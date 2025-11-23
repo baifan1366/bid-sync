@@ -1,0 +1,573 @@
+@import "tailwindcss";
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+/*
+  The default border color has changed to `currentColor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+*/
+@layer base {
+
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 45 93% 56%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 45 93% 56%;
+    --radius: 0.5rem;
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+
+  .dark {
+    --background: 0 0% 6%;
+    /* Darker black background */
+    --foreground: 45 15% 95%;
+    /* Slight yellow tint to white text */
+    --card: 0 0% 9%;
+    /* Dark card background */
+    --card-foreground: 45 10% 95%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 45 10% 95%;
+    --primary: 45 93% 56%;
+    /* JobStreet yellow */
+    --primary-foreground: 0 0% 10%;
+    --secondary: 45 15% 15%;
+    /* Dark with yellow tint */
+    --secondary-foreground: 45 10% 95%;
+    --muted: 45 10% 18%;
+    --muted-foreground: 45 8% 60%;
+    --accent: 45 93% 56%;
+    --accent-foreground: 0 0% 10%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 45 15% 20%;
+    --input: 45 15% 20%;
+    --ring: 45 93% 56%;
+    --chart-1: 45 93% 56%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Accessibility: Focus indicators */
+  *:focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  /* Ensure keyboard navigation is visible */
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  /* Smooth scroll for navigation */
+  @media (prefers-reduced-motion: no-preference) {
+    html,
+    [data-scroll-smooth] {
+      scroll-behavior: smooth;
+    }
+  }
+
+  /* Respect user's motion preferences */
+  @media (prefers-reduced-motion: reduce) {
+    html,
+    * {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+
+  /* Screen reader only utility class */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  /* Skip to main content link */
+  .skip-to-main {
+    @apply sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50;
+    @apply bg-yellow-400 text-black px-4 py-2 rounded-md;
+    @apply focus:outline-2 focus:outline-offset-2 focus:outline-ring;
+  }
+}
+/* Ti
+pTap Editor Styles */
+@layer components {
+  /* Editor content wrapper */
+  .tiptap-editor-content {
+    @apply min-h-[300px];
+  }
+
+  /* Editor prose styles */
+  .tiptap-editor-content .ProseMirror {
+    @apply outline-none min-h-[300px];
+  }
+
+  /* Placeholder styles */
+  .tiptap-editor-content .ProseMirror p.is-editor-empty:first-child::before {
+    @apply text-muted-foreground;
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+  }
+
+  /* Heading styles */
+  .tiptap-editor-content .ProseMirror h1 {
+    @apply text-3xl font-bold mt-6 mb-4 text-black dark:text-white;
+  }
+
+  .tiptap-editor-content .ProseMirror h2 {
+    @apply text-2xl font-bold mt-5 mb-3 text-black dark:text-white;
+  }
+
+  .tiptap-editor-content .ProseMirror h3 {
+    @apply text-xl font-bold mt-4 mb-2 text-black dark:text-white;
+  }
+
+  .tiptap-editor-content .ProseMirror h4 {
+    @apply text-lg font-semibold mt-3 mb-2 text-black dark:text-white;
+  }
+
+  .tiptap-editor-content .ProseMirror h5 {
+    @apply text-base font-semibold mt-2 mb-1 text-black dark:text-white;
+  }
+
+  .tiptap-editor-content .ProseMirror h6 {
+    @apply text-sm font-semibold mt-2 mb-1 text-black dark:text-white;
+  }
+
+  /* Paragraph styles */
+  .tiptap-editor-content .ProseMirror p {
+    @apply my-3 text-black dark:text-white;
+  }
+
+  /* List styles */
+  .tiptap-editor-content .ProseMirror ul,
+  .tiptap-editor-content .ProseMirror ol {
+    @apply pl-6 my-3;
+  }
+
+  .tiptap-editor-content .ProseMirror ul {
+    @apply list-disc;
+  }
+
+  .tiptap-editor-content .ProseMirror ol {
+    @apply list-decimal;
+  }
+
+  .tiptap-editor-content .ProseMirror li {
+    @apply my-1;
+  }
+
+  /* Task list styles */
+  .tiptap-editor-content .ProseMirror ul[data-type="taskList"] {
+    @apply list-none pl-0;
+  }
+
+  .tiptap-editor-content .ProseMirror ul[data-type="taskList"] li {
+    @apply flex items-start gap-2;
+  }
+
+  .tiptap-editor-content .ProseMirror ul[data-type="taskList"] li > label {
+    @apply flex items-center gap-2 flex-1;
+  }
+
+  .tiptap-editor-content .ProseMirror ul[data-type="taskList"] li > label > input[type="checkbox"] {
+    @apply mt-1 cursor-pointer accent-yellow-400;
+  }
+
+  .tiptap-editor-content .ProseMirror ul[data-type="taskList"] li[data-checked="true"] > label {
+    @apply line-through text-muted-foreground;
+  }
+
+  /* Blockquote styles */
+  .tiptap-editor-content .ProseMirror blockquote {
+    @apply border-l-4 border-yellow-400 pl-4 my-4 italic text-muted-foreground;
+  }
+
+  /* Code styles */
+  .tiptap-editor-content .ProseMirror code {
+    @apply bg-yellow-400/10 text-yellow-400 px-1.5 py-0.5 rounded text-sm font-mono;
+  }
+
+  .tiptap-editor-content .ProseMirror pre {
+    @apply bg-black dark:bg-white/5 text-white dark:text-white rounded-md p-4 my-4 overflow-x-auto;
+  }
+
+  .tiptap-editor-content .ProseMirror pre code {
+    @apply bg-transparent text-white dark:text-white p-0;
+  }
+
+  /* Table styles */
+  .tiptap-editor-content .ProseMirror table {
+    @apply border-collapse table-auto w-full my-4;
+  }
+
+  .tiptap-editor-content .ProseMirror table td,
+  .tiptap-editor-content .ProseMirror table th {
+    @apply border border-yellow-400/20 px-3 py-2 text-left;
+  }
+
+  .tiptap-editor-content .ProseMirror table th {
+    @apply bg-yellow-400/10 font-semibold;
+  }
+
+  .tiptap-editor-content .ProseMirror table td {
+    @apply bg-white dark:bg-black;
+  }
+
+  /* Selected cell */
+  .tiptap-editor-content .ProseMirror .selectedCell {
+    @apply bg-yellow-400/20;
+  }
+
+  /* Horizontal rule */
+  .tiptap-editor-content .ProseMirror hr {
+    @apply border-t border-yellow-400/20 my-6;
+  }
+
+  /* Link styles */
+  .tiptap-editor-content .ProseMirror a {
+    @apply text-yellow-400 underline hover:text-yellow-500 cursor-pointer;
+  }
+
+  /* Strong and emphasis */
+  .tiptap-editor-content .ProseMirror strong {
+    @apply font-bold;
+  }
+
+  .tiptap-editor-content .ProseMirror em {
+    @apply italic;
+  }
+
+  /* Strike through */
+  .tiptap-editor-content .ProseMirror s {
+    @apply line-through;
+  }
+
+  /* Focus styles */
+  .tiptap-editor-content .ProseMirror:focus {
+    @apply outline-none;
+  }
+
+  /* Selection styles */
+  .tiptap-editor-content .ProseMirror ::selection {
+    @apply bg-yellow-400/30;
+  }
+
+  /* Gapcursor (cursor between blocks) */
+  .tiptap-editor-content .ProseMirror .ProseMirror-gapcursor {
+    @apply border-t-2 border-yellow-400;
+  }
+
+  /* Collaboration cursor styles */
+  .tiptap-editor-content .ProseMirror .collaboration-cursor__caret {
+    @apply border-l-2 border-black dark:border-white;
+    margin-left: -1px;
+    margin-right: -1px;
+    pointer-events: none;
+    position: relative;
+    word-break: normal;
+  }
+
+  .tiptap-editor-content .ProseMirror .collaboration-cursor__label {
+    @apply text-xs text-white px-1.5 py-0.5 rounded-t-lg;
+    position: absolute;
+    top: -1.4em;
+    left: -1px;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 600;
+    line-height: normal;
+    user-select: none;
+    white-space: nowrap;
+  }
+
+  /* Yjs awareness styles */
+  .tiptap-editor-content .ProseMirror .ProseMirror-yjs-cursor {
+    position: absolute;
+    border-left: 2px solid;
+    border-color: var(--cursor-color);
+    height: 1.2em;
+    word-break: normal;
+    pointer-events: none;
+  }
+
+  .tiptap-editor-content .ProseMirror .ProseMirror-yjs-selection {
+    background-color: var(--selection-color);
+    opacity: 0.3;
+  }
+}
+
+/* Conflict Indicator Styles */
+.conflict-indicator {
+  position: relative;
+  cursor: help;
+}
+
+.conflict-indicator::after {
+  content: '⚠';
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  font-size: 12px;
+  color: rgb(251, 191, 36);
+  background: white;
+  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.dark .conflict-indicator::after {
+  background: black;
+}
+
+.conflict-indicator:hover {
+  background-color: rgba(251, 191, 36, 0.3);
+}
+
+/* TipTap Editor Conflict Styles */
+.tiptap-editor-content .conflict-indicator {
+  animation: pulse-conflict 2s ease-in-out infinite;
+}
+
+@keyframes pulse-conflict {
+  0%, 100% {
+    background-color: rgba(251, 191, 36, 0.2);
+  }
+  50% {
+    background-color: rgba(251, 191, 36, 0.4);
+  }
+}
+
+/*
+  ---break---
+*/
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/*
+  ---break---
+*/
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+/*
+  ---break---
+*/
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+/*
+  ---break---
+*/
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

@@ -1,0 +1,1417 @@
+-- ============================================================
+-- BIDSYNC — FULL SUPABASE SQL SCHEMA (GraphQL + RLS Ready)
+-- ============================================================
+
+-- ============================================================
+-- 1. Create ENUM Types
+-- ============================================================
+CREATE TYPE user_role AS ENUM ('client', 'bidding_member', 'bidding_lead', 'admin');
+CREATE TYPE proposal_status AS ENUM ('draft', 'submitted', 'reviewing', 'approved', 'rejected');
+CREATE TYPE project_status AS ENUM ('pending_review', 'open', 'closed', 'awarded');
+CREATE TYPE comment_visibility AS ENUM ('internal', 'public');
+
+-- ============================================================
+-- 2. Insert Sample Users into auth.users (via RPC)
+-- ============================================================
+-- NOTE: Only works on self-hosted or via Supabase service role.
+-- If using hosted Supabase, insert via Authentication > Users.
+
+-- CLIENT
+SELECT auth.admin_create_user(
+    email := 'client@example.com',
+    password := 'Password123!',
+    email_confirm := true,
+    user_metadata := jsonb_build_object('role', 'client', 'name', 'Alice Client')
+);
+
+-- BIDDING LEAD
+SELECT auth.admin_create_user(
+    email := 'lead@example.com',
+    password := 'Password123!',
+    email_confirm := true,
+    user_metadata := jsonb_build_object('role', 'bidding_lead', 'name', 'Bob Lead')
+);
+
+-- BIDDING MEMBER
+SELECT auth.admin_create_user(
+    email := 'member@example.com',
+    password := 'Password123!',
+    email_confirm := true,
+    user_metadata := jsonb_build_object('role', 'bidding_member', 'name', 'Charlie Member')
+);
+
+-- ADMIN
+SELECT auth.admin_create_user(
+    email := 'admin@example.com',
+    password := 'Password123!',
+    email_confirm := true,
+    user_metadata := jsonb_build_object('role', 'admin', 'name', 'Diana Admin')
+);
+
+-- ============================================================
+-- 3. PROJECT TABLE
+-- ============================================================
+CREATE TABLE public.projects (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL,
+    status project_status NOT NULL DEFAULT 'open',
+    budget NUMERIC,
+    deadline DATE,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_projects_client ON public.projects(client_id);
+CREATE INDEX idx_projects_status ON public.projects(status);
+
+-- Seed project
+INSERT INTO public.projects (client_id, title, description, budget, deadline)
+SELECT id, 'Website Revamp Project', 'Full redesign of corporate website.', 20000, NOW() + INTERVAL '30 days'
+FROM auth.users WHERE email = 'client@example.com' LIMIT 1;
+
+
+-- ============================================================
+-- 4. BID TEAMS
+-- ============================================================
+CREATE TABLE public.bid_team_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('lead', 'member')),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_bid_team_project ON public.bid_team_members(project_id);
+CREATE INDEX idx_bid_team_user ON public.bid_team_members(user_id);
+
+-- Seed team (lead + member)
+INSERT INTO public.bid_team_members (project_id, user_id, role)
+SELECT p.id, u.id, 'lead'
+FROM projects p, auth.users u
+WHERE u.email = 'lead@example.com'
+LIMIT 1;
+
+INSERT INTO public.bid_team_members (project_id, user_id, role)
+SELECT p.id, u.id, 'member'
+FROM projects p, auth.users u
+WHERE u.email = 'member@example.com'
+LIMIT 1;
+
+
+-- ============================================================
+-- 5. PROPOSALS
+-- ============================================================
+CREATE TABLE public.proposals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    lead_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    status proposal_status NOT NULL DEFAULT 'draft',
+    submitted_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_proposals_project ON public.proposals(project_id);
+CREATE INDEX idx_proposals_lead ON public.proposals(lead_id);
+
+-- Seed proposal shell
+INSERT INTO public.proposals (project_id, lead_id)
+SELECT p.id, u.id
+FROM projects p, auth.users u
+WHERE u.email = 'lead@example.com'
+LIMIT 1;
+
+
+-- ============================================================
+-- 6. PROPOSAL VERSIONS
+-- ============================================================
+CREATE TABLE public.proposal_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    version_number INT NOT NULL,
+    content JSONB NOT NULL,
+    created_by UUID NOT NULL REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (proposal_id, version_number)
+);
+
+CREATE INDEX idx_versions_proposal ON public.proposal_versions(proposal_id);
+
+-- Seed Version 1
+INSERT INTO public.proposal_versions (proposal_id, version_number, content, created_by)
+SELECT p.id, 1, jsonb_build_object('summary', 'Initial draft'), u.id
+FROM proposals p, auth.users u
+WHERE u.email = 'lead@example.com'
+LIMIT 1;
+
+
+-- ============================================================
+-- 7. COMMENTS
+-- ============================================================
+CREATE TABLE public.comments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    author_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    visibility comment_visibility NOT NULL DEFAULT 'internal',
+    message TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_comments_proposal ON public.comments(proposal_id);
+
+
+-- ============================================================
+-- 8. DOCUMENTS
+-- ============================================================
+CREATE TABLE public.documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    doc_type TEXT,
+    created_by UUID NOT NULL REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_docs_proposal ON public.documents(proposal_id);
+
+
+-- ============================================================
+-- 9. CHECKLISTS
+-- ============================================================
+CREATE TABLE public.checklist_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    label TEXT NOT NULL,
+    passed BOOLEAN DEFAULT false,
+    reviewer_id UUID REFERENCES auth.users(id),
+    checked_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_checklist_proposal ON public.checklist_items(proposal_id);
+
+
+-- ============================================================
+-- 10. NOTIFICATIONS (Optional but useful)
+-- ============================================================
+CREATE TABLE public.notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id),
+    title TEXT NOT NULL,
+    body TEXT,
+    read BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_notifications_user ON public.notifications(user_id);
+
+
+-- ============================================================
+-- 11. ENABLE RLS
+-- ============================================================
+ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.proposals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.proposal_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bid_team_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.checklist_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+
+-- ============================================================
+-- 12. RLS POLICIES
+-- ============================================================
+
+-- PUBLIC PROJECTS (Clients own them; bidders can view)
+CREATE POLICY "projects_read" ON public.projects
+FOR SELECT USING (true);
+
+CREATE POLICY "projects_modify" ON public.projects
+FOR UPDATE TO authenticated
+USING (auth.uid() = client_id);
+
+-- PROPOSALS (Lead + team + client can read)
+CREATE POLICY "proposal_read" ON public.proposals
+FOR SELECT USING (
+    auth.uid() = lead_id
+    OR EXISTS (
+        SELECT 1 FROM bid_team_members m WHERE m.user_id = auth.uid() AND m.project_id = project_id
+    )
+    OR EXISTS (
+        SELECT 1 FROM projects p WHERE p.id = project_id AND p.client_id = auth.uid()
+    )
+);
+
+CREATE POLICY "proposal_write" ON public.proposals
+FOR UPDATE TO authenticated
+USING (auth.uid() = lead_id);
+
+
+-- PROPOSAL VERSIONS
+CREATE POLICY "versions_read" ON public.proposal_versions
+FOR SELECT USING (
+    EXISTS (SELECT 1 FROM proposals p WHERE p.id = proposal_id AND (
+        auth.uid() = p.lead_id OR
+        EXISTS (SELECT 1 FROM bid_team_members m WHERE m.user_id = auth.uid() AND m.project_id = p.project_id)
+    ))
+);
+
+CREATE POLICY "versions_write" ON public.proposal_versions
+FOR INSERT WITH CHECK (
+    EXISTS (SELECT 1 FROM proposals p WHERE p.id = proposal_id AND (
+        auth.uid() = p.lead_id OR
+        EXISTS (SELECT 1 FROM bid_team_members m WHERE m.user_id = auth.uid() AND m.project_id = p.project_id)
+    ))
+);
+
+
+-- COMMENTS
+CREATE POLICY "comments_read" ON public.comments
+FOR SELECT USING (
+    visibility = 'public'
+    OR EXISTS (
+        SELECT 1 FROM proposals p, bid_team_members m
+        WHERE p.id = proposal_id AND m.project_id = p.project_id AND m.user_id = auth.uid()
+    )
+);
+
+CREATE POLICY "comments_write" ON public.comments
+FOR INSERT WITH CHECK (auth.uid() = author_id);
+
+
+-- DOCUMENTS
+CREATE POLICY "docs_read" ON public.documents
+FOR SELECT USING (true);
+
+CREATE POLICY "docs_write" ON public.documents
+FOR INSERT WITH CHECK (auth.uid() = created_by);
+
+
+-- CHECKLISTS (Admins + Clients)
+CREATE POLICY "checklist_read" ON public.checklist_items
+FOR SELECT USING (true);
+
+CREATE POLICY "checklist_modify" ON public.checklist_items
+FOR UPDATE USING (
+    (SELECT raw_user_meta_data->>'role' FROM auth.users u WHERE u.id = auth.uid()) = 'admin'
+);
+
+
+-- NOTIFICATIONS
+CREATE POLICY "notif_read" ON public.notifications
+FOR SELECT USING (auth.uid() = user_id);
+
+CREATE POLICY "notif_write" ON public.notifications
+FOR INSERT WITH CHECK (auth.uid() = user_id);
+
+-- ============================================================
+-- TEAM INVITATIONS TABLE
+-- ============================================================
+
+-- Create team_invitations table for managing team member invitations
+CREATE TABLE public.team_invitations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    code VARCHAR(8) NOT NULL UNIQUE,  -- 8-digit code
+    token UUID DEFAULT gen_random_uuid() UNIQUE,  -- for shareable links
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_by UUID REFERENCES auth.users(id),
+    used_at TIMESTAMPTZ,
+    is_multi_use BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_team_invitations_code ON public.team_invitations(code);
+CREATE INDEX idx_team_invitations_token ON public.team_invitations(token);
+CREATE INDEX idx_team_invitations_project ON public.team_invitations(project_id);
+CREATE INDEX idx_team_invitations_created_by ON public.team_invitations(created_by);
+
+-- Enable RLS
+ALTER TABLE public.team_invitations ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================
+-- RLS POLICIES FOR TEAM INVITATIONS
+-- ============================================================
+
+-- Anyone can read invitations to validate them (will check expiry in app logic)
+CREATE POLICY "invitations_read" ON public.team_invitations
+FOR SELECT USING (true);
+
+-- Only bidding leads can create invitations for their projects
+CREATE POLICY "invitations_create" ON public.team_invitations
+FOR INSERT WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM bid_team_members m
+        WHERE m.project_id = team_invitations.project_id
+        AND m.user_id = auth.uid()
+        AND m.role = 'lead'
+    )
+);
+
+-- Only creators can update their invitations (for revoking)
+CREATE POLICY "invitations_update" ON public.team_invitations
+FOR UPDATE USING (auth.uid() = created_by);
+
+-- Only creators can delete their invitations
+CREATE POLICY "invitations_delete" ON public.team_invitations
+FOR DELETE USING (auth.uid() = created_by);
+
+
+-- ============================================================
+-- END OF FULL SCHEMA
+-- ============================================================
+
+-- ============================================================
+-- MIGRATION 002: CHAT AND DECISIONS
+-- ============================================================
+
+-- Chat Messages Table
+CREATE TABLE IF NOT EXISTS public.chat_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  proposal_id UUID REFERENCES public.proposals(id) ON DELETE CASCADE,
+  sender_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  read BOOLEAN DEFAULT FALSE
+);
+
+-- Proposal Decisions Table
+CREATE TABLE IF NOT EXISTS public.proposal_decisions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+  project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  decision_type VARCHAR(20) NOT NULL CHECK (decision_type IN ('accepted', 'rejected')),
+  decided_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  decided_at TIMESTAMPTZ DEFAULT now(),
+  feedback TEXT
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_chat_messages_project ON public.chat_messages(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_proposal ON public.chat_messages(proposal_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_unread ON public.chat_messages(sender_id, read) WHERE read = FALSE;
+CREATE INDEX IF NOT EXISTS idx_proposal_decisions_proposal ON public.proposal_decisions(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_decisions_project ON public.proposal_decisions(project_id);
+
+-- Enable RLS
+ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.proposal_decisions ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Chat Messages
+CREATE POLICY "chat_messages_client_select" ON public.chat_messages
+FOR SELECT USING (project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid()));
+
+CREATE POLICY "chat_messages_client_insert" ON public.chat_messages
+FOR INSERT WITH CHECK (sender_id = auth.uid() AND project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid()));
+
+CREATE POLICY "chat_messages_team_select" ON public.chat_messages
+FOR SELECT USING (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid()));
+
+CREATE POLICY "chat_messages_team_insert" ON public.chat_messages
+FOR INSERT WITH CHECK (sender_id = auth.uid() AND proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid()));
+
+CREATE POLICY "chat_messages_mark_read" ON public.chat_messages
+FOR UPDATE USING ((project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid())) OR (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid())));
+
+-- RLS Policies for Proposal Decisions
+CREATE POLICY "proposal_decisions_client_select" ON public.proposal_decisions
+FOR SELECT USING (project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid()));
+
+CREATE POLICY "proposal_decisions_client_insert" ON public.proposal_decisions
+FOR INSERT WITH CHECK (decided_by = auth.uid() AND project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid()));
+
+CREATE POLICY "proposal_decisions_team_select" ON public.proposal_decisions
+FOR SELECT USING (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid()));
+
+-- ============================================================
+-- MIGRATION 003: ADMIN MANAGEMENT
+-- ============================================================
+
+-- Admin Invitations Table
+CREATE TABLE IF NOT EXISTS public.admin_invitations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email TEXT NOT NULL,
+    invited_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    token UUID DEFAULT gen_random_uuid() UNIQUE NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    used_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    used_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- User Activity Logs Table
+CREATE TABLE IF NOT EXISTS public.user_activity_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    action TEXT NOT NULL,
+    resource_type TEXT,
+    resource_id UUID,
+    ip_address INET,
+    user_agent TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Admin Actions Audit Log Table
+CREATE TABLE IF NOT EXISTS public.admin_actions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    action_type TEXT NOT NULL,
+    target_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    previous_value JSONB,
+    new_value JSONB,
+    reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_admin_invitations_email ON public.admin_invitations(email);
+CREATE INDEX IF NOT EXISTS idx_admin_invitations_token ON public.admin_invitations(token);
+CREATE INDEX IF NOT EXISTS idx_admin_invitations_invited_by ON public.admin_invitations(invited_by);
+CREATE INDEX IF NOT EXISTS idx_admin_invitations_expires ON public.admin_invitations(expires_at);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_user ON public.user_activity_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_created ON public.user_activity_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_action ON public.user_activity_logs(action);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_resource ON public.user_activity_logs(resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_admin ON public.admin_actions(admin_id);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_target ON public.admin_actions(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_created ON public.admin_actions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_type ON public.admin_actions(action_type);
+
+-- Enable RLS
+ALTER TABLE public.admin_invitations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_activity_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.admin_actions ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies
+CREATE POLICY "admin_invitations_admin_select" ON public.admin_invitations
+FOR SELECT USING ((SELECT raw_user_meta_data->>'role' FROM auth.users WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "admin_invitations_admin_insert" ON public.admin_invitations
+FOR INSERT WITH CHECK (invited_by = auth.uid() AND (SELECT raw_user_meta_data->>'role' FROM auth.users WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "admin_invitations_admin_update" ON public.admin_invitations
+FOR UPDATE USING ((SELECT raw_user_meta_data->>'role' FROM auth.users WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "activity_logs_user_select" ON public.user_activity_logs
+FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "activity_logs_admin_select" ON public.user_activity_logs
+FOR SELECT USING ((SELECT raw_user_meta_data->>'role' FROM auth.users WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "activity_logs_insert" ON public.user_activity_logs
+FOR INSERT WITH CHECK (user_id = auth.uid() OR (SELECT raw_user_meta_data->>'role' FROM auth.users WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "admin_actions_admin_select" ON public.admin_actions
+FOR SELECT USING ((SELECT raw_user_meta_data->>'role' FROM auth.users WHERE id = auth.uid()) = 'admin');
+
+CREATE POLICY "admin_actions_admin_insert" ON public.admin_actions
+FOR INSERT WITH CHECK (admin_id = auth.uid() AND (SELECT raw_user_meta_data->>'role' FROM auth.users WHERE id = auth.uid()) = 'admin');
+
+-- Helper Functions
+CREATE OR REPLACE FUNCTION public.is_admin(user_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN (SELECT raw_user_meta_data->>'role' = 'admin' FROM auth.users WHERE id = user_id);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.count_admins()
+RETURNS INTEGER AS $$
+BEGIN
+  RETURN (SELECT COUNT(*)::INTEGER FROM auth.users WHERE raw_user_meta_data->>'role' = 'admin');
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.log_admin_action(
+  p_admin_id UUID,
+  p_action_type TEXT,
+  p_target_user_id UUID DEFAULT NULL,
+  p_previous_value JSONB DEFAULT NULL,
+  p_new_value JSONB DEFAULT NULL,
+  p_reason TEXT DEFAULT NULL
+)
+RETURNS UUID AS $$
+DECLARE
+  v_action_id UUID;
+BEGIN
+  INSERT INTO public.admin_actions (admin_id, action_type, target_user_id, previous_value, new_value, reason)
+  VALUES (p_admin_id, p_action_type, p_target_user_id, p_previous_value, p_new_value, p_reason)
+  RETURNING id INTO v_action_id;
+  RETURN v_action_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.log_user_activity(
+  p_user_id UUID,
+  p_action TEXT,
+  p_resource_type TEXT DEFAULT NULL,
+  p_resource_id UUID DEFAULT NULL,
+  p_ip_address INET DEFAULT NULL,
+  p_user_agent TEXT DEFAULT NULL,
+  p_metadata JSONB DEFAULT NULL
+)
+RETURNS UUID AS $$
+DECLARE
+  v_log_id UUID;
+BEGIN
+  INSERT INTO public.user_activity_logs (user_id, action, resource_type, resource_id, ip_address, user_agent, metadata)
+  VALUES (p_user_id, p_action, p_resource_type, p_resource_id, p_ip_address, p_user_agent, p_metadata)
+  RETURNING id INTO v_log_id;
+  RETURN v_log_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================
+-- MIGRATION 005: PROPOSAL SUBMISSION WORKFLOW
+-- ============================================================
+
+-- Add columns to projects table
+ALTER TABLE public.projects 
+ADD COLUMN IF NOT EXISTS additional_info_requirements JSONB DEFAULT '[]'::jsonb;
+
+-- Add columns to proposals table
+ALTER TABLE public.proposals 
+ADD COLUMN IF NOT EXISTS title TEXT,
+ADD COLUMN IF NOT EXISTS budget_estimate NUMERIC,
+ADD COLUMN IF NOT EXISTS timeline_estimate TEXT,
+ADD COLUMN IF NOT EXISTS executive_summary TEXT;
+
+-- Proposal Additional Info Table
+CREATE TABLE IF NOT EXISTS public.proposal_additional_info (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    field_id TEXT NOT NULL,
+    field_name TEXT NOT NULL,
+    field_value JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (proposal_id, field_id)
+);
+
+-- Submission Drafts Table
+CREATE TABLE IF NOT EXISTS public.submission_drafts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    current_step INT NOT NULL DEFAULT 1,
+    draft_data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (proposal_id, user_id)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_proposal_additional_info_proposal ON public.proposal_additional_info(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_additional_info_field ON public.proposal_additional_info(field_id);
+CREATE INDEX IF NOT EXISTS idx_submission_drafts_proposal ON public.submission_drafts(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_submission_drafts_user ON public.submission_drafts(user_id);
+CREATE INDEX IF NOT EXISTS idx_submission_drafts_updated ON public.submission_drafts(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_projects_additional_requirements ON public.projects USING GIN (additional_info_requirements);
+CREATE INDEX IF NOT EXISTS idx_proposals_title ON public.proposals(title);
+CREATE INDEX IF NOT EXISTS idx_proposals_budget ON public.proposals(budget_estimate);
+
+-- Enable RLS
+ALTER TABLE public.proposal_additional_info ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.submission_drafts ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Proposal Additional Info
+CREATE POLICY "proposal_additional_info_client_select" ON public.proposal_additional_info
+FOR SELECT USING (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.projects proj ON proj.id = p.project_id WHERE proj.client_id = auth.uid()));
+
+CREATE POLICY "proposal_additional_info_lead_select" ON public.proposal_additional_info
+FOR SELECT USING (proposal_id IN (SELECT id FROM public.proposals WHERE lead_id = auth.uid()));
+
+CREATE POLICY "proposal_additional_info_team_select" ON public.proposal_additional_info
+FOR SELECT USING (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid()));
+
+CREATE POLICY "proposal_additional_info_lead_insert" ON public.proposal_additional_info
+FOR INSERT WITH CHECK (proposal_id IN (SELECT id FROM public.proposals WHERE lead_id = auth.uid()));
+
+CREATE POLICY "proposal_additional_info_lead_update" ON public.proposal_additional_info
+FOR UPDATE USING (proposal_id IN (SELECT id FROM public.proposals WHERE lead_id = auth.uid()));
+
+CREATE POLICY "proposal_additional_info_lead_delete" ON public.proposal_additional_info
+FOR DELETE USING (proposal_id IN (SELECT id FROM public.proposals WHERE lead_id = auth.uid()));
+
+-- RLS Policies for Submission Drafts
+CREATE POLICY "submission_drafts_user_select" ON public.submission_drafts
+FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "submission_drafts_user_insert" ON public.submission_drafts
+FOR INSERT WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "submission_drafts_user_update" ON public.submission_drafts
+FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "submission_drafts_user_delete" ON public.submission_drafts
+FOR DELETE USING (user_id = auth.uid());
+
+-- Helper Functions
+CREATE OR REPLACE FUNCTION public.get_project_requirements(p_project_id UUID)
+RETURNS JSONB AS $$
+DECLARE
+  v_requirements JSONB;
+BEGIN
+  SELECT additional_info_requirements INTO v_requirements FROM public.projects WHERE id = p_project_id;
+  RETURN COALESCE(v_requirements, '[]'::jsonb);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS update_proposal_additional_info_updated_at ON public.proposal_additional_info;
+CREATE TRIGGER update_proposal_additional_info_updated_at
+  BEFORE UPDATE ON public.proposal_additional_info
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_submission_drafts_updated_at ON public.submission_drafts;
+CREATE TRIGGER update_submission_drafts_updated_at
+  BEFORE UPDATE ON public.submission_drafts
+  FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- ============================================================
+-- MIGRATION 007: Q&A SYSTEM, ANALYTICS, AND ADDITIONAL FEATURES
+-- ============================================================
+
+-- Project Questions Table
+CREATE TABLE IF NOT EXISTS public.project_questions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+  asked_by UUID NOT NULL REFERENCES auth.users(id),
+  question TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Question Answers Table
+CREATE TABLE IF NOT EXISTS public.question_answers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  question_id UUID NOT NULL REFERENCES public.project_questions(id) ON DELETE CASCADE,
+  answered_by UUID NOT NULL REFERENCES auth.users(id),
+  answer TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Document Comments Table
+CREATE TABLE IF NOT EXISTS public.document_comments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id UUID NOT NULL REFERENCES public.workspace_documents(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id),
+  content TEXT NOT NULL,
+  is_internal BOOLEAN DEFAULT true,
+  parent_id UUID REFERENCES public.document_comments(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Contract Templates Table
+CREATE TABLE IF NOT EXISTS public.contract_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  content TEXT NOT NULL,
+  variables JSONB DEFAULT '[]'::jsonb,
+  category VARCHAR(100),
+  is_active BOOLEAN DEFAULT true,
+  created_by UUID NOT NULL REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Contracts Table
+CREATE TABLE IF NOT EXISTS public.contracts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES public.projects(id),
+  proposal_id UUID NOT NULL REFERENCES public.proposals(id),
+  template_id UUID REFERENCES public.contract_templates(id),
+  content TEXT NOT NULL,
+  status VARCHAR(50) DEFAULT 'draft',
+  version INT DEFAULT 1,
+  created_by UUID NOT NULL REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Contract Signatures Table
+CREATE TABLE IF NOT EXISTS public.contract_signatures (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  contract_id UUID NOT NULL REFERENCES public.contracts(id) ON DELETE CASCADE,
+  signer_id UUID NOT NULL REFERENCES auth.users(id),
+  signed_at TIMESTAMPTZ,
+  signature_data TEXT,
+  ip_address VARCHAR(45),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add approval tracking columns to projects
+ALTER TABLE public.projects 
+ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES auth.users(id),
+ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ,
+ADD COLUMN IF NOT EXISTS rejection_reason TEXT,
+ADD COLUMN IF NOT EXISTS approval_notes TEXT;
+
+-- Platform Metrics Table
+CREATE TABLE IF NOT EXISTS public.platform_metrics (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  metric_date DATE NOT NULL,
+  metric_type VARCHAR(100) NOT NULL,
+  metric_value JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(metric_date, metric_type)
+);
+
+-- User Notification Preferences Table
+CREATE TABLE IF NOT EXISTS public.user_notification_preferences (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  email_notifications BOOLEAN DEFAULT true,
+  project_updates BOOLEAN DEFAULT true,
+  new_messages BOOLEAN DEFAULT true,
+  proposal_updates BOOLEAN DEFAULT true,
+  qa_notifications BOOLEAN DEFAULT true,
+  deadline_reminders BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_project_questions_project ON public.project_questions(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_questions_created ON public.project_questions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_question_answers_question ON public.question_answers(question_id);
+CREATE INDEX IF NOT EXISTS idx_question_answers_created ON public.question_answers(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_document_comments_document ON public.document_comments(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_comments_parent ON public.document_comments(parent_id);
+CREATE INDEX IF NOT EXISTS idx_document_comments_created ON public.document_comments(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_contracts_project ON public.contracts(project_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_proposal ON public.contracts(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_status ON public.contracts(status);
+CREATE INDEX IF NOT EXISTS idx_contract_signatures_contract ON public.contract_signatures(contract_id);
+CREATE INDEX IF NOT EXISTS idx_projects_status_created ON public.projects(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_platform_metrics_date ON public.platform_metrics(metric_date DESC);
+CREATE INDEX IF NOT EXISTS idx_platform_metrics_type ON public.platform_metrics(metric_type);
+
+-- Enable RLS
+ALTER TABLE public.project_questions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.question_answers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.document_comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contract_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contracts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contract_signatures ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_notification_preferences ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Q&A
+CREATE POLICY "Anyone can view project questions" ON public.project_questions FOR SELECT USING (true);
+CREATE POLICY "Authenticated users can ask questions" ON public.project_questions FOR INSERT WITH CHECK (auth.uid() = asked_by);
+CREATE POLICY "Anyone can view answers" ON public.question_answers FOR SELECT USING (true);
+CREATE POLICY "Authenticated users can answer" ON public.question_answers FOR INSERT WITH CHECK (auth.uid() = answered_by);
+
+-- RLS Policies for Comments
+CREATE POLICY "Team members can view comments" ON public.document_comments
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_comments.document_id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "Team members can create comments" ON public.document_comments
+FOR INSERT WITH CHECK (auth.uid() = user_id AND EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_comments.document_id AND dc.user_id = auth.uid()));
+
+-- RLS Policies for Contracts
+CREATE POLICY "Project participants can view contracts" ON public.contracts
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.projects p WHERE p.id = contracts.project_id AND (p.client_id = auth.uid() OR EXISTS (SELECT 1 FROM public.proposals pr WHERE pr.project_id = p.id AND pr.lead_id = auth.uid()))));
+
+-- RLS Policies for Notification Preferences
+CREATE POLICY "Users can manage their notification preferences" ON public.user_notification_preferences
+USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+-- Helper Functions
+CREATE OR REPLACE FUNCTION get_pending_projects_count()
+RETURNS INTEGER AS $$
+BEGIN
+  RETURN (SELECT COUNT(*) FROM public.projects WHERE status = 'pending_review');
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION approve_project(p_project_id UUID, p_admin_id UUID, p_notes TEXT DEFAULT NULL)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE public.projects SET status = 'open', approved_by = p_admin_id, approved_at = NOW(), approval_notes = p_notes, updated_at = NOW() WHERE id = p_project_id;
+  INSERT INTO public.admin_actions (admin_id, action_type, target_user_id, reason, created_at)
+  SELECT p_admin_id, 'APPROVE_PROJECT', client_id, p_notes, NOW() FROM public.projects WHERE id = p_project_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION reject_project(p_project_id UUID, p_admin_id UUID, p_reason TEXT)
+RETURNS VOID AS $$
+BEGIN
+  UPDATE public.projects SET status = 'pending_review', approved_by = p_admin_id, approved_at = NOW(), rejection_reason = p_reason, updated_at = NOW() WHERE id = p_project_id;
+  INSERT INTO public.admin_actions (admin_id, action_type, target_user_id, reason, created_at)
+  SELECT p_admin_id, 'REJECT_PROJECT', client_id, p_reason, NOW() FROM public.projects WHERE id = p_project_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION calculate_platform_analytics(p_date_from TIMESTAMPTZ DEFAULT NOW() - INTERVAL '30 days', p_date_to TIMESTAMPTZ DEFAULT NOW())
+RETURNS JSONB AS $$
+DECLARE
+  result JSONB;
+BEGIN
+  SELECT jsonb_build_object(
+    'userGrowth', (SELECT jsonb_agg(jsonb_build_object('date', date_trunc('day', created_at)::date, 'value', COUNT(*))) FROM auth.users WHERE created_at BETWEEN p_date_from AND p_date_to GROUP BY date_trunc('day', created_at) ORDER BY date_trunc('day', created_at)),
+    'projectStats', (SELECT jsonb_build_object('total', COUNT(*), 'pending', COUNT(*) FILTER (WHERE status = 'pending_review'), 'open', COUNT(*) FILTER (WHERE status = 'open'), 'closed', COUNT(*) FILTER (WHERE status = 'closed'), 'awarded', COUNT(*) FILTER (WHERE status = 'awarded')) FROM public.projects WHERE created_at BETWEEN p_date_from AND p_date_to),
+    'proposalStats', (SELECT jsonb_build_object('total', COUNT(*), 'draft', COUNT(*) FILTER (WHERE status = 'draft'), 'submitted', COUNT(*) FILTER (WHERE status = 'submitted'), 'approved', COUNT(*) FILTER (WHERE status = 'approved'), 'rejected', COUNT(*) FILTER (WHERE status = 'rejected')) FROM public.proposals WHERE created_at BETWEEN p_date_from AND p_date_to)
+  ) INTO result;
+  RETURN result;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Triggers
+CREATE OR REPLACE FUNCTION update_project_questions_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_project_questions_updated_at
+BEFORE UPDATE ON public.project_questions FOR EACH ROW EXECUTE FUNCTION update_project_questions_updated_at();
+
+CREATE OR REPLACE FUNCTION update_document_comments_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_document_comments_updated_at
+BEFORE UPDATE ON public.document_comments FOR EACH ROW EXECUTE FUNCTION update_document_comments_updated_at();
+
+-- Member Assigned Sections View
+CREATE OR REPLACE VIEW member_assigned_sections AS
+SELECT 
+  ds.id as section_id,
+  ds.document_id,
+  ds.title as section_title,
+  ds.status,
+  ds.deadline,
+  ds.assigned_to,
+  wd.title as document_title,
+  wd.workspace_id,
+  w.project_id,
+  proj.title as project_title,
+  proj.client_id,
+  w.lead_id
+FROM public.document_sections ds
+JOIN public.workspace_documents wd ON ds.document_id = wd.id
+JOIN public.workspaces w ON wd.workspace_id = w.id
+JOIN public.projects proj ON w.project_id = proj.id
+WHERE ds.assigned_to IS NOT NULL;
+
+-- Seed default notification preferences
+INSERT INTO public.user_notification_preferences (user_id)
+SELECT id FROM auth.users ON CONFLICT (user_id) DO NOTHING;
+
+-- ============================================================
+-- MIGRATION 009: COLLABORATIVE PROPOSAL EDITOR
+-- ============================================================
+
+-- Workspaces Table
+CREATE TABLE IF NOT EXISTS public.workspaces (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    lead_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Workspace Documents Table
+CREATE TABLE IF NOT EXISTS public.workspace_documents (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    content JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by UUID NOT NULL REFERENCES auth.users(id),
+    last_edited_by UUID NOT NULL REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Document Versions Table
+CREATE TABLE IF NOT EXISTS public.document_versions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id UUID NOT NULL REFERENCES public.workspace_documents(id) ON DELETE CASCADE,
+    version_number INT NOT NULL,
+    content JSONB NOT NULL,
+    created_by UUID NOT NULL REFERENCES auth.users(id),
+    changes_summary TEXT,
+    is_rollback BOOLEAN DEFAULT false,
+    rolled_back_from UUID REFERENCES public.document_versions(id),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(document_id, version_number)
+);
+
+-- Document Collaborators Table
+CREATE TABLE IF NOT EXISTS public.document_collaborators (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id UUID NOT NULL REFERENCES public.workspace_documents(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('owner', 'editor', 'commenter', 'viewer')),
+    added_by UUID NOT NULL REFERENCES auth.users(id),
+    added_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(document_id, user_id)
+);
+
+-- Collaboration Sessions Table
+CREATE TABLE IF NOT EXISTS public.collaboration_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id UUID NOT NULL REFERENCES public.workspace_documents(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_color TEXT NOT NULL,
+    cursor_position JSONB,
+    presence_status TEXT DEFAULT 'active' CHECK (presence_status IN ('active', 'idle', 'away')),
+    last_activity TIMESTAMPTZ DEFAULT now(),
+    joined_at TIMESTAMPTZ DEFAULT now(),
+    current_section TEXT
+);
+
+-- Document Invitations Table
+CREATE TABLE IF NOT EXISTS public.document_invitations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id UUID NOT NULL REFERENCES public.workspace_documents(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('editor', 'commenter', 'viewer')),
+    token UUID DEFAULT gen_random_uuid() UNIQUE,
+    invited_by UUID NOT NULL REFERENCES auth.users(id),
+    expires_at TIMESTAMPTZ NOT NULL,
+    accepted_at TIMESTAMPTZ,
+    accepted_by UUID REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_workspaces_project ON public.workspaces(project_id);
+CREATE INDEX IF NOT EXISTS idx_workspaces_lead ON public.workspaces(lead_id);
+CREATE INDEX IF NOT EXISTS idx_workspaces_updated ON public.workspaces(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_documents_workspace ON public.workspace_documents(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_documents_updated ON public.workspace_documents(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_documents_created_by ON public.workspace_documents(created_by);
+CREATE INDEX IF NOT EXISTS idx_documents_title_search ON public.workspace_documents USING gin(to_tsvector('english', title));
+CREATE INDEX IF NOT EXISTS idx_documents_content_search ON public.workspace_documents USING gin(to_tsvector('english', content::text));
+CREATE INDEX IF NOT EXISTS idx_document_versions_document ON public.document_versions(document_id, version_number DESC);
+CREATE INDEX IF NOT EXISTS idx_document_versions_created_by ON public.document_versions(created_by);
+CREATE INDEX IF NOT EXISTS idx_document_versions_created_at ON public.document_versions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_document_collaborators_document ON public.document_collaborators(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_collaborators_user ON public.document_collaborators(user_id);
+CREATE INDEX IF NOT EXISTS idx_document_collaborators_role ON public.document_collaborators(document_id, role);
+CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_document ON public.collaboration_sessions(document_id);
+CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_user ON public.collaboration_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_active ON public.collaboration_sessions(document_id, last_activity DESC);
+CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_presence ON public.collaboration_sessions(document_id, presence_status);
+CREATE INDEX IF NOT EXISTS idx_collaboration_sessions_current_section ON public.collaboration_sessions(document_id, current_section) WHERE current_section IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_document_invitations_token ON public.document_invitations(token);
+CREATE INDEX IF NOT EXISTS idx_document_invitations_email ON public.document_invitations(email);
+CREATE INDEX IF NOT EXISTS idx_document_invitations_document ON public.document_invitations(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_invitations_expires ON public.document_invitations(expires_at) WHERE accepted_at IS NULL;
+
+-- Enable RLS
+ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.workspace_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.document_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.document_collaborators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.collaboration_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.document_invitations ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Workspaces
+CREATE POLICY "workspaces_owner_select" ON public.workspaces FOR SELECT USING (lead_id = auth.uid());
+CREATE POLICY "workspaces_owner_insert" ON public.workspaces FOR INSERT WITH CHECK (lead_id = auth.uid());
+CREATE POLICY "workspaces_owner_update" ON public.workspaces FOR UPDATE USING (lead_id = auth.uid()) WITH CHECK (lead_id = auth.uid());
+CREATE POLICY "workspaces_owner_delete" ON public.workspaces FOR DELETE USING (lead_id = auth.uid());
+
+-- RLS Policies for Documents
+CREATE POLICY "documents_collaborator_select" ON public.workspace_documents
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = workspace_documents.id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "documents_creator_insert" ON public.workspace_documents FOR INSERT WITH CHECK (created_by = auth.uid());
+
+CREATE POLICY "documents_editor_update" ON public.workspace_documents
+FOR UPDATE USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = workspace_documents.id AND dc.user_id = auth.uid() AND dc.role IN ('owner', 'editor')))
+WITH CHECK (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = workspace_documents.id AND dc.user_id = auth.uid() AND dc.role IN ('owner', 'editor')));
+
+CREATE POLICY "documents_owner_delete" ON public.workspace_documents
+FOR DELETE USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = workspace_documents.id AND dc.user_id = auth.uid() AND dc.role = 'owner'));
+
+-- RLS Policies for Document Versions
+CREATE POLICY "document_versions_collaborator_select" ON public.document_versions
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_versions.document_id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "document_versions_editor_insert" ON public.document_versions
+FOR INSERT WITH CHECK (created_by = auth.uid() AND EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_versions.document_id AND dc.user_id = auth.uid() AND dc.role IN ('owner', 'editor')));
+
+-- RLS Policies for Document Collaborators
+CREATE POLICY "document_collaborators_select" ON public.document_collaborators
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_collaborators.document_id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "document_collaborators_owner_insert" ON public.document_collaborators
+FOR INSERT WITH CHECK (added_by = auth.uid() AND EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_collaborators.document_id AND dc.user_id = auth.uid() AND dc.role = 'owner'));
+
+CREATE POLICY "document_collaborators_owner_update" ON public.document_collaborators
+FOR UPDATE USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_collaborators.document_id AND dc.user_id = auth.uid() AND dc.role = 'owner'))
+WITH CHECK (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_collaborators.document_id AND dc.user_id = auth.uid() AND dc.role = 'owner'));
+
+CREATE POLICY "document_collaborators_owner_delete" ON public.document_collaborators
+FOR DELETE USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_collaborators.document_id AND dc.user_id = auth.uid() AND dc.role = 'owner'));
+
+-- RLS Policies for Collaboration Sessions
+CREATE POLICY "collaboration_sessions_collaborator_select" ON public.collaboration_sessions
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = collaboration_sessions.document_id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "collaboration_sessions_user_insert" ON public.collaboration_sessions
+FOR INSERT WITH CHECK (user_id = auth.uid() AND EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = collaboration_sessions.document_id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "collaboration_sessions_user_update" ON public.collaboration_sessions
+FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "collaboration_sessions_user_delete" ON public.collaboration_sessions
+FOR DELETE USING (user_id = auth.uid());
+
+-- RLS Policies for Document Invitations
+CREATE POLICY "document_invitations_owner_select" ON public.document_invitations
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_invitations.document_id AND dc.user_id = auth.uid() AND dc.role = 'owner'));
+
+CREATE POLICY "document_invitations_token_select" ON public.document_invitations FOR SELECT USING (true);
+
+CREATE POLICY "document_invitations_owner_insert" ON public.document_invitations
+FOR INSERT WITH CHECK (invited_by = auth.uid() AND EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_invitations.document_id AND dc.user_id = auth.uid() AND dc.role = 'owner'));
+
+CREATE POLICY "document_invitations_accept_update" ON public.document_invitations
+FOR UPDATE USING (accepted_by IS NULL OR accepted_by = auth.uid()) WITH CHECK (accepted_by = auth.uid());
+
+CREATE POLICY "document_invitations_owner_delete" ON public.document_invitations
+FOR DELETE USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_invitations.document_id AND dc.user_id = auth.uid() AND dc.role = 'owner'));
+
+-- Helper Functions
+CREATE OR REPLACE FUNCTION public.create_document_owner()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.document_collaborators (document_id, user_id, role, added_by)
+    VALUES (NEW.id, NEW.created_by, 'owner', NEW.created_by);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_create_document_owner ON public.workspace_documents;
+CREATE TRIGGER trigger_create_document_owner AFTER INSERT ON public.workspace_documents FOR EACH ROW EXECUTE FUNCTION public.create_document_owner();
+
+CREATE OR REPLACE FUNCTION public.update_document_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_document_timestamp ON public.workspace_documents;
+CREATE TRIGGER trigger_update_document_timestamp BEFORE UPDATE ON public.workspace_documents FOR EACH ROW EXECUTE FUNCTION public.update_document_timestamp();
+
+CREATE OR REPLACE FUNCTION public.update_workspace_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_workspace_timestamp ON public.workspaces;
+CREATE TRIGGER trigger_update_workspace_timestamp BEFORE UPDATE ON public.workspaces FOR EACH ROW EXECUTE FUNCTION public.update_workspace_timestamp();
+
+CREATE OR REPLACE FUNCTION public.get_next_version_number(p_document_id UUID)
+RETURNS INT AS $$
+DECLARE
+    v_next_version INT;
+BEGIN
+    SELECT COALESCE(MAX(version_number), 0) + 1 INTO v_next_version FROM public.document_versions WHERE document_id = p_document_id;
+    RETURN v_next_version;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.has_document_permission(p_document_id UUID, p_user_id UUID, p_required_role TEXT DEFAULT 'viewer')
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_user_role TEXT;
+    v_role_hierarchy INT;
+    v_required_hierarchy INT;
+BEGIN
+    SELECT role INTO v_user_role FROM public.document_collaborators WHERE document_id = p_document_id AND user_id = p_user_id;
+    IF v_user_role IS NULL THEN RETURN FALSE; END IF;
+    v_user_role := LOWER(v_user_role);
+    p_required_role := LOWER(p_required_role);
+    v_role_hierarchy := CASE v_user_role WHEN 'owner' THEN 4 WHEN 'editor' THEN 3 WHEN 'commenter' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END;
+    v_required_hierarchy := CASE p_required_role WHEN 'owner' THEN 4 WHEN 'editor' THEN 3 WHEN 'commenter' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END;
+    RETURN v_role_hierarchy >= v_required_hierarchy;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.cleanup_expired_invitations()
+RETURNS void AS $$
+BEGIN
+    DELETE FROM public.document_invitations WHERE expires_at < now() AND accepted_at IS NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.cleanup_inactive_sessions()
+RETURNS void AS $$
+BEGIN
+    DELETE FROM public.collaboration_sessions WHERE last_activity < now() - INTERVAL '1 hour';
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================
+-- MIGRATION 010: SECTION-BASED LOCKING AND PROGRESS TRACKING
+-- ============================================================
+
+-- Document Sections Table
+CREATE TABLE IF NOT EXISTS public.document_sections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    document_id UUID NOT NULL REFERENCES public.workspace_documents(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    "order" INT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'not_started' CHECK (status IN ('not_started', 'in_progress', 'in_review', 'completed')),
+    assigned_to UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    deadline TIMESTAMPTZ,
+    content JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT document_sections_order_positive CHECK ("order" >= 0)
+);
+
+-- Section Locks Table
+CREATE TABLE IF NOT EXISTS public.section_locks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    section_id UUID NOT NULL REFERENCES public.document_sections(id) ON DELETE CASCADE,
+    document_id UUID NOT NULL REFERENCES public.workspace_documents(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    acquired_at TIMESTAMPTZ DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    last_heartbeat TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT section_locks_expires_after_acquired CHECK (expires_at > acquired_at)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_document_sections_document ON public.document_sections(document_id);
+CREATE INDEX IF NOT EXISTS idx_document_sections_order ON public.document_sections(document_id, "order");
+CREATE INDEX IF NOT EXISTS idx_document_sections_status ON public.document_sections(document_id, status);
+CREATE INDEX IF NOT EXISTS idx_document_sections_assigned ON public.document_sections(assigned_to) WHERE assigned_to IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_document_sections_deadline ON public.document_sections(deadline) WHERE deadline IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_document_sections_updated ON public.document_sections(updated_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_section_locks_active_section ON public.section_locks(section_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_section_locks_document ON public.section_locks(document_id);
+CREATE INDEX IF NOT EXISTS idx_section_locks_user ON public.section_locks(user_id);
+CREATE INDEX IF NOT EXISTS idx_section_locks_expires ON public.section_locks(expires_at);
+CREATE INDEX IF NOT EXISTS idx_section_locks_heartbeat ON public.section_locks(last_heartbeat);
+
+-- Enable RLS
+ALTER TABLE public.document_sections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.section_locks ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Document Sections
+CREATE POLICY "document_sections_collaborator_select" ON public.document_sections
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_sections.document_id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "document_sections_editor_insert" ON public.document_sections
+FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_sections.document_id AND dc.user_id = auth.uid() AND dc.role IN ('owner', 'editor')));
+
+CREATE POLICY "document_sections_editor_update" ON public.document_sections
+FOR UPDATE USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_sections.document_id AND dc.user_id = auth.uid() AND dc.role IN ('owner', 'editor')))
+WITH CHECK (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_sections.document_id AND dc.user_id = auth.uid() AND dc.role IN ('owner', 'editor')));
+
+CREATE POLICY "document_sections_owner_delete" ON public.document_sections
+FOR DELETE USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = document_sections.document_id AND dc.user_id = auth.uid() AND dc.role = 'owner'));
+
+-- RLS Policies for Section Locks
+CREATE POLICY "section_locks_collaborator_select" ON public.section_locks
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = section_locks.document_id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "section_locks_collaborator_insert" ON public.section_locks
+FOR INSERT WITH CHECK (user_id = auth.uid() AND EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = section_locks.document_id AND dc.user_id = auth.uid() AND dc.role IN ('owner', 'editor')));
+
+CREATE POLICY "section_locks_user_update" ON public.section_locks
+FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "section_locks_user_delete" ON public.section_locks
+FOR DELETE USING (user_id = auth.uid());
+
+-- Helper Functions
+CREATE OR REPLACE FUNCTION public.update_section_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_section_timestamp ON public.document_sections;
+CREATE TRIGGER trigger_update_section_timestamp BEFORE UPDATE ON public.document_sections FOR EACH ROW EXECUTE FUNCTION public.update_section_timestamp();
+
+CREATE OR REPLACE FUNCTION public.auto_update_section_status()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.content IS DISTINCT FROM OLD.content AND OLD.status = 'not_started' THEN
+        NEW.status = 'in_progress';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_auto_update_section_status ON public.document_sections;
+CREATE TRIGGER trigger_auto_update_section_status BEFORE UPDATE ON public.document_sections FOR EACH ROW EXECUTE FUNCTION public.auto_update_section_status();
+
+CREATE OR REPLACE FUNCTION public.acquire_section_lock(p_section_id UUID, p_document_id UUID, p_user_id UUID, p_ttl_seconds INT DEFAULT 30)
+RETURNS TABLE(success BOOLEAN, lock_id UUID, locked_by UUID, expires_at TIMESTAMPTZ) AS $$
+DECLARE
+    v_lock_id UUID;
+    v_expires_at TIMESTAMPTZ;
+    v_existing_lock RECORD;
+BEGIN
+    DELETE FROM public.section_locks WHERE section_id = p_section_id AND expires_at <= now();
+    SELECT id, user_id, expires_at INTO v_existing_lock FROM public.section_locks WHERE section_id = p_section_id AND expires_at > now() LIMIT 1;
+    IF v_existing_lock.id IS NOT NULL AND v_existing_lock.user_id != p_user_id THEN
+        RETURN QUERY SELECT false, v_existing_lock.id, v_existing_lock.user_id, v_existing_lock.expires_at;
+        RETURN;
+    END IF;
+    IF v_existing_lock.id IS NOT NULL AND v_existing_lock.user_id = p_user_id THEN
+        v_expires_at := now() + (p_ttl_seconds || ' seconds')::INTERVAL;
+        UPDATE public.section_locks SET expires_at = v_expires_at, last_heartbeat = now() WHERE id = v_existing_lock.id;
+        RETURN QUERY SELECT true, v_existing_lock.id, p_user_id, v_expires_at;
+        RETURN;
+    END IF;
+    v_lock_id := gen_random_uuid();
+    v_expires_at := now() + (p_ttl_seconds || ' seconds')::INTERVAL;
+    INSERT INTO public.section_locks (id, section_id, document_id, user_id, expires_at) VALUES (v_lock_id, p_section_id, p_document_id, p_user_id, v_expires_at);
+    RETURN QUERY SELECT true, v_lock_id, p_user_id, v_expires_at;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.release_section_lock(p_section_id UUID, p_user_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_deleted_count INT;
+BEGIN
+    DELETE FROM public.section_locks WHERE section_id = p_section_id AND user_id = p_user_id;
+    GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
+    RETURN v_deleted_count > 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.update_lock_heartbeat(p_lock_id UUID, p_user_id UUID)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_updated_count INT;
+BEGIN
+    UPDATE public.section_locks SET last_heartbeat = now(), expires_at = now() + INTERVAL '30 seconds' WHERE id = p_lock_id AND user_id = p_user_id AND expires_at > now();
+    GET DIAGNOSTICS v_updated_count = ROW_COUNT;
+    RETURN v_updated_count > 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.get_section_lock_status(p_section_id UUID)
+RETURNS TABLE(is_locked BOOLEAN, locked_by UUID, locked_at TIMESTAMPTZ, expires_at TIMESTAMPTZ) AS $$
+BEGIN
+    DELETE FROM public.section_locks WHERE section_id = p_section_id AND expires_at <= now();
+    RETURN QUERY SELECT true as is_locked, sl.user_id as locked_by, sl.acquired_at as locked_at, sl.expires_at FROM public.section_locks sl WHERE sl.section_id = p_section_id AND sl.expires_at > now() LIMIT 1;
+    IF NOT FOUND THEN
+        RETURN QUERY SELECT false, NULL::UUID, NULL::TIMESTAMPTZ, NULL::TIMESTAMPTZ;
+    END IF;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.cleanup_expired_locks()
+RETURNS INT AS $$
+DECLARE
+    v_deleted_count INT;
+BEGIN
+    DELETE FROM public.section_locks WHERE expires_at <= now();
+    GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
+    RETURN v_deleted_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.release_user_locks(p_user_id UUID)
+RETURNS INT AS $$
+DECLARE
+    v_deleted_count INT;
+BEGIN
+    DELETE FROM public.section_locks WHERE user_id = p_user_id;
+    GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
+    RETURN v_deleted_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.calculate_document_progress(p_document_id UUID)
+RETURNS TABLE(total_sections INT, not_started INT, in_progress INT, in_review INT, completed INT, completion_percentage NUMERIC) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        COUNT(*)::INT as total_sections,
+        COUNT(*) FILTER (WHERE status = 'not_started')::INT as not_started,
+        COUNT(*) FILTER (WHERE status = 'in_progress')::INT as in_progress,
+        COUNT(*) FILTER (WHERE status = 'in_review')::INT as in_review,
+        COUNT(*) FILTER (WHERE status = 'completed')::INT as completed,
+        CASE WHEN COUNT(*) = 0 THEN 0 ELSE ROUND((COUNT(*) FILTER (WHERE status = 'completed')::NUMERIC / COUNT(*)::NUMERIC) * 100, 2) END as completion_percentage
+    FROM public.document_sections WHERE document_id = p_document_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.get_upcoming_deadlines(p_document_id UUID, p_hours_ahead INT DEFAULT 24)
+RETURNS TABLE(section_id UUID, title TEXT, deadline TIMESTAMPTZ, assigned_to UUID, status TEXT, is_overdue BOOLEAN, hours_remaining NUMERIC) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT 
+        ds.id as section_id,
+        ds.title,
+        ds.deadline,
+        ds.assigned_to,
+        ds.status,
+        (ds.deadline < now()) as is_overdue,
+        ROUND(EXTRACT(EPOCH FROM (ds.deadline - now())) / 3600, 2) as hours_remaining
+    FROM public.document_sections ds
+    WHERE ds.document_id = p_document_id AND ds.deadline IS NOT NULL AND ds.deadline <= now() + (p_hours_ahead || ' hours')::INTERVAL AND ds.status != 'completed'
+    ORDER BY ds.deadline ASC;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================
+-- HELPER FUNCTION: CHECK USER EXISTS
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION check_user_exists(user_email TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  user_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO user_count FROM auth.users WHERE email = user_email;
+  RETURN user_count > 0;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION check_user_exists(TEXT) TO authenticated, anon;
+
+-- ============================================================
+-- END OF CONSOLIDATED SCHEMA
+-- ============================================================
