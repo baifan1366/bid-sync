@@ -112,46 +112,49 @@ export function MessageComposer({
 
       {/* Input Area */}
       <div className="flex gap-2 items-end">
-        <Textarea
-          ref={textareaRef}
-          value={content}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          placeholder="Type a message... (Press Enter to send, Shift+Enter for new line)"
-          disabled={disabled || isSubmitting}
-          aria-label="Message input"
-          aria-describedby="message-help-text"
-          className={cn(
-            "min-h-[44px] max-h-[200px] resize-none",
-            "border-yellow-400/20 focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-offset-2",
-            "bg-white dark:bg-black text-black dark:text-white",
-            "placeholder:text-muted-foreground"
-          )}
-          rows={1}
-        />
+        <div className="flex-1 relative">
+          <Textarea
+            ref={textareaRef}
+            value={content}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            placeholder="Type a message..."
+            disabled={disabled || isSubmitting}
+            aria-label="Message input"
+            aria-describedby="message-help-text"
+            className={cn(
+              "min-h-[48px] max-h-[200px] resize-none pr-3",
+              "border-yellow-400/30 focus-visible:ring-2 focus-visible:ring-yellow-400 focus-visible:ring-offset-0",
+              "bg-white dark:bg-black text-black dark:text-white",
+              "placeholder:text-muted-foreground/60",
+              "rounded-lg"
+            )}
+            rows={1}
+          />
+        </div>
         <Button
           onClick={handleSubmit}
           disabled={disabled || isSubmitting || !content.trim()}
           aria-label="Send message"
-          className="bg-yellow-400 hover:bg-yellow-500 text-black h-[44px] px-4 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow-400"
+          className="bg-yellow-400 hover:bg-yellow-500 text-black h-[48px] px-5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-yellow-400 shrink-0 font-medium"
         >
           {isSubmitting ? (
             <span className="flex items-center gap-2">
               <span className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" aria-hidden="true" />
-              Sending
+              <span className="hidden sm:inline">Sending</span>
             </span>
           ) : (
             <span className="flex items-center gap-2">
               <Send className="w-4 h-4" aria-hidden="true" />
-              Send
+              <span className="hidden sm:inline">Send</span>
             </span>
           )}
         </Button>
       </div>
 
       {/* Helper Text */}
-      <p id="message-help-text" className="text-xs text-muted-foreground">
-        Press Enter to send, Shift+Enter for new line, Ctrl/Cmd+Enter also sends
+      <p id="message-help-text" className="text-xs text-muted-foreground/80">
+        Press <kbd className="px-1.5 py-0.5 bg-yellow-400/10 border border-yellow-400/20 rounded text-xs font-mono">Enter</kbd> to send, <kbd className="px-1.5 py-0.5 bg-yellow-400/10 border border-yellow-400/20 rounded text-xs font-mono">Shift+Enter</kbd> for new line
       </p>
     </div>
   )

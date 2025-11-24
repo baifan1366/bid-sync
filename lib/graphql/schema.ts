@@ -581,6 +581,45 @@ export const typeDefs = /* GraphQL */ `
     
     # Member Dashboard queries
     myAssignedSections: [AssignedSection!]!
+    
+    # Admin Proposal Oversight queries
+    adminAllProposals(status: String, search: String): [AdminProposal!]!
+    
+    # Admin Template Management queries
+    adminAllTemplates: [Template!]!
+  }
+  
+  type AdminProposal {
+    id: ID!
+    title: String!
+    status: ProposalStatus!
+    budgetEstimate: Float
+    timelineEstimate: String
+    submissionDate: String
+    project: Project!
+    biddingLead: User!
+    biddingTeam: BiddingTeam
+  }
+  
+  type BiddingTeam {
+    id: ID!
+    name: String!
+  }
+  
+  type Template {
+    id: ID!
+    name: String!
+    description: String
+    type: TemplateType!
+    content: String!
+    createdAt: String!
+    updatedAt: String!
+  }
+  
+  enum TemplateType {
+    PROPOSAL
+    CHECKLIST
+    CONTRACT
   }
 
   type Project {

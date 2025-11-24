@@ -2325,6 +2325,168 @@ export const resolvers = {
     },
 
     // ============================================================================
+    // ADMIN PROPOSAL OVERSIGHT QUERIES
+    // ============================================================================
+
+    adminAllProposals: async (_: any, { status, search }: { status?: string; search?: string }) => {
+      const supabase = await createClient();
+      
+      // Check if user is admin
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      if (user.user_metadata?.role !== 'admin') {
+        throw new GraphQLError('Forbidden: Admin access required', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Build query
+      let query = supabase
+        .from('proposals')
+        .select(`
+          id,
+          title,
+          status,
+          budget_estimate,
+          timeline_estimate,
+          submitted_at,
+          lead_id,
+          project_id
+        `)
+        .order('submitted_at', { ascending: false, nullsFirst: false });
+
+      // Apply status filter
+      if (status && status !== 'all') {
+        query = query.eq('status', status);
+      }
+
+      // Apply search filter
+      if (search && search.trim()) {
+        query = query.or(`title.ilike.%${search}%`);
+      }
+
+      const { data: proposals, error } = await query;
+
+      if (error) {
+        console.error('Error fetching proposals:', error);
+        throw new GraphQLError('Failed to fetch proposals', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR', details: error },
+        });
+      }
+
+      // Get related data (projects, users)
+      const adminClient = createAdminClient();
+      const proposalsWithDetails = await Promise.all(
+        (proposals || []).map(async (proposal: any) => {
+          // Get project
+          const { data: project } = await supabase
+            .from('projects')
+            .select('id, title')
+            .eq('id', proposal.project_id)
+            .single();
+
+          // Get bidding lead user info
+          const { data: { user: leadUser } } = await adminClient.auth.admin.getUserById(proposal.lead_id);
+
+          // Try to find bidding team through bid_team_members table
+          let biddingTeam = null;
+          const { data: teamMember } = await supabase
+            .from('bid_team_members')
+            .select('bidding_team_id, bidding_teams(id, name)')
+            .eq('user_id', proposal.lead_id)
+            .eq('project_id', proposal.project_id)
+            .single();
+          
+          if (teamMember && teamMember.bidding_teams) {
+            const team = Array.isArray(teamMember.bidding_teams) 
+              ? teamMember.bidding_teams[0] 
+              : teamMember.bidding_teams;
+            
+            if (team) {
+              biddingTeam = {
+                id: team.id,
+                name: team.name,
+              };
+            }
+          }
+
+          return {
+            id: proposal.id,
+            title: proposal.title || 'Untitled Proposal',
+            status: proposal.status.toUpperCase(),
+            budgetEstimate: proposal.budget_estimate,
+            timelineEstimate: proposal.timeline_estimate,
+            submissionDate: proposal.submitted_at,
+            project: project ? {
+              id: project.id,
+              title: project.title,
+            } : null,
+            biddingLead: leadUser ? {
+              id: leadUser.id,
+              email: leadUser.email,
+              fullName: leadUser.user_metadata?.full_name || 
+                        leadUser.user_metadata?.name || 
+                        null,
+            } : null,
+            biddingTeam,
+          };
+        })
+      );
+
+      return proposalsWithDetails.filter(p => p.project && p.biddingLead);
+    },
+
+    // ============================================================================
+    // ADMIN TEMPLATE MANAGEMENT QUERIES
+    // ============================================================================
+
+    adminAllTemplates: async () => {
+      const supabase = await createClient();
+      
+      // Check if user is admin
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      if (user.user_metadata?.role !== 'admin') {
+        throw new GraphQLError('Forbidden: Admin access required', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Query contract_templates table (the actual table name)
+      const { data: templates, error } = await supabase
+        .from('contract_templates')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching templates:', error);
+        throw new GraphQLError('Failed to fetch templates', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR', details: error },
+        });
+      }
+
+      return (templates || []).map((template: any) => ({
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        type: (template.type || 'CONTRACT').toUpperCase(),
+        content: JSON.stringify(template.content),
+        createdAt: template.created_at,
+        updatedAt: template.updated_at,
+      }));
+    },
+
+    // ============================================================================
     // SCORING TEMPLATE QUERIES
     // ============================================================================
 

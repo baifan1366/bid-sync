@@ -420,11 +420,13 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
 
         {/* Chat Section (Mobile - Bottom) */}
         <aside className="lg:hidden mt-6" aria-label="Project chat">
-          <ChatSection
-            projectId={projectId}
-            proposalId={null}
-            projectTitle={projectData.project.title}
-          />
+          <div className="h-[600px]">
+            <ChatSection
+              projectId={projectId}
+              proposalId={null}
+              projectTitle={projectData.project.title}
+            />
+          </div>
         </aside>
       </div>
     </div>

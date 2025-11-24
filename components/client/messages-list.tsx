@@ -108,7 +108,7 @@ export function MessagesList({
   return (
     <div 
       ref={containerRef} 
-      className="space-y-6"
+      className="space-y-6 pb-2"
       role="log"
       aria-live="polite"
       aria-label="Chat messages"
@@ -125,18 +125,18 @@ export function MessagesList({
         return (
           <div key={date} className="space-y-4">
             {/* Date Separator */}
-            <div className="flex items-center gap-3" role="separator" aria-label={`Messages from ${dateLabel}`}>
+            <div className="flex items-center gap-3 py-2" role="separator" aria-label={`Messages from ${dateLabel}`}>
               <Separator className="flex-1 bg-yellow-400/20" />
-              <span className="text-xs font-medium text-muted-foreground px-2">
+              <span className="text-xs font-medium text-muted-foreground px-3 py-1 bg-yellow-400/5 rounded-full border border-yellow-400/10">
                 {dateLabel}
               </span>
               <Separator className="flex-1 bg-yellow-400/20" />
             </div>
 
             {/* Message Groups */}
-            <div className="space-y-4">
+            <div className="space-y-3">
               {messageGroups.map((group, groupIndex) => (
-                <div key={`group-${groupIndex}`} className="space-y-2">
+                <div key={`group-${groupIndex}`} className="space-y-1.5">
                   {group.map((message) => (
                     <MessageBubble
                       key={message.id}

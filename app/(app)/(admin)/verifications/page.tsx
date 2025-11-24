@@ -84,31 +84,44 @@ export default function VerificationsPage() {
 
   if (isLoading) {
     return (
-      <div className="p-8">
-        <h1 className="text-2xl font-bold mb-6">Client Verifications</h1>
-        <p className="text-muted-foreground">Loading pending verifications...</p>
-      </div>
+      <>
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-black dark:text-white mb-2">Client Verifications</h1>
+          <p className="text-muted-foreground">Loading pending verifications...</p>
+        </div>
+      </>
     );
   }
 
   if (error) {
     return (
-      <div className="p-8">
-        <h1 className="text-2xl font-bold mb-6">Client Verifications</h1>
+      <>
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold text-black dark:text-white mb-2">Client Verifications</h1>
+        </div>
         <Card className="border-destructive">
           <CardContent className="pt-6">
             <p className="text-destructive">Error loading verifications. Please try again.</p>
           </CardContent>
         </Card>
-      </div>
+      </>
     );
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold">Client Verifications</h1>
-        <p className="text-muted-foreground mt-1">
+    <>
+      <div className="mb-6 sm:mb-8">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="p-2 bg-yellow-400 rounded-lg">
+            <svg className="h-6 w-6 text-black" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-black dark:text-white">
+            Client Verifications
+          </h1>
+        </div>
+        <p className="text-muted-foreground">
           Review and approve client registrations before they can create projects
         </p>
       </div>
@@ -162,7 +175,7 @@ export default function VerificationsPage() {
           ))}
         </div>
       )}
-
+      
       <Dialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
         <DialogContent>
           <DialogHeader>
@@ -204,6 +217,6 @@ export default function VerificationsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }

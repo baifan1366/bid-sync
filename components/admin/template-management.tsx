@@ -18,21 +18,22 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Plus, Edit, Trash2, FileText } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
+import { createGraphQLClient, ADMIN_ALL_TEMPLATES } from '@/lib/graphql/client'
 
 interface Template {
   id: string
   name: string
   description: string
-  type: 'proposal' | 'checklist'
-  content: any
-  created_at: string
-  updated_at: string
+  type: string
+  content: string
+  createdAt: string
+  updatedAt: string
 }
 
 async function fetchTemplates(): Promise<Template[]> {
-  const response = await fetch('/api/admin/templates')
-  if (!response.ok) throw new Error('Failed to fetch templates')
-  return response.json()
+  const client = createGraphQLClient()
+  const data = await client.request<{ adminAllTemplates: Template[] }>(ADMIN_ALL_TEMPLATES)
+  return data.adminAllTemplates
 }
 
 export function TemplateManagement() {
@@ -43,7 +44,7 @@ export function TemplateManagement() {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    type: 'proposal' as 'proposal' | 'checklist',
+    type: 'PROPOSAL' as string,
     content: '',
   })
 
@@ -108,7 +109,7 @@ export function TemplateManagement() {
     setFormData({
       name: '',
       description: '',
-      type: 'proposal',
+      type: 'PROPOSAL',
       content: '',
     })
   }
@@ -117,9 +118,9 @@ export function TemplateManagement() {
     setEditingTemplate(template)
     setFormData({
       name: template.name,
-      description: template.description,
+      description: template.description || '',
       type: template.type,
-      content: JSON.stringify(template.content, null, 2),
+      content: template.content,
     })
   }
 
@@ -148,22 +149,31 @@ export function TemplateManagement() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {templates?.map((template) => (
-          <Card key={template.id} className="border-yellow-400/20">
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div className="space-y-1">
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-yellow-400" />
-                    {template.name}
-                  </CardTitle>
-                  <CardDescription>{template.description}</CardDescription>
+        {isLoading ? (
+          <div className="col-span-2 text-center py-8 text-muted-foreground">
+            Loading templates...
+          </div>
+        ) : templates && templates.length === 0 ? (
+          <div className="col-span-2 text-center py-8 text-muted-foreground">
+            No templates found. Create your first template to get started.
+          </div>
+        ) : (
+          templates?.map((template) => (
+            <Card key={template.id} className="border-yellow-400/20">
+              <CardHeader>
+                <div className="flex items-start justify-between">
+                  <div className="space-y-1">
+                    <CardTitle className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-yellow-400" />
+                      {template.name}
+                    </CardTitle>
+                    <CardDescription>{template.description || 'No description'}</CardDescription>
+                  </div>
+                  <Badge className="bg-yellow-400 text-black hover:bg-yellow-500">
+                    {template.type}
+                  </Badge>
                 </div>
-                <Badge className="bg-yellow-400 text-black hover:bg-yellow-500">
-                  {template.type}
-                </Badge>
-              </div>
-            </CardHeader>
+              </CardHeader>
             <CardContent>
               <div className="flex gap-2">
                 <Button
@@ -187,7 +197,8 @@ export function TemplateManagement() {
               </div>
             </CardContent>
           </Card>
-        ))}
+          ))
+        )}
       </div>
 
       <Dialog

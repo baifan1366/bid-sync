@@ -60,15 +60,15 @@ export function MessageBubble({
   return (
     <article
       className={cn(
-        "flex gap-3 w-full",
+        "flex gap-3 w-full animate-in fade-in slide-in-from-bottom-2 duration-300",
         isCurrentUser ? "flex-row-reverse" : "flex-row"
       )}
       aria-label={`Message from ${senderName}`}
     >
       {/* Avatar */}
-      <Avatar className="w-10 h-10 shrink-0">
+      <Avatar className="w-9 h-9 shrink-0 border-2 border-yellow-400/20">
         <AvatarImage src={senderAvatar || undefined} alt={`${senderName}'s avatar`} />
-        <AvatarFallback className="bg-yellow-400 text-black font-semibold">
+        <AvatarFallback className="bg-yellow-400 text-black font-semibold text-xs">
           {getInitials(senderName)}
         </AvatarFallback>
       </Avatar>
@@ -76,7 +76,7 @@ export function MessageBubble({
       {/* Message Content */}
       <div
         className={cn(
-          "flex flex-col gap-1 max-w-[70%]",
+          "flex flex-col gap-1.5 max-w-[75%] sm:max-w-[70%]",
           isCurrentUser ? "items-end" : "items-start"
         )}
       >
@@ -87,12 +87,12 @@ export function MessageBubble({
             isCurrentUser ? "flex-row-reverse" : "flex-row"
           )}
         >
-          <span className="text-sm font-medium text-black dark:text-white">
+          <span className="text-xs font-semibold text-black dark:text-white">
             {senderName}
           </span>
           <Badge
             variant="secondary"
-            className={cn("text-xs", getRoleBadgeColor(senderRole))}
+            className={cn("text-[10px] px-1.5 py-0.5 h-5", getRoleBadgeColor(senderRole))}
           >
             {getRoleLabel(senderRole)}
           </Badge>
@@ -101,18 +101,18 @@ export function MessageBubble({
         {/* Message Bubble */}
         <div
           className={cn(
-            "rounded-lg px-4 py-2 wrap-break-word",
+            "rounded-2xl px-4 py-2.5 wrap-break-word shadow-sm",
             isCurrentUser
-              ? "bg-yellow-400 text-black"
-              : "bg-white dark:bg-gray-800 text-black dark:text-white border border-yellow-400/20"
+              ? "bg-yellow-400 text-black rounded-tr-sm"
+              : "bg-gray-50 dark:bg-gray-800/50 text-black dark:text-white border border-yellow-400/20 rounded-tl-sm"
           )}
         >
-          <p className="text-sm whitespace-pre-wrap">{content}</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{content}</p>
         </div>
 
         {/* Timestamp */}
         <time 
-          className="text-xs text-muted-foreground"
+          className="text-[11px] text-muted-foreground/80 px-1"
           dateTime={timestamp}
         >
           {formatDistanceToNow(new Date(timestamp), { addSuffix: true })}

@@ -62,3 +62,43 @@ export const CREATE_PROJECT = /* GraphQL */ `
     }
   }
 `;
+
+export const ADMIN_ALL_PROPOSALS = /* GraphQL */ `
+  query AdminAllProposals($status: String, $search: String) {
+    adminAllProposals(status: $status, search: $search) {
+      id
+      title
+      status
+      budgetEstimate
+      timelineEstimate
+      submissionDate
+      project {
+        id
+        title
+      }
+      biddingLead {
+        id
+        fullName
+        email
+      }
+      biddingTeam {
+        id
+        name
+      }
+    }
+  }
+`;
+
+export const ADMIN_ALL_TEMPLATES = /* GraphQL */ `
+  query AdminAllTemplates {
+    adminAllTemplates {
+      id
+      name
+      description
+      type
+      content
+      createdAt
+      updatedAt
+    }
+  }
+`;

@@ -22,27 +22,37 @@ import {
 } from '@/components/ui/dialog'
 import { Search, Eye, Calendar, User, Briefcase } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import { createGraphQLClient, ADMIN_ALL_PROPOSALS } from '@/lib/graphql/client'
 
 interface Proposal {
   id: string
   title: string
-  project_title: string
-  team_name: string
-  lead_name: string
   status: string
-  submitted_at: string
-  budget: number
-  timeline: string
+  budgetEstimate: number
+  timelineEstimate: string
+  submissionDate: string
+  project: {
+    id: string
+    title: string
+  }
+  biddingLead: {
+    id: string
+    fullName: string
+    email: string
+  }
+  biddingTeam: {
+    id: string
+    name: string
+  } | null
 }
 
 async function fetchProposals(status?: string, search?: string): Promise<Proposal[]> {
-  const params = new URLSearchParams()
-  if (status && status !== 'all') params.append('status', status)
-  if (search) params.append('search', search)
-  
-  const response = await fetch(`/api/admin/proposals?${params}`)
-  if (!response.ok) throw new Error('Failed to fetch proposals')
-  return response.json()
+  const client = createGraphQLClient()
+  const data = await client.request<{ adminAllProposals: Proposal[] }>(
+    ADMIN_ALL_PROPOSALS,
+    { status, search }
+  )
+  return data.adminAllProposals
 }
 
 export function ProposalOversight() {
@@ -123,7 +133,7 @@ export function ProposalOversight() {
                     <CardTitle className="text-lg">{proposal.title}</CardTitle>
                     <CardDescription className="flex items-center gap-2">
                       <Briefcase className="h-3 w-3" />
-                      {proposal.project_title}
+                      {proposal.project.title}
                     </CardDescription>
                   </div>
                   <Badge 
@@ -135,27 +145,29 @@ export function ProposalOversight() {
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-                  <div className="flex items-center gap-2 text-sm">
-                    <User className="h-4 w-4 text-yellow-400" />
-                    <span className="text-muted-foreground">Team:</span>
-                    <span className="font-medium">{proposal.team_name}</span>
-                  </div>
+                  {proposal.biddingTeam && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <User className="h-4 w-4 text-yellow-400" />
+                      <span className="text-muted-foreground">Team:</span>
+                      <span className="font-medium">{proposal.biddingTeam.name}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 text-sm">
                     <User className="h-4 w-4 text-yellow-400" />
                     <span className="text-muted-foreground">Lead:</span>
-                    <span className="font-medium">{proposal.lead_name}</span>
+                    <span className="font-medium">{proposal.biddingLead.fullName || proposal.biddingLead.email}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <Calendar className="h-4 w-4 text-yellow-400" />
                     <span className="text-muted-foreground">Submitted:</span>
                     <span className="font-medium">
-                      {new Date(proposal.submitted_at).toLocaleDateString()}
+                      {new Date(proposal.submissionDate).toLocaleDateString()}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-muted-foreground">Budget:</span>
                     <span className="font-medium text-yellow-400">
-                      ${proposal.budget.toLocaleString()}
+                      ${proposal.budgetEstimate?.toLocaleString() || 'N/A'}
                     </span>
                   </div>
                 </div>
@@ -188,31 +200,33 @@ export function ProposalOversight() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-muted-foreground">Project</p>
-                  <p className="font-medium">{selectedProposal.project_title}</p>
+                  <p className="font-medium">{selectedProposal.project.title}</p>
                 </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Team</p>
-                  <p className="font-medium">{selectedProposal.team_name}</p>
-                </div>
+                {selectedProposal.biddingTeam && (
+                  <div>
+                    <p className="text-sm text-muted-foreground">Team</p>
+                    <p className="font-medium">{selectedProposal.biddingTeam.name}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-sm text-muted-foreground">Lead</p>
-                  <p className="font-medium">{selectedProposal.lead_name}</p>
+                  <p className="font-medium">{selectedProposal.biddingLead.fullName || selectedProposal.biddingLead.email}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Status</p>
-                  <Badge className={getStatusColor(selectedProposal.status)}>
+                  <Badge className={getStatusColor(selectedProposal.status.toLowerCase())}>
                     {selectedProposal.status.replace('_', ' ')}
                   </Badge>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Budget</p>
                   <p className="font-medium text-yellow-400">
-                    ${selectedProposal.budget.toLocaleString()}
+                    ${selectedProposal.budgetEstimate?.toLocaleString() || 'N/A'}
                   </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Timeline</p>
-                  <p className="font-medium">{selectedProposal.timeline}</p>
+                  <p className="font-medium">{selectedProposal.timelineEstimate || 'N/A'}</p>
                 </div>
               </div>
               

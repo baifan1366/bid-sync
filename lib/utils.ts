@@ -9,7 +9,7 @@ export function formatBudget(budget?: number | null): string {
   if (!budget) return 'Not specified'
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'MYR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(budget)
