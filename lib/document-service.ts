@@ -1,620 +1,912 @@
 /**
  * Document Service
  * 
- * Handles CRUD operations for proposal documents including:
- * - Document creation with automatic owner assignment
- * - Document retrieval with permission checks
- * - Document updates with validation
- * - Document deletion with cascading cleanup
- * - Document listing and search functionality
+ * Handles document creation, retrieval, update, and deletion for collaborative editing.
+ * Also handles proposal document upload, storage, retrieval, and deletion.
+ * Implements requirements 9.1, 9.2, 9.3, 9.4, 9.5 from the bidding-leader-management spec.
  */
 
-import { createClient } from '@/lib/supabase/server'
-import { z } from 'zod'
-import type { Document, JSONContent } from '@/types/document'
+import { createClient } from '@/lib/supabase/server';
 
-/**
- * Validation Schemas
- */
+// File type validation
+const ALLOWED_FILE_TYPES = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'text/plain',
+  'text/csv',
+];
 
-// JSONContent schema for TipTap editor content
-const JSONContentSchema: z.ZodType<JSONContent> = z.lazy(() =>
-  z.object({
-    type: z.string().optional(),
-    attrs: z.record(z.string(), z.any()).optional(),
-    content: z.array(JSONContentSchema).optional(),
-    marks: z.array(
-      z.object({
-        type: z.string(),
-        attrs: z.record(z.string(), z.any()).optional(),
-      }).passthrough()
-    ).optional(),
-    text: z.string().optional(),
-  }).passthrough()
-)
+// File size limit: 10MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
-const CreateDocumentInputSchema = z.object({
-  workspaceId: z.string().uuid('Invalid workspace ID'),
-  title: z.string()
-    .min(1, 'Title is required')
-    .max(200, 'Title must be 200 characters or less'),
-  description: z.string()
-    .max(1000, 'Description must be 1000 characters or less')
-    .optional(),
-  createdBy: z.string().uuid('Invalid user ID'),
-})
-
-const UpdateDocumentInputSchema = z.object({
-  documentId: z.string().uuid('Invalid document ID'),
-  content: JSONContentSchema,
-  userId: z.string().uuid('Invalid user ID'),
-})
-
-const UpdateDocumentMetadataSchema = z.object({
-  documentId: z.string().uuid('Invalid document ID'),
-  title: z.string()
-    .min(1, 'Title is required')
-    .max(200, 'Title must be 200 characters or less')
-    .optional(),
-  description: z.string()
-    .max(1000, 'Description must be 1000 characters or less')
-    .optional(),
-  userId: z.string().uuid('Invalid user ID'),
-})
-
-const SearchDocumentsInputSchema = z.object({
-  query: z.string().min(1, 'Search query is required'),
-  workspaceId: z.string().uuid('Invalid workspace ID'),
-  userId: z.string().uuid('Invalid user ID'),
-})
-
-/**
- * Input and Output Types
- */
+// Collaborative document interfaces
+export interface CollaborativeDocument {
+  id: string;
+  workspaceId: string;
+  title: string;
+  description?: string;
+  content: any;
+  createdBy: string;
+  lastEditedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface CreateDocumentInput {
-  workspaceId: string
-  title: string
-  description?: string
-  createdBy: string
+  workspaceId: string;
+  title: string;
+  description?: string;
+  createdBy: string;
 }
 
 export interface UpdateDocumentInput {
-  documentId: string
-  content: JSONContent
-  userId: string
+  documentId: string;
+  content: any;
+  userId: string;
 }
 
 export interface UpdateDocumentMetadataInput {
-  documentId: string
-  title?: string
-  description?: string
-  userId: string
+  documentId: string;
+  title?: string;
+  description?: string;
+  userId: string;
 }
 
 export interface SearchDocumentsInput {
-  query: string
-  workspaceId: string
-  userId: string
+  query: string;
+  workspaceId?: string;
+  userId: string;
 }
 
-export interface DocumentServiceResult<T> {
-  success: boolean
-  data?: T
-  error?: string
+export interface DocumentResult {
+  success: boolean;
+  data?: CollaborativeDocument;
+  error?: string;
+}
+
+export interface DocumentsResult {
+  success: boolean;
+  data?: CollaborativeDocument[];
+  error?: string;
+}
+
+export interface DocumentMetadata {
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  isRequired?: boolean;
+}
+
+export interface ProposalDocument {
+  id: string;
+  proposalId: string;
+  url: string;
+  docType: string;
+  fileName: string;
+  fileSize: number;
+  uploadedBy: string;
+  uploadedAt: string;
+  isRequired: boolean;
+}
+
+export interface UploadDocumentResult {
+  success: boolean;
+  document?: ProposalDocument;
+  error?: string;
+  errorCode?: 'INVALID_FILE_TYPE' | 'FILE_TOO_LARGE' | 'UPLOAD_FAILED' | 'UNAUTHORIZED' | 'PROPOSAL_NOT_FOUND' | 'UNKNOWN';
+}
+
+export interface DeleteDocumentResult {
+  success: boolean;
+  error?: string;
+  errorCode?: 'DOCUMENT_NOT_FOUND' | 'UNAUTHORIZED' | 'DELETE_FAILED' | 'UNKNOWN';
+}
+
+export interface GetDocumentsResult {
+  success: boolean;
+  documents?: ProposalDocument[];
+  error?: string;
 }
 
 /**
- * Document Service Class
- * Manages all document-related operations
+ * DocumentService class for managing both collaborative documents and proposal documents
  */
 export class DocumentService {
   /**
-   * Create a new document
-   * Automatically assigns creator as owner via database trigger
-   * 
-   * @param input - Document creation parameters
-   * @returns Created document or error
+   * Creates a new collaborative document
    */
-  async createDocument(
-    input: CreateDocumentInput
-  ): Promise<DocumentServiceResult<Document>> {
+  async createDocument(input: CreateDocumentInput): Promise<DocumentResult> {
     try {
-      // Validate input
-      const validated = CreateDocumentInputSchema.parse(input)
-
-      const supabase = await createClient()
+      const supabase = await createClient();
 
       // Verify workspace exists and user has access
       const { data: workspace, error: workspaceError } = await supabase
         .from('workspaces')
         .select('id, lead_id')
-        .eq('id', validated.workspaceId)
-        .single()
+        .eq('id', input.workspaceId)
+        .single();
 
       if (workspaceError || !workspace) {
         return {
           success: false,
-          error: 'Workspace not found or access denied',
-        }
+          error: 'Workspace not found',
+        };
       }
 
-      // Create document with initial empty content
+      // Create document
       const { data: document, error: createError } = await supabase
         .from('documents')
         .insert({
-          workspace_id: validated.workspaceId,
-          title: validated.title,
-          description: validated.description,
+          workspace_id: input.workspaceId,
+          title: input.title,
+          description: input.description || null,
           content: {},
-          created_by: validated.createdBy,
-          last_edited_by: validated.createdBy,
+          created_by: input.createdBy,
+          last_edited_by: input.createdBy,
         })
         .select()
-        .single()
+        .single();
 
       if (createError || !document) {
-        console.error('Failed to create document:', createError)
         return {
           success: false,
-          error: `Failed to create document: ${createError?.message || 'Unknown error'}`,
-        }
-      }
-
-      // Transform database response to Document type
-      const result: Document = {
-        id: document.id,
-        workspaceId: document.workspace_id,
-        title: document.title,
-        description: document.description,
-        content: document.content as JSONContent,
-        createdBy: document.created_by,
-        lastEditedBy: document.last_edited_by,
-        createdAt: document.created_at,
-        updatedAt: document.updated_at,
+          error: 'Failed to create document',
+        };
       }
 
       return {
         success: true,
-        data: result,
-      }
+        data: {
+          id: document.id,
+          workspaceId: document.workspace_id,
+          title: document.title,
+          description: document.description,
+          content: document.content,
+          createdBy: document.created_by,
+          lastEditedBy: document.last_edited_by,
+          createdAt: document.created_at,
+          updatedAt: document.updated_at,
+        },
+      };
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return {
-          success: false,
-          error: error.issues.map((e: z.ZodIssue) => e.message).join(', '),
-        }
-      }
-
-      console.error('Error in createDocument:', error)
+      console.error('Error creating document:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-      }
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
     }
   }
 
   /**
-   * Get a document by ID
-   * Checks user permissions via RLS policies
-   * 
-   * @param documentId - Document ID
-   * @param userId - User ID for permission check
-   * @returns Document or error
+   * Gets a document by ID
    */
-  async getDocument(
-    documentId: string,
-    userId: string
-  ): Promise<DocumentServiceResult<Document>> {
+  async getDocument(documentId: string, _userId: string): Promise<DocumentResult> {
     try {
-      // Validate IDs
-      z.string().uuid().parse(documentId)
-      z.string().uuid().parse(userId)
-
-      const supabase = await createClient()
+      const supabase = await createClient();
 
       const { data: document, error } = await supabase
         .from('documents')
         .select('*')
         .eq('id', documentId)
-        .single()
+        .single();
 
       if (error || !document) {
         return {
           success: false,
-          error: 'Document not found or access denied',
-        }
-      }
-
-      // Transform database response to Document type
-      const result: Document = {
-        id: document.id,
-        workspaceId: document.workspace_id,
-        title: document.title,
-        description: document.description,
-        content: document.content as JSONContent,
-        createdBy: document.created_by,
-        lastEditedBy: document.last_edited_by,
-        createdAt: document.created_at,
-        updatedAt: document.updated_at,
+          error: 'Document not found',
+        };
       }
 
       return {
         success: true,
-        data: result,
-      }
+        data: {
+          id: document.id,
+          workspaceId: document.workspace_id,
+          title: document.title,
+          description: document.description,
+          content: document.content,
+          createdBy: document.created_by,
+          lastEditedBy: document.last_edited_by,
+          createdAt: document.created_at,
+          updatedAt: document.updated_at,
+        },
+      };
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return {
-          success: false,
-          error: 'Invalid document ID or user ID',
-        }
-      }
-
-      console.error('Error in getDocument:', error)
+      console.error('Error getting document:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-      }
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
     }
   }
 
   /**
-   * Update document content
-   * Requires editor or owner role (enforced by RLS)
-   * 
-   * @param input - Update parameters
-   * @returns Updated document or error
+   * Lists all documents in a workspace
    */
-  async updateDocument(
-    input: UpdateDocumentInput
-  ): Promise<DocumentServiceResult<Document>> {
+  async listDocuments(workspaceId: string, _userId: string): Promise<DocumentsResult> {
     try {
-      // Validate input
-      const validated = UpdateDocumentInputSchema.parse(input)
-
-      const supabase = await createClient()
-
-      // Update document content
-      const { data: document, error: updateError } = await supabase
-        .from('documents')
-        .update({
-          content: validated.content,
-          last_edited_by: validated.userId,
-        })
-        .eq('id', validated.documentId)
-        .select()
-        .single()
-
-      if (updateError || !document) {
-        console.error('Failed to update document:', updateError)
-        return {
-          success: false,
-          error: updateError?.message || 'Failed to update document or insufficient permissions',
-        }
-      }
-
-      // Transform database response to Document type
-      const result: Document = {
-        id: document.id,
-        workspaceId: document.workspace_id,
-        title: document.title,
-        description: document.description,
-        content: document.content as JSONContent,
-        createdBy: document.created_by,
-        lastEditedBy: document.last_edited_by,
-        createdAt: document.created_at,
-        updatedAt: document.updated_at,
-      }
-
-      return {
-        success: true,
-        data: result,
-      }
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return {
-          success: false,
-          error: error.issues.map((e: z.ZodIssue) => e.message).join(', '),
-        }
-      }
-
-      console.error('Error in updateDocument:', error)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-      }
-    }
-  }
-
-  /**
-   * Update document metadata (title, description)
-   * Requires editor or owner role (enforced by RLS)
-   * 
-   * @param input - Update parameters
-   * @returns Updated document or error
-   */
-  async updateDocumentMetadata(
-    input: UpdateDocumentMetadataInput
-  ): Promise<DocumentServiceResult<Document>> {
-    try {
-      // Validate input
-      const validated = UpdateDocumentMetadataSchema.parse(input)
-
-      const supabase = await createClient()
-
-      // Build update object with only provided fields
-      const updateData: any = {
-        last_edited_by: validated.userId,
-      }
-
-      if (validated.title !== undefined) {
-        updateData.title = validated.title
-      }
-
-      if (validated.description !== undefined) {
-        updateData.description = validated.description
-      }
-
-      // Update document metadata
-      const { data: document, error: updateError } = await supabase
-        .from('documents')
-        .update(updateData)
-        .eq('id', validated.documentId)
-        .select()
-        .single()
-
-      if (updateError || !document) {
-        console.error('Failed to update document metadata:', updateError)
-        return {
-          success: false,
-          error: updateError?.message || 'Failed to update document or insufficient permissions',
-        }
-      }
-
-      // Transform database response to Document type
-      const result: Document = {
-        id: document.id,
-        workspaceId: document.workspace_id,
-        title: document.title,
-        description: document.description,
-        content: document.content as JSONContent,
-        createdBy: document.created_by,
-        lastEditedBy: document.last_edited_by,
-        createdAt: document.created_at,
-        updatedAt: document.updated_at,
-      }
-
-      return {
-        success: true,
-        data: result,
-      }
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return {
-          success: false,
-          error: error.issues.map((e: z.ZodIssue) => e.message).join(', '),
-        }
-      }
-
-      console.error('Error in updateDocumentMetadata:', error)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-      }
-    }
-  }
-
-  /**
-   * Delete a document
-   * Requires owner role (enforced by RLS)
-   * Cascades to versions, collaborators, sessions, and invitations
-   * 
-   * @param documentId - Document ID
-   * @param userId - User ID for permission check
-   * @returns Success status or error
-   */
-  async deleteDocument(
-    documentId: string,
-    userId: string
-  ): Promise<DocumentServiceResult<boolean>> {
-    try {
-      // Validate IDs
-      z.string().uuid().parse(documentId)
-      z.string().uuid().parse(userId)
-
-      const supabase = await createClient()
-
-      // Delete document (RLS ensures only owner can delete)
-      const { error: deleteError } = await supabase
-        .from('documents')
-        .delete()
-        .eq('id', documentId)
-
-      if (deleteError) {
-        console.error('Failed to delete document:', deleteError)
-        return {
-          success: false,
-          error: deleteError.message || 'Failed to delete document or insufficient permissions',
-        }
-      }
-
-      return {
-        success: true,
-        data: true,
-      }
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return {
-          success: false,
-          error: 'Invalid document ID or user ID',
-        }
-      }
-
-      console.error('Error in deleteDocument:', error)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-      }
-    }
-  }
-
-  /**
-   * List all documents in a workspace
-   * Returns only documents the user has access to (via RLS)
-   * 
-   * @param workspaceId - Workspace ID
-   * @param userId - User ID for permission check
-   * @returns Array of documents or error
-   */
-  async listDocuments(
-    workspaceId: string,
-    userId: string
-  ): Promise<DocumentServiceResult<Document[]>> {
-    try {
-      // Validate IDs
-      z.string().uuid().parse(workspaceId)
-      z.string().uuid().parse(userId)
-
-      const supabase = await createClient()
+      const supabase = await createClient();
 
       const { data: documents, error } = await supabase
         .from('documents')
         .select('*')
         .eq('workspace_id', workspaceId)
-        .order('updated_at', { ascending: false })
+        .order('updated_at', { ascending: false });
 
       if (error) {
-        console.error('Failed to list documents:', error)
         return {
           success: false,
-          error: error.message || 'Failed to list documents',
-        }
+          error: 'Failed to list documents',
+        };
       }
-
-      // Transform database response to Document array
-      const results: Document[] = (documents || []).map(doc => ({
-        id: doc.id,
-        workspaceId: doc.workspace_id,
-        title: doc.title,
-        description: doc.description,
-        content: doc.content as JSONContent,
-        createdBy: doc.created_by,
-        lastEditedBy: doc.last_edited_by,
-        createdAt: doc.created_at,
-        updatedAt: doc.updated_at,
-      }))
 
       return {
         success: true,
-        data: results,
-      }
+        data: (documents || []).map((doc) => ({
+          id: doc.id,
+          workspaceId: doc.workspace_id,
+          title: doc.title,
+          description: doc.description,
+          content: doc.content,
+          createdBy: doc.created_by,
+          lastEditedBy: doc.last_edited_by,
+          createdAt: doc.created_at,
+          updatedAt: doc.updated_at,
+        })),
+      };
     } catch (error) {
-      if (error instanceof z.ZodError) {
-        return {
-          success: false,
-          error: 'Invalid workspace ID or user ID',
-        }
-      }
-
-      console.error('Error in listDocuments:', error)
+      console.error('Error listing documents:', error);
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error occurred',
-      }
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
     }
   }
 
   /**
-   * Search documents by title, content, or collaborator names
-   * Uses PostgreSQL full-text search
-   * 
-   * @param input - Search parameters
-   * @returns Array of matching documents or error
+   * Searches documents by query
    */
-  async searchDocuments(
-    input: SearchDocumentsInput
-  ): Promise<DocumentServiceResult<Document[]>> {
+  async searchDocuments(input: SearchDocumentsInput): Promise<DocumentsResult> {
     try {
-      // Validate input
-      const validated = SearchDocumentsInputSchema.parse(input)
+      const supabase = await createClient();
 
-      const supabase = await createClient()
+      let query = supabase
+        .from('documents')
+        .select('*');
 
-      // Sanitize search query for PostgreSQL full-text search
-      const sanitizedQuery = validated.query
-        .trim()
-        .replace(/[^\w\s]/g, ' ')
-        .split(/\s+/)
-        .filter(word => word.length > 0)
-        .join(' & ')
-
-      if (!sanitizedQuery) {
-        return {
-          success: true,
-          data: [],
-        }
+      if (input.workspaceId) {
+        query = query.eq('workspace_id', input.workspaceId);
       }
 
-      // Search in title and content using full-text search
-      const { data: documents, error } = await supabase
-        .from('documents')
-        .select(`
-          *,
-          document_collaborators!inner(user_id)
-        `)
-        .eq('workspace_id', validated.workspaceId)
-        .or(`
-          to_tsvector('english', title).@@.to_tsquery('english', '${sanitizedQuery}'),
-          to_tsvector('english', content::text).@@.to_tsquery('english', '${sanitizedQuery}')
-        `)
-        .order('updated_at', { ascending: false })
+      // Search in title and description
+      query = query.or(`title.ilike.%${input.query}%,description.ilike.%${input.query}%`);
+
+      const { data: documents, error } = await query.order('updated_at', { ascending: false });
 
       if (error) {
-        console.error('Failed to search documents:', error)
         return {
           success: false,
-          error: error.message || 'Failed to search documents',
-        }
+          error: 'Failed to search documents',
+        };
       }
-
-      // Remove duplicates and transform to Document array
-      const uniqueDocuments = new Map<string, any>()
-      documents?.forEach(doc => {
-        if (!uniqueDocuments.has(doc.id)) {
-          uniqueDocuments.set(doc.id, doc)
-        }
-      })
-
-      const results: Document[] = Array.from(uniqueDocuments.values()).map(doc => ({
-        id: doc.id,
-        workspaceId: doc.workspace_id,
-        title: doc.title,
-        description: doc.description,
-        content: doc.content as JSONContent,
-        createdBy: doc.created_by,
-        lastEditedBy: doc.last_edited_by,
-        createdAt: doc.created_at,
-        updatedAt: doc.updated_at,
-      }))
 
       return {
         success: true,
-        data: results,
-      }
+        data: (documents || []).map((doc) => ({
+          id: doc.id,
+          workspaceId: doc.workspace_id,
+          title: doc.title,
+          description: doc.description,
+          content: doc.content,
+          createdBy: doc.created_by,
+          lastEditedBy: doc.last_edited_by,
+          createdAt: doc.created_at,
+          updatedAt: doc.updated_at,
+        })),
+      };
     } catch (error) {
-      if (error instanceof z.ZodError) {
+      console.error('Error searching documents:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Updates document content
+   */
+  async updateDocument(input: UpdateDocumentInput): Promise<DocumentResult> {
+    try {
+      const supabase = await createClient();
+
+      const { data: document, error } = await supabase
+        .from('documents')
+        .update({
+          content: input.content,
+          last_edited_by: input.userId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', input.documentId)
+        .select()
+        .single();
+
+      if (error || !document) {
         return {
           success: false,
-          error: error.issues.map((e: z.ZodIssue) => e.message).join(', '),
-        }
+          error: 'Failed to update document',
+        };
       }
 
-      console.error('Error in searchDocuments:', error)
+      return {
+        success: true,
+        data: {
+          id: document.id,
+          workspaceId: document.workspace_id,
+          title: document.title,
+          description: document.description,
+          content: document.content,
+          createdBy: document.created_by,
+          lastEditedBy: document.last_edited_by,
+          createdAt: document.created_at,
+          updatedAt: document.updated_at,
+        },
+      };
+    } catch (error) {
+      console.error('Error updating document:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Updates document metadata (title, description)
+   */
+  async updateDocumentMetadata(input: UpdateDocumentMetadataInput): Promise<DocumentResult> {
+    try {
+      const supabase = await createClient();
+
+      const updateData: any = {
+        last_edited_by: input.userId,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (input.title !== undefined) updateData.title = input.title;
+      if (input.description !== undefined) updateData.description = input.description;
+
+      const { data: document, error } = await supabase
+        .from('documents')
+        .update(updateData)
+        .eq('id', input.documentId)
+        .select()
+        .single();
+
+      if (error || !document) {
+        return {
+          success: false,
+          error: 'Failed to update document metadata',
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          id: document.id,
+          workspaceId: document.workspace_id,
+          title: document.title,
+          description: document.description,
+          content: document.content,
+          createdBy: document.created_by,
+          lastEditedBy: document.last_edited_by,
+          createdAt: document.created_at,
+          updatedAt: document.updated_at,
+        },
+      };
+    } catch (error) {
+      console.error('Error updating document metadata:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Deletes a document
+   */
+  async deleteDocument(documentId: string, userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const supabase = await createClient();
+
+      // Verify document exists and user has permission
+      const { data: document, error: fetchError } = await supabase
+        .from('documents')
+        .select('*, workspaces!inner(lead_id)')
+        .eq('id', documentId)
+        .single();
+
+      if (fetchError || !document) {
+        return {
+          success: false,
+          error: 'Document not found',
+        };
+      }
+
+      // Check if user is workspace lead
+      const workspace = document.workspaces as any;
+      if (workspace.lead_id !== userId) {
+        return {
+          success: false,
+          error: 'Unauthorized to delete this document',
+        };
+      }
+
+      const { error: deleteError } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', documentId);
+
+      if (deleteError) {
+        return {
+          success: false,
+          error: 'Failed to delete document',
+        };
+      }
+
+      return {
+        success: true,
+      };
+    } catch (error) {
+      console.error('Error deleting document:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  // ============================================================================
+  // PROPOSAL DOCUMENT METHODS (Original functionality)
+  // ============================================================================
+
+  /**
+   * Validates file type and size
+   * 
+   * Requirement 9.1: Validate file type and size limits
+   * 
+   * @param file - The file to validate
+   * @returns Validation result with error details if invalid
+   */
+  static validateFile(file: File): { valid: boolean; error?: string; errorCode?: string } {
+    // Check file type
+    if (!ALLOWED_FILE_TYPES.includes(file.type)) {
+      return {
+        valid: false,
+        error: `File type ${file.type} is not allowed. Allowed types: PDF, Word, Excel, PowerPoint, Images (JPEG, PNG, GIF), Text, CSV`,
+        errorCode: 'INVALID_FILE_TYPE',
+      };
+    }
+
+    // Check file size
+    if (file.size > MAX_FILE_SIZE) {
+      return {
+        valid: false,
+        error: `File size ${(file.size / 1024 / 1024).toFixed(2)}MB exceeds maximum allowed size of ${MAX_FILE_SIZE / 1024 / 1024}MB`,
+        errorCode: 'FILE_TOO_LARGE',
+      };
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * Uploads a document to a proposal
+   * 
+   * Requirements:
+   * - 9.1: Validate file type and size limits
+   * - 9.2: Store securely and associate with proposal
+   * 
+   * @param proposalId - The proposal ID
+   * @param file - The file to upload
+   * @param metadata - Additional metadata
+   * @param userId - The user uploading the document
+   * @returns UploadDocumentResult with document data
+   */
+  static async uploadDocument(
+    proposalId: string,
+    file: File,
+    metadata: DocumentMetadata,
+    userId: string
+  ): Promise<UploadDocumentResult> {
+    try {
+      // Validate file (Requirement 9.1)
+      const validation = this.validateFile(file);
+      if (!validation.valid) {
+        return {
+          success: false,
+          error: validation.error,
+          errorCode: validation.errorCode as any,
+        };
+      }
+
+      const supabase = await createClient();
+
+      // Verify proposal exists and user has access
+      const { data: proposal, error: proposalError } = await supabase
+        .from('proposals')
+        .select('id, lead_id, project_id')
+        .eq('id', proposalId)
+        .single();
+
+      if (proposalError || !proposal) {
+        return {
+          success: false,
+          error: 'Proposal not found',
+          errorCode: 'PROPOSAL_NOT_FOUND',
+        };
+      }
+
+      // Check if user is lead or team member
+      const { data: teamMember } = await supabase
+        .from('bid_team_members')
+        .select('id')
+        .eq('project_id', proposal.project_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (proposal.lead_id !== userId && !teamMember) {
+        return {
+          success: false,
+          error: 'Unauthorized to upload documents to this proposal',
+          errorCode: 'UNAUTHORIZED',
+        };
+      }
+
+      // Upload file to Supabase Storage (Requirement 9.2)
+      const fileExt = metadata.fileName.split('.').pop();
+      const fileName = `${proposalId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('proposal-documents')
+        .upload(fileName, file, {
+          contentType: metadata.fileType,
+          upsert: false,
+        });
+
+      if (uploadError || !uploadData) {
+        console.error('Error uploading file to storage:', uploadError);
+        return {
+          success: false,
+          error: 'Failed to upload file to storage',
+          errorCode: 'UPLOAD_FAILED',
+        };
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('proposal-documents')
+        .getPublicUrl(fileName);
+
+      // Store document metadata in database (Requirement 9.2)
+      const { data: document, error: dbError } = await supabase
+        .from('documents')
+        .insert({
+          proposal_id: proposalId,
+          url: urlData.publicUrl,
+          doc_type: metadata.fileType,
+          file_name: metadata.fileName,
+          file_size: metadata.fileSize,
+          created_by: userId,
+          is_required: metadata.isRequired || false,
+        })
+        .select('id, proposal_id, url, doc_type, file_name, file_size, created_by, created_at, is_required')
+        .single();
+
+      if (dbError || !document) {
+        console.error('Error storing document metadata:', dbError);
+        
+        // Cleanup: Delete uploaded file
+        await supabase.storage
+          .from('proposal-documents')
+          .remove([fileName]);
+
+        return {
+          success: false,
+          error: 'Failed to store document metadata',
+          errorCode: 'UPLOAD_FAILED',
+        };
+      }
+
+      return {
+        success: true,
+        document: {
+          id: document.id,
+          proposalId: document.proposal_id,
+          url: document.url,
+          docType: document.doc_type,
+          fileName: document.file_name,
+          fileSize: document.file_size,
+          uploadedBy: document.created_by,
+          uploadedAt: document.created_at,
+          isRequired: document.is_required,
+        },
+      };
+    } catch (error) {
+      console.error('Unexpected error in uploadDocument:', error);
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error occurred',
-        }
+        errorCode: 'UNKNOWN',
+      };
+    }
+  }
+
+  /**
+   * Gets all documents for a proposal
+   * 
+   * Requirement 9.3: Display all uploaded files with metadata
+   * 
+   * @param proposalId - The proposal ID
+   * @returns GetDocumentsResult with documents array
+   */
+  static async getDocuments(proposalId: string): Promise<GetDocumentsResult> {
+    try {
+      const supabase = await createClient();
+
+      const { data: documents, error } = await supabase
+        .from('documents')
+        .select(`
+          id,
+          proposal_id,
+          url,
+          doc_type,
+          file_name,
+          file_size,
+          created_by,
+          created_at,
+          is_required
+        `)
+        .eq('proposal_id', proposalId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching documents:', error);
+        return {
+          success: false,
+          error: 'Failed to fetch documents',
+        };
+      }
+
+      return {
+        success: true,
+        documents: documents.map((doc) => ({
+          id: doc.id,
+          proposalId: doc.proposal_id,
+          url: doc.url,
+          docType: doc.doc_type,
+          fileName: doc.file_name,
+          fileSize: doc.file_size,
+          uploadedBy: doc.created_by,
+          uploadedAt: doc.created_at,
+          isRequired: doc.is_required,
+        })),
+      };
+    } catch (error) {
+      console.error('Unexpected error in getDocuments:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+      };
+    }
+  }
+
+  /**
+   * Deletes a document from a proposal
+   * 
+   * Requirement 9.4: Require confirmation and remove from storage
+   * 
+   * @param documentId - The document ID
+   * @param userId - The user deleting the document
+   * @returns DeleteDocumentResult
+   */
+  static async deleteDocument(
+    documentId: string,
+    userId: string
+  ): Promise<DeleteDocumentResult> {
+    try {
+      const supabase = await createClient();
+
+      // Get document details
+      const { data: document, error: docError } = await supabase
+        .from('documents')
+        .select(`
+          id,
+          proposal_id,
+          url,
+          proposals!inner (
+            id,
+            lead_id,
+            project_id
+          )
+        `)
+        .eq('id', documentId)
+        .single();
+
+      if (docError || !document) {
+        return {
+          success: false,
+          error: 'Document not found',
+          errorCode: 'DOCUMENT_NOT_FOUND',
+        };
+      }
+
+      // Check if user is lead or team member
+      const proposal = document.proposals as any;
+      const { data: teamMember } = await supabase
+        .from('bid_team_members')
+        .select('id')
+        .eq('project_id', proposal.project_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (proposal.lead_id !== userId && !teamMember) {
+        return {
+          success: false,
+          error: 'Unauthorized to delete this document',
+          errorCode: 'UNAUTHORIZED',
+        };
+      }
+
+      // Extract file path from URL
+      const url = new URL(document.url);
+      const pathParts = url.pathname.split('/');
+      const fileName = pathParts.slice(-2).join('/'); // Get last two parts (proposalId/filename)
+
+      // Delete from storage
+      const { error: storageError } = await supabase.storage
+        .from('proposal-documents')
+        .remove([fileName]);
+
+      if (storageError) {
+        console.error('Error deleting file from storage:', storageError);
+        // Continue with database deletion even if storage deletion fails
+      }
+
+      // Delete from database
+      const { error: deleteError } = await supabase
+        .from('documents')
+        .delete()
+        .eq('id', documentId);
+
+      if (deleteError) {
+        console.error('Error deleting document from database:', deleteError);
+        return {
+          success: false,
+          error: 'Failed to delete document',
+          errorCode: 'DELETE_FAILED',
+        };
+      }
+
+      return {
+        success: true,
+      };
+    } catch (error) {
+      console.error('Unexpected error in deleteDocument:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error occurred',
+        errorCode: 'UNKNOWN',
+      };
+    }
+  }
+
+  /**
+   * Checks if all required documents are uploaded for a proposal
+   * 
+   * Requirement 9.5: Track required documents and prevent submission without them
+   * 
+   * @param proposalId - The proposal ID
+   * @param requiredDocTypes - Array of required document types
+   * @returns Object with validation result and missing documents
+   */
+  static async validateRequiredDocuments(
+    proposalId: string,
+    requiredDocTypes: string[]
+  ): Promise<{
+    valid: boolean;
+    missingDocuments: string[];
+  }> {
+    try {
+      const supabase = await createClient();
+
+      // Get all documents for the proposal
+      const { data: documents, error } = await supabase
+        .from('documents')
+        .select('doc_type, is_required')
+        .eq('proposal_id', proposalId);
+
+      if (error) {
+        console.error('Error fetching documents for validation:', error);
+        return {
+          valid: false,
+          missingDocuments: requiredDocTypes,
+        };
+      }
+
+      // Check which required documents are missing
+      const uploadedTypes = new Set(documents.map((doc) => doc.doc_type));
+      const missingDocuments = requiredDocTypes.filter(
+        (type) => !uploadedTypes.has(type)
+      );
+
+      return {
+        valid: missingDocuments.length === 0,
+        missingDocuments,
+      };
+    } catch (error) {
+      console.error('Unexpected error in validateRequiredDocuments:', error);
+      return {
+        valid: false,
+        missingDocuments: requiredDocTypes,
+      };
+    }
+  }
+
+  /**
+   * Gets proposal document by ID
+   * 
+   * @param documentId - The document ID
+   * @returns Document data or null
+   */
+  static async getProposalDocument(documentId: string): Promise<ProposalDocument | null> {
+    try {
+      const supabase = await createClient();
+
+      const { data: document, error } = await supabase
+        .from('documents')
+        .select(`
+          id,
+          proposal_id,
+          url,
+          doc_type,
+          file_name,
+          file_size,
+          created_by,
+          created_at,
+          is_required
+        `)
+        .eq('id', documentId)
+        .single();
+
+      if (error || !document) {
+        console.error('Error fetching document:', error);
+        return null;
+      }
+
+      return {
+        id: document.id,
+        proposalId: document.proposal_id,
+        url: document.url,
+        docType: document.doc_type,
+        fileName: document.file_name,
+        fileSize: document.file_size,
+        uploadedBy: document.created_by,
+        uploadedAt: document.created_at,
+        isRequired: document.is_required,
+      };
+    } catch (error) {
+      console.error('Unexpected error in getProposalDocument:', error);
+      return null;
     }
   }
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Search, Briefcase, TrendingUp, MapPin, Filter } from "lucide-react"
+import { Search, Briefcase, TrendingUp, DollarSign } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -29,25 +29,38 @@ export function PublicMarketplace() {
     LIST_PROJECTS
   )
   const [searchQuery, setSearchQuery] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("all")
-  const [locationFilter, setLocationFilter] = useState("all")
+  const [budgetFilter, setBudgetFilter] = useState("all")
+  const [appliedSearchQuery, setAppliedSearchQuery] = useState("")
+  const [appliedBudgetFilter, setAppliedBudgetFilter] = useState("all")
   const [filteredProjects, setFilteredProjects] = useState<Project[]>([])
   const [recommendedProjects, setRecommendedProjects] = useState<Project[]>([])
 
   useEffect(() => {
     if (data?.projects) {
-      const openProjects = data.projects.filter((p: Project) => 
-        p.status?.toLowerCase() === "open" || p.status === "OPEN"
-      )
+      const now = new Date()
+      
+      // Filter open projects and exclude overdue ones
+      const openProjects = data.projects.filter((p: Project) => {
+        const isOpen = p.status?.toLowerCase() === "open" || p.status === "OPEN"
+        
+        // Check if project is overdue
+        if (p.deadline) {
+          const deadlineDate = new Date(p.deadline)
+          const isOverdue = deadlineDate < now
+          return isOpen && !isOverdue
+        }
+        
+        return isOpen
+      })
       
       // Set recommended projects (first 3)
       setRecommendedProjects(openProjects.slice(0, 3))
       
-      // Apply filters
+      // Apply filters using applied values (only updated on button click)
       let filtered = openProjects
       
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase()
+      if (appliedSearchQuery.trim()) {
+        const query = appliedSearchQuery.toLowerCase()
         filtered = filtered.filter(
           (p: Project) =>
             p.title.toLowerCase().includes(query) ||
@@ -55,20 +68,46 @@ export function PublicMarketplace() {
         )
       }
       
+      // Budget filter
+      if (appliedBudgetFilter !== "all") {
+        filtered = filtered.filter((p: Project) => {
+          if (!p.budget) return appliedBudgetFilter === "not-specified"
+          
+          const budget = p.budget
+          switch (appliedBudgetFilter) {
+            case "under-1k":
+              return budget < 1000
+            case "1k-5k":
+              return budget >= 1000 && budget < 5000
+            case "5k-10k":
+              return budget >= 5000 && budget < 10000
+            case "10k-20k":
+              return budget >= 10000 && budget < 20000
+            case "20k-plus":
+              return budget >= 20000
+            default:
+              return true
+          }
+        })
+      }
+      
       setFilteredProjects(filtered)
     }
-  }, [data, searchQuery, categoryFilter, locationFilter])
+  }, [data, appliedSearchQuery, appliedBudgetFilter])
 
   const handleProjectClick = (projectId: string) => {
     if (!user) {
-      router.push(`/login?redirect=/projects/${projectId}`)
+      router.push(`/login?redirect=/client-projects/${projectId}`)
     } else {
-      router.push(`/projects/${projectId}`)
+      // For now, all users view projects through client-projects route
+      router.push(`/client-projects/${projectId}`)
     }
   }
 
   const handleSearch = () => {
-    // Search is already reactive via useEffect
+    // Apply the current filter values
+    setAppliedSearchQuery(searchQuery)
+    setAppliedBudgetFilter(budgetFilter)
   }
 
   return (
@@ -104,21 +143,24 @@ export function PublicMarketplace() {
                   </div>
                 </div>
 
-                {/* Where - Location */}
+                {/* Budget Filter */}
                 <div className="md:col-span-4">
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">
-                    Where
+                    Budget
                   </label>
-                  <Select value={locationFilter} onValueChange={setLocationFilter}>
+                  <Select value={budgetFilter} onValueChange={setBudgetFilter}>
                     <SelectTrigger className="h-11 border-gray-300 dark:border-zinc-700 dark:bg-zinc-800">
-                      <MapPin className="h-4 w-4 mr-2 text-gray-400" />
-                      <SelectValue placeholder="All locations" />
+                      <DollarSign className="h-4 w-4 mr-2 text-gray-400" />
+                      <SelectValue placeholder="All budgets" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All locations</SelectItem>
-                      <SelectItem value="kuala-lumpur">Kuala Lumpur</SelectItem>
-                      <SelectItem value="penang">Penang</SelectItem>
-                      <SelectItem value="johor">Johor</SelectItem>
+                      <SelectItem value="all">All budgets</SelectItem>
+                      <SelectItem value="under-1k">Under RM 1,000</SelectItem>
+                      <SelectItem value="1k-5k">RM 1,000 - RM 5,000</SelectItem>
+                      <SelectItem value="5k-10k">RM 5,000 - RM 10,000</SelectItem>
+                      <SelectItem value="10k-20k">RM 10,000 - RM 20,000</SelectItem>
+                      <SelectItem value="20k-plus">RM 20,000+</SelectItem>
+                      <SelectItem value="not-specified">Not specified</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -132,14 +174,6 @@ export function PublicMarketplace() {
                     SEEK
                   </Button>
                 </div>
-              </div>
-
-              {/* More Options Link */}
-              <div className="mt-3 text-right">
-                <button className="text-sm text-yellow-400 hover:text-yellow-500 font-medium inline-flex items-center gap-1">
-                  <Filter className="h-3.5 w-3.5" />
-                  More options
-                </button>
               </div>
             </div>
 
@@ -173,14 +207,14 @@ export function PublicMarketplace() {
           {/* Main Content - Projects */}
           <div className="lg:col-span-3">
             {/* Recommended Section */}
-            {!searchQuery && recommendedProjects.length > 0 && (
+            {!appliedSearchQuery && recommendedProjects.length > 0 && (
               <div className="mb-10">
                 <div className="flex items-center gap-2 mb-4">
                   <TrendingUp className="h-5 w-5 text-yellow-400" />
                   <h2 className="text-xl font-semibold text-black dark:text-white">Recommended</h2>
                   <Badge className="ml-2 bg-yellow-400 text-black hover:bg-yellow-500">Hot</Badge>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                   {recommendedProjects.map((project) => (
                     <PublicProjectCard
                       key={project.id}
@@ -197,7 +231,7 @@ export function PublicMarketplace() {
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-xl font-semibold text-black dark:text-white">
-                    {searchQuery ? "Search Results" : "All Projects"}
+                    {appliedSearchQuery ? "Search Results" : "All Projects"}
                   </h2>
                   <p className="text-sm text-muted-foreground mt-1">
                     {isLoading ? "Loading..." : `${filteredProjects.length} projects found`}
@@ -212,7 +246,7 @@ export function PublicMarketplace() {
               )}
 
               {isLoading ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <PublicProjectCardSkeleton key={i} />
                   ))}
@@ -222,11 +256,11 @@ export function PublicMarketplace() {
                   <Briefcase className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                   <h3 className="text-lg font-medium mb-2">No projects available</h3>
                   <p className="text-muted-foreground">
-                    {searchQuery ? "Try adjusting your search criteria" : "Check back later for new projects"}
+                    {appliedSearchQuery ? "Try adjusting your search criteria" : "Check back later for new projects"}
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                   {filteredProjects.map((project) => (
                     <PublicProjectCard
                       key={project.id}

@@ -54,10 +54,12 @@ const GET_LEAD_PROPOSALS = gql`
     leadProposals(leadId: $leadId) {
       id
       title
+      content
       status
       budgetEstimate
       timelineEstimate
       submissionDate
+      additionalInfo
       project {
         id
         title
@@ -78,43 +80,7 @@ const GET_LEAD_PROPOSALS = gql`
   }
 `
 
-const UPDATE_PROPOSAL = gql`
-  mutation UpdateProposal(
-    $proposalId: ID!
-    $title: String
-    $content: String
-    $budgetEstimate: Float
-    $timelineEstimate: String
-    $additionalInfo: JSON
-  ) {
-    updateProposal(
-      proposalId: $proposalId
-      title: $title
-      content: $content
-      budgetEstimate: $budgetEstimate
-      timelineEstimate: $timelineEstimate
-      additionalInfo: $additionalInfo
-    ) {
-      id
-      title
-      content
-      status
-      budgetEstimate
-      timelineEstimate
-      additionalInfo
-    }
-  }
-`
-
-const SUBMIT_PROPOSAL = gql`
-  mutation SubmitProposal($proposalId: ID!) {
-    submitProposal(proposalId: $proposalId) {
-      id
-      status
-      submissionDate
-    }
-  }
-`
+import { UPDATE_PROPOSAL, SUBMIT_PROPOSAL } from "@/lib/graphql/mutations"
 
 const statusColors: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
   draft: {
@@ -169,6 +135,12 @@ export function WorkspaceContent() {
 
   const proposals = shouldFetch ? (data?.leadProposals || []) : []
 
+  // Get selected proposal
+  const selectedProposal = React.useMemo(() => {
+    if (!selectedProposalId) return null
+    return proposals.find((p) => p.id === selectedProposalId) || null
+  }, [selectedProposalId, proposals])
+
   // Debug logging
   React.useEffect(() => {
     console.log('Workspace Debug:', {
@@ -178,15 +150,15 @@ export function WorkspaceContent() {
       isLoading,
       error: error?.message,
       proposalsCount: proposals.length,
-      proposals: proposals.map(p => ({ id: p.id, title: p.title, status: p.status }))
+      proposals: proposals.map(p => ({ id: p.id, title: p.title, status: p.status })),
+      selectedProposal: selectedProposal ? {
+        id: selectedProposal.id,
+        title: selectedProposal.title,
+        status: selectedProposal.status,
+        isDraft: selectedProposal.status?.toLowerCase() === 'draft'
+      } : null
     })
-  }, [user, shouldFetch, isLoading, error, proposals])
-
-  // Get selected proposal
-  const selectedProposal = React.useMemo(() => {
-    if (!selectedProposalId) return null
-    return proposals.find((p) => p.id === selectedProposalId) || null
-  }, [selectedProposalId, proposals])
+  }, [user, shouldFetch, isLoading, error, proposals, selectedProposal])
 
   // Fetch proposal scores for the selected proposal
   const { data: scoresData, isLoading: scoresLoading, refetch: refetchScores } = useGraphQLQuery<{ proposalScores: any[] }>(
@@ -294,7 +266,22 @@ export function WorkspaceContent() {
         body: JSON.stringify({
           query: SUBMIT_PROPOSAL,
           variables: {
-            proposalId: selectedProposal.id,
+            input: {
+              proposalId: selectedProposal.id,
+              projectId: selectedProposal.project.id,
+              title: data.title,
+              budgetEstimate: data.budgetEstimate || 0,
+              timelineEstimate: data.timelineEstimate,
+              executiveSummary: data.content,
+              additionalInfo: Object.entries(data.additionalInfo || {}).map(([fieldId, fieldValue]) => {
+                const req = selectedProposal.project.additionalInfoRequirements?.find(r => r.id === fieldId)
+                return {
+                  fieldId,
+                  fieldName: req?.fieldName || fieldId,
+                  fieldValue
+                }
+              })
+            }
           },
         }),
       })
@@ -303,6 +290,10 @@ export function WorkspaceContent() {
 
       if (result.errors) {
         throw new Error(result.errors[0]?.message || "Failed to submit proposal")
+      }
+
+      if (!result.data?.submitProposal?.success) {
+        throw new Error(result.data?.submitProposal?.errors?.join(', ') || "Failed to submit proposal")
       }
 
       alert("Proposal submitted successfully!")
@@ -464,7 +455,7 @@ export function WorkspaceContent() {
                         <ExternalLink className="h-4 w-4 mr-2" />
                         View Project
                       </Button>
-                      {selectedProposal.status === "draft" && (
+                      {selectedProposal.status?.toLowerCase() === "draft" && (
                         <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "view" | "edit")}>
                           <TabsList className="bg-yellow-400/10">
                             <TabsTrigger value="edit" className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black">
@@ -483,7 +474,7 @@ export function WorkspaceContent() {
                 </Card>
 
                 {/* Edit Mode - Proposal Editor */}
-                {viewMode === "edit" && selectedProposal.status === "draft" && (
+                {viewMode === "edit" && selectedProposal.status?.toLowerCase() === "draft" && (
                   <ProposalEditor
                     proposalId={selectedProposal.id}
                     projectId={selectedProposal.project.id}
@@ -501,7 +492,7 @@ export function WorkspaceContent() {
                 )}
 
                 {/* View Mode - Read-only Display */}
-                {(viewMode === "view" || selectedProposal.status !== "draft") && (
+                {(viewMode === "view" || selectedProposal.status?.toLowerCase() !== "draft") && (
                   <div className="space-y-6">
                     {/* Proposal Content */}
                     <Card className="p-6 border-yellow-400/20">
@@ -556,7 +547,7 @@ export function WorkspaceContent() {
                     </Card>
 
                     {/* Scoring Section - Only show for submitted proposals */}
-                    {selectedProposal.status !== 'draft' && (
+                    {selectedProposal.status?.toLowerCase() !== 'draft' && (
                       <>
                         {scoresLoading ? (
                           <Card className="p-6 border-yellow-400/20">

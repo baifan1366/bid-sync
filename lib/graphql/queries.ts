@@ -763,3 +763,351 @@ export const GET_PROPOSAL_SCORE_HISTORY = gql`
     }
   }
 `
+
+// ============================================================================
+// Proposal Archival Queries
+// ============================================================================
+
+export const GET_PROPOSALS = gql`
+  query GetProposals(
+    $includeArchived: Boolean
+    $archivedOnly: Boolean
+    $projectId: ID
+    $status: ProposalStatus
+  ) {
+    getProposals(
+      includeArchived: $includeArchived
+      archivedOnly: $archivedOnly
+      projectId: $projectId
+      status: $status
+    ) {
+      success
+      data {
+        id
+        title
+        projectId
+        projectTitle
+        status
+        leadId
+        leadName
+        submittedAt
+        archivedAt
+        archivedBy
+        createdAt
+        updatedAt
+      }
+      error
+    }
+  }
+`
+
+export const IS_PROPOSAL_ARCHIVED = gql`
+  query IsProposalArchived($proposalId: ID!) {
+    isProposalArchived(proposalId: $proposalId) {
+      success
+      data {
+        isArchived
+        archivedAt
+        archivedBy
+        archivedByName
+      }
+      error
+    }
+  }
+`
+
+export const GET_ARCHIVED_COUNT = gql`
+  query GetArchivedCount {
+    getArchivedCount {
+      success
+      count
+      error
+    }
+  }
+`
+
+// ============================================================================
+// Multi-Proposal Management Queries
+// ============================================================================
+
+export const GET_PROPOSAL_DASHBOARD = gql`
+  query GetProposalDashboard(
+    $filterStatus: ProposalStatus
+    $filterDeadlineBefore: String
+    $filterDeadlineAfter: String
+    $filterProjectId: ID
+    $sortBy: String
+    $sortOrder: String
+  ) {
+    getProposalDashboard(
+      filterStatus: $filterStatus
+      filterDeadlineBefore: $filterDeadlineBefore
+      filterDeadlineAfter: $filterDeadlineAfter
+      filterProjectId: $filterProjectId
+      sortBy: $sortBy
+      sortOrder: $sortOrder
+    ) {
+      success
+      data {
+        id
+        projectId
+        projectName
+        projectDeadline
+        status
+        completionPercentage
+        teamSize
+        unreadMessages
+        lastActivity
+        createdAt
+        updatedAt
+      }
+      error
+    }
+  }
+`
+
+export const GET_WORKSPACE_STATE = gql`
+  query GetWorkspaceState($proposalId: ID!) {
+    getWorkspaceState(proposalId: $proposalId) {
+      success
+      data {
+        proposalId
+        state
+        savedAt
+      }
+      error
+    }
+  }
+`
+
+export const GET_AGGREGATE_STATISTICS = gql`
+  query GetAggregateStatistics {
+    getAggregateStatistics {
+      success
+      data {
+        totalProposals
+        activeProposals
+        draftProposals
+        submittedProposals
+        approvedProposals
+        rejectedProposals
+        archivedProposals
+        averageCompletionRate
+        upcomingDeadlines
+        overdueProposals
+        totalTeamMembers
+        averageTeamSize
+      }
+      error
+    }
+  }
+`
+
+// ============================================================================
+// Bidding Leader Management Queries
+// ============================================================================
+
+export const GET_OPEN_PROJECTS = gql`
+  query GetOpenProjects($filter: ProjectFilterInput) {
+    getOpenProjects(filter: $filter) {
+      id
+      clientId
+      title
+      description
+      status
+      budget
+      deadline
+      additionalInfoRequirements {
+        id
+        fieldName
+        fieldType
+        required
+        helpText
+        options
+        order
+      }
+      createdAt
+      updatedAt
+    }
+  }
+`
+
+export const SEARCH_PROJECTS = gql`
+  query SearchProjects($query: String!, $filter: ProjectFilterInput) {
+    searchProjects(query: $query, filter: $filter) {
+      id
+      clientId
+      title
+      description
+      status
+      budget
+      deadline
+      additionalInfoRequirements {
+        id
+        fieldName
+        fieldType
+        required
+        helpText
+        options
+        order
+      }
+      createdAt
+      updatedAt
+    }
+  }
+`
+
+export const GET_PROJECT_DETAIL = gql`
+  query GetProjectDetail($projectId: ID!) {
+    getProjectDetail(projectId: $projectId) {
+      id
+      clientId
+      client {
+        id
+        email
+        fullName
+      }
+      title
+      description
+      status
+      budget
+      deadline
+      additionalInfoRequirements {
+        id
+        fieldName
+        fieldType
+        required
+        helpText
+        options
+        order
+      }
+      createdAt
+      updatedAt
+    }
+  }
+`
+
+export const GET_BID_PERFORMANCE = gql`
+  query GetBidPerformance($leadId: ID!) {
+    getBidPerformance(leadId: $leadId) {
+      totalProposals
+      submitted
+      accepted
+      rejected
+      winRate
+      statusBreakdown {
+        draft
+        submitted
+        reviewing
+        approved
+        rejected
+      }
+      averageTeamSize
+      averageSectionsCount
+      averageTimeToSubmit
+    }
+  }
+`
+
+export const GET_TEAM_METRICS = gql`
+  query GetTeamMetrics($projectId: ID!) {
+    getTeamMetrics(projectId: $projectId) {
+      totalMembers
+      activeMembers
+      averageContribution
+      topContributors {
+        userId
+        userName
+        email
+        sectionsCompleted
+        sectionsAssigned
+        completionRate
+      }
+    }
+  }
+`
+
+export const GET_TEAM_MEMBERS = gql`
+  query GetTeamMembers($projectId: ID) {
+    getTeamMembers(projectId: $projectId) {
+      id
+      projectId
+      userId
+      user {
+        id
+        email
+        fullName
+      }
+      role
+      joinedAt
+      assignedSections {
+        id
+        title
+        status
+        deadline
+      }
+      contributionStats {
+        sectionsAssigned
+        sectionsCompleted
+        lastActivity
+      }
+    }
+  }
+`
+
+export const GET_ALL_PROPOSAL_TEAM_MEMBERS = gql`
+  query GetAllProposalTeamMembers {
+    getAllProposalTeamMembers {
+      proposalId
+      projectId
+      projectTitle
+      proposalStatus
+      teamMembers {
+        userId
+        user {
+          id
+          email
+          fullName
+          avatarUrl
+        }
+        role
+        joinedAt
+      }
+    }
+  }
+`
+
+export const GET_ACTIVE_INVITATIONS = gql`
+  query GetActiveInvitations($projectId: ID!) {
+    getActiveInvitations(projectId: $projectId) {
+      id
+      projectId
+      createdBy
+      code
+      token
+      expiresAt
+      usedBy
+      usedAt
+      isMultiUse
+      createdAt
+    }
+  }
+`
+
+export const VALIDATE_INVITATION = gql`
+  query ValidateInvitation($codeOrToken: String!) {
+    validateInvitation(codeOrToken: $codeOrToken) {
+      valid
+      invitation {
+        id
+        projectId
+        code
+        token
+        expiresAt
+        isMultiUse
+        usedAt
+      }
+      error
+    }
+  }
+`

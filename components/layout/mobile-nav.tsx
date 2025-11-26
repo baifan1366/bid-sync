@@ -3,7 +3,7 @@
 import { memo } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, Folder, Briefcase, FileText, Shield } from "lucide-react"
+import { Home, Folder, Briefcase, FileText, Shield, TrendingUp, User, Users, ClipboardList } from "lucide-react"
 import {
   Sheet,
   SheetContent,
@@ -26,15 +26,15 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
   client: [
     { 
       label: "Projects", 
-      href: "/projects", 
+      href: "/client-projects", 
       icon: Folder,
-      matchPaths: ["/projects"]
+      matchPaths: ["/client-projects"]
     },
     { 
-      label: "Documents", 
-      href: "/documents", 
-      icon: FileText,
-      matchPaths: ["/documents", "/editor"]
+      label: "Profile", 
+      href: "/profile", 
+      icon: User,
+      matchPaths: ["/profile"]
     },
   ],
   bidding_lead: [
@@ -45,6 +45,30 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       matchPaths: ["/lead-dashboard"]
     },
     { 
+      label: "Projects", 
+      href: "/lead-projects", 
+      icon: Folder,
+      matchPaths: ["/lead-projects"]
+    },
+    { 
+      label: "Proposals", 
+      href: "/lead-proposals", 
+      icon: ClipboardList,
+      matchPaths: ["/lead-proposals"]
+    },
+    { 
+      label: "Team", 
+      href: "/team", 
+      icon: Users,
+      matchPaths: ["/team"]
+    },
+    { 
+      label: "Performance", 
+      href: "/performance", 
+      icon: TrendingUp,
+      matchPaths: ["/performance"]
+    },
+    { 
       label: "Workspace", 
       href: "/workspace", 
       icon: Briefcase,
@@ -55,10 +79,22 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       href: "/documents", 
       icon: FileText,
       matchPaths: ["/documents", "/editor"]
+    },
+    { 
+      label: "Profile", 
+      href: "/profile", 
+      icon: User,
+      matchPaths: ["/profile"]
     },
   ],
   bidding_member: [
     { 
+      label: "Dashboard", 
+      href: "/member-dashboard", 
+      icon: Home,
+      matchPaths: ["/member-dashboard"]
+    },
+    { 
       label: "Workspace", 
       href: "/workspace", 
       icon: Briefcase,
@@ -70,25 +106,61 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       icon: FileText,
       matchPaths: ["/documents", "/editor"]
     },
+    { 
+      label: "Profile", 
+      href: "/profile", 
+      icon: User,
+      matchPaths: ["/profile"]
+    },
   ],
   admin: [
     { 
-      label: "Admin Dashboard", 
+      label: "Dashboard", 
       href: "/admin-dashboard", 
       icon: Shield,
       matchPaths: ["/admin-dashboard"]
     },
     { 
-      label: "Projects", 
-      href: "/projects", 
-      icon: Folder,
-      matchPaths: ["/projects"]
+      label: "Overview", 
+      href: "/overview", 
+      icon: Home,
+      matchPaths: ["/overview"]
     },
     { 
-      label: "Documents", 
-      href: "/documents", 
+      label: "Analytics", 
+      href: "/analytics", 
+      icon: TrendingUp,
+      matchPaths: ["/analytics"]
+    },
+    { 
+      label: "Projects", 
+      href: "/admin-projects", 
+      icon: Folder,
+      matchPaths: ["/admin-projects"]
+    },
+    { 
+      label: "Proposals", 
+      href: "/admin-proposals", 
       icon: FileText,
-      matchPaths: ["/documents", "/editor"]
+      matchPaths: ["/admin-proposals"]
+    },
+    { 
+      label: "Verifications", 
+      href: "/verifications", 
+      icon: Shield,
+      matchPaths: ["/verifications"]
+    },
+    { 
+      label: "Templates", 
+      href: "/templates", 
+      icon: FileText,
+      matchPaths: ["/templates"]
+    },
+    { 
+      label: "Settings", 
+      href: "/admin-settings", 
+      icon: Briefcase,
+      matchPaths: ["/admin-settings"]
     },
   ],
 }

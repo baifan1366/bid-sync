@@ -5,7 +5,6 @@ import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -28,6 +27,9 @@ import {
   AlertCircle,
 } from "lucide-react"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
+import { TipTapEditor } from "@/components/editor/tiptap-editor"
+import { Textarea } from "@/components/ui/textarea"
+import type { JSONContent } from "@tiptap/core"
 
 interface ProposalEditorProps {
   proposalId: string
@@ -62,6 +64,9 @@ export function ProposalEditor({
 }: ProposalEditorProps) {
   const [isSaving, setIsSaving] = React.useState(false)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  const [editorContent, setEditorContent] = React.useState<JSONContent | string>(
+    initialData?.content || ""
+  )
   const [formData, setFormData] = React.useState<ProposalFormData>({
     title: initialData?.title || "",
     content: initialData?.content || "",
@@ -69,6 +74,12 @@ export function ProposalEditor({
     timelineEstimate: initialData?.timelineEstimate || "",
     additionalInfo: initialData?.additionalInfo || {},
   })
+
+  const handleEditorUpdate = (content: JSONContent) => {
+    // Convert JSONContent to HTML string for storage
+    const htmlContent = JSON.stringify(content)
+    setFormData((prev) => ({ ...prev, content: htmlContent }))
+  }
 
   const sortedRequirements = React.useMemo(
     () => [...requirements].sort((a, b) => a.order - b.order),
@@ -235,14 +246,15 @@ export function ProposalEditor({
 
             <div>
               <Label htmlFor="content">Proposal Content *</Label>
-              <Textarea
-                id="content"
-                value={formData.content}
-                onChange={(e) => updateField("content", e.target.value)}
-                placeholder="Describe your approach, methodology, and why you're the best fit for this project..."
-                rows={8}
-                className="border-yellow-400/20 focus:border-yellow-400"
-              />
+              <div className="border border-yellow-400/20 rounded-lg overflow-hidden focus-within:border-yellow-400">
+                <TipTapEditor
+                  content={editorContent}
+                  placeholder="Describe your approach, methodology, and why you're the best fit for this project..."
+                  onUpdate={handleEditorUpdate}
+                  minHeight="300px"
+                  className="bg-white dark:bg-black"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

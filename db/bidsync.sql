@@ -6,7 +6,7 @@
 -- 1. Create ENUM Types
 -- ============================================================
 CREATE TYPE user_role AS ENUM ('client', 'bidding_member', 'bidding_lead', 'admin');
-CREATE TYPE proposal_status AS ENUM ('draft', 'submitted', 'reviewing', 'approved', 'rejected');
+CREATE TYPE proposal_status AS ENUM ('draft', 'submitted', 'reviewing', 'approved', 'rejected', 'archived');
 CREATE TYPE project_status AS ENUM ('pending_review', 'open', 'closed', 'awarded');
 CREATE TYPE comment_visibility AS ENUM ('internal', 'public');
 
@@ -73,7 +73,7 @@ FROM auth.users WHERE email = 'client@example.com' LIMIT 1;
 
 
 -- ============================================================
--- 4. BID TEAMS
+-- 4. BID TEAMS (DEPRECATED - Use proposal_team_members instead)
 -- ============================================================
 CREATE TABLE public.bid_team_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -86,7 +86,9 @@ CREATE TABLE public.bid_team_members (
 CREATE INDEX idx_bid_team_project ON public.bid_team_members(project_id);
 CREATE INDEX idx_bid_team_user ON public.bid_team_members(user_id);
 
--- Seed team (lead + member)
+COMMENT ON TABLE public.bid_team_members IS 'DEPRECATED: Use proposal_team_members instead. Kept for legacy support.';
+
+-- Seed team (lead + member) - for backward compatibility
 INSERT INTO public.bid_team_members (project_id, user_id, role)
 SELECT p.id, u.id, 'lead'
 FROM projects p, auth.users u
@@ -101,6 +103,31 @@ LIMIT 1;
 
 
 -- ============================================================
+-- 4B. PROPOSAL TEAM MEMBERS (NEW - Correct Architecture)
+-- ============================================================
+CREATE TABLE public.proposal_team_members (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('lead', 'member')),
+    joined_at TIMESTAMPTZ DEFAULT now(),
+    assigned_sections TEXT[] DEFAULT '{}',
+    contribution_stats JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (proposal_id, user_id)
+);
+
+CREATE INDEX idx_proposal_team_proposal ON public.proposal_team_members(proposal_id);
+CREATE INDEX idx_proposal_team_user ON public.proposal_team_members(user_id);
+CREATE INDEX idx_proposal_team_role ON public.proposal_team_members(proposal_id, role);
+
+COMMENT ON TABLE public.proposal_team_members IS 'Team members for each proposal (not project-level)';
+COMMENT ON COLUMN public.proposal_team_members.proposal_id IS 'The proposal this team member belongs to';
+COMMENT ON COLUMN public.proposal_team_members.assigned_sections IS 'Sections assigned to this team member';
+COMMENT ON COLUMN public.proposal_team_members.contribution_stats IS 'Statistics about member contributions';
+
+
+-- ============================================================
 -- 5. PROPOSALS
 -- ============================================================
 CREATE TABLE public.proposals (
@@ -109,12 +136,20 @@ CREATE TABLE public.proposals (
     lead_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     status proposal_status NOT NULL DEFAULT 'draft',
     submitted_at TIMESTAMPTZ,
+    archived_at TIMESTAMPTZ,
+    archived_by UUID REFERENCES auth.users(id),
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
 CREATE INDEX idx_proposals_project ON public.proposals(project_id);
 CREATE INDEX idx_proposals_lead ON public.proposals(lead_id);
+CREATE INDEX IF NOT EXISTS idx_proposals_archived_at 
+ON public.proposals(archived_at) 
+WHERE archived_at IS NOT NULL;
+
+COMMENT ON COLUMN public.proposals.archived_at IS 'Timestamp when the proposal was archived';
+COMMENT ON COLUMN public.proposals.archived_by IS 'User who archived the proposal';
 
 -- Seed proposal shell
 INSERT INTO public.proposals (project_id, lead_id)
@@ -132,12 +167,28 @@ CREATE TABLE public.proposal_versions (
     proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
     version_number INT NOT NULL,
     content JSONB NOT NULL,
+    sections_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    documents_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    change_summary TEXT,
     created_by UUID NOT NULL REFERENCES auth.users(id),
     created_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT proposal_versions_version_positive CHECK (version_number > 0),
     UNIQUE (proposal_id, version_number)
 );
 
 CREATE INDEX idx_versions_proposal ON public.proposal_versions(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_versions_proposal_version 
+    ON public.proposal_versions(proposal_id, version_number DESC);
+CREATE INDEX IF NOT EXISTS idx_proposal_versions_created 
+    ON public.proposal_versions(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_proposal_versions_created_by 
+    ON public.proposal_versions(created_by);
+
+COMMENT ON TABLE public.proposal_versions IS 'Stores complete snapshots of proposals for version control and history tracking';
+COMMENT ON COLUMN public.proposal_versions.content IS 'Main proposal content snapshot';
+COMMENT ON COLUMN public.proposal_versions.sections_snapshot IS 'Complete snapshot of all sections at version creation time';
+COMMENT ON COLUMN public.proposal_versions.documents_snapshot IS 'Complete snapshot of all documents at version creation time';
+COMMENT ON COLUMN public.proposal_versions.change_summary IS 'Human-readable summary of changes in this version';
 
 -- Seed Version 1
 INSERT INTO public.proposal_versions (proposal_id, version_number, content, created_by)
@@ -313,7 +364,8 @@ FOR INSERT WITH CHECK (auth.uid() = user_id);
 -- Create team_invitations table for managing team member invitations
 CREATE TABLE public.team_invitations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE,  -- DEPRECATED: for legacy support
+    proposal_id UUID REFERENCES public.proposals(id) ON DELETE CASCADE,  -- NEW: correct approach
     created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
     code VARCHAR(8) NOT NULL UNIQUE,  -- 8-digit code
     token UUID DEFAULT gen_random_uuid() UNIQUE,  -- for shareable links
@@ -321,14 +373,27 @@ CREATE TABLE public.team_invitations (
     used_by UUID REFERENCES auth.users(id),
     used_at TIMESTAMPTZ,
     is_multi_use BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ DEFAULT now()
+    created_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT team_invitations_code_format CHECK (code ~ '^\d{8}$'),
+    CONSTRAINT team_invitations_expires_future CHECK (expires_at > created_at),
+    CONSTRAINT team_invitations_has_project_or_proposal CHECK (project_id IS NOT NULL OR proposal_id IS NOT NULL)
 );
 
 -- Create indexes for performance
 CREATE INDEX idx_team_invitations_code ON public.team_invitations(code);
 CREATE INDEX idx_team_invitations_token ON public.team_invitations(token);
 CREATE INDEX idx_team_invitations_project ON public.team_invitations(project_id);
+CREATE INDEX idx_team_invitations_proposal ON public.team_invitations(proposal_id);
 CREATE INDEX idx_team_invitations_created_by ON public.team_invitations(created_by);
+CREATE INDEX IF NOT EXISTS idx_team_invitations_expires 
+    ON public.team_invitations(expires_at) 
+    WHERE used_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_team_invitations_project_active 
+    ON public.team_invitations(project_id, expires_at) 
+    WHERE used_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_team_invitations_proposal_active 
+    ON public.team_invitations(proposal_id, expires_at) 
+    WHERE used_at IS NULL;
 
 -- Enable RLS
 ALTER TABLE public.team_invitations ENABLE ROW LEVEL SECURITY;
@@ -337,28 +402,58 @@ ALTER TABLE public.team_invitations ENABLE ROW LEVEL SECURITY;
 -- RLS POLICIES FOR TEAM INVITATIONS
 -- ============================================================
 
--- Anyone can read invitations to validate them (will check expiry in app logic)
-CREATE POLICY "invitations_read" ON public.team_invitations
-FOR SELECT USING (true);
-
--- Only bidding leads can create invitations for their projects
-CREATE POLICY "invitations_create" ON public.team_invitations
-FOR INSERT WITH CHECK (
+-- Bidding leads can view invitations for their projects
+CREATE POLICY "team_invitations_lead_select" ON public.team_invitations
+FOR SELECT
+USING (
     EXISTS (
-        SELECT 1 FROM bid_team_members m
-        WHERE m.project_id = team_invitations.project_id
-        AND m.user_id = auth.uid()
-        AND m.role = 'lead'
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = team_invitations.project_id
+        AND btm.user_id = auth.uid()
+        AND btm.role = 'lead'
     )
 );
 
--- Only creators can update their invitations (for revoking)
-CREATE POLICY "invitations_update" ON public.team_invitations
-FOR UPDATE USING (auth.uid() = created_by);
+-- Bidding leads can create invitations for their projects
+CREATE POLICY "team_invitations_lead_insert" ON public.team_invitations
+FOR INSERT
+WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = team_invitations.project_id
+        AND btm.user_id = auth.uid()
+        AND btm.role = 'lead'
+    )
+);
 
--- Only creators can delete their invitations
-CREATE POLICY "invitations_delete" ON public.team_invitations
-FOR DELETE USING (auth.uid() = created_by);
+-- Anyone can view invitations by code or token (for validation)
+CREATE POLICY "team_invitations_public_select_by_code_token" ON public.team_invitations
+FOR SELECT
+USING (true);
+
+-- System can update invitations (for marking as used)
+CREATE POLICY "team_invitations_system_update" ON public.team_invitations
+FOR UPDATE
+USING (true)
+WITH CHECK (true);
+
+-- Admins can view all invitations
+CREATE POLICY "team_invitations_admin_select" ON public.team_invitations
+FOR SELECT
+USING (
+    EXISTS (
+        SELECT 1 FROM auth.users
+        WHERE id = auth.uid() 
+        AND raw_user_meta_data->>'role' = 'admin'
+    )
+);
+
+COMMENT ON TABLE public.team_invitations IS 'Stores team invitations with codes and tokens for bidding team member joining';
+COMMENT ON COLUMN public.team_invitations.code IS '8-digit numeric code for easy sharing';
+COMMENT ON COLUMN public.team_invitations.token IS 'UUID token for invitation links';
+COMMENT ON COLUMN public.team_invitations.is_multi_use IS 'Whether invitation can be used multiple times';
+COMMENT ON COLUMN public.team_invitations.used_by IS 'User who used the invitation (for single-use tracking)';
+COMMENT ON COLUMN public.team_invitations.used_at IS 'Timestamp when invitation was used (for single-use tracking)';
 
 
 -- ============================================================
@@ -578,9 +673,11 @@ ADD COLUMN IF NOT EXISTS additional_info_requirements JSONB DEFAULT '[]'::jsonb;
 -- Add columns to proposals table
 ALTER TABLE public.proposals 
 ADD COLUMN IF NOT EXISTS title TEXT,
+ADD COLUMN IF NOT EXISTS content TEXT,
 ADD COLUMN IF NOT EXISTS budget_estimate NUMERIC,
 ADD COLUMN IF NOT EXISTS timeline_estimate TEXT,
-ADD COLUMN IF NOT EXISTS executive_summary TEXT;
+ADD COLUMN IF NOT EXISTS executive_summary TEXT,
+ADD COLUMN IF NOT EXISTS additional_info JSONB DEFAULT '{}'::jsonb;
 
 -- Proposal Additional Info Table
 CREATE TABLE IF NOT EXISTS public.proposal_additional_info (
@@ -1413,5 +1510,939 @@ $$;
 GRANT EXECUTE ON FUNCTION check_user_exists(TEXT) TO authenticated, anon;
 
 -- ============================================================
+-- MIGRATION 015: BIDDING LEADER MANAGEMENT
+-- ============================================================
+
+-- Proposal Performance Table
+CREATE TABLE IF NOT EXISTS public.proposal_performance (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    lead_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    time_to_submit INTERVAL,
+    team_size INT,
+    sections_count INT,
+    documents_count INT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT proposal_performance_team_size_positive CHECK (team_size >= 0),
+    CONSTRAINT proposal_performance_sections_positive CHECK (sections_count >= 0),
+    CONSTRAINT proposal_performance_documents_positive CHECK (documents_count >= 0),
+    UNIQUE(proposal_id)
+);
+
+-- Notification Queue Table
+CREATE TABLE IF NOT EXISTS public.notification_queue (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    type VARCHAR(50) NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT,
+    data JSONB,
+    read BOOLEAN DEFAULT false,
+    sent_via_email BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    read_at TIMESTAMPTZ,
+    CONSTRAINT notification_queue_type_valid CHECK (
+        type IN (
+            'team_member_joined',
+            'section_assigned',
+            'section_reassigned',
+            'section_completed',
+            'deadline_approaching',
+            'deadline_missed',
+            'message_received',
+            'proposal_submitted',
+            'proposal_status_changed',
+            'qa_answer_posted',
+            'document_uploaded',
+            'invitation_created',
+            'member_removed'
+        )
+    )
+);
+
+-- Indexes for Proposal Performance
+CREATE INDEX IF NOT EXISTS idx_proposal_performance_lead ON public.proposal_performance(lead_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_performance_proposal ON public.proposal_performance(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_performance_created ON public.proposal_performance(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_proposal_performance_lead_created ON public.proposal_performance(lead_id, created_at DESC);
+
+-- Indexes for Notification Queue
+CREATE INDEX IF NOT EXISTS idx_notification_queue_user ON public.notification_queue(user_id);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_user_unread ON public.notification_queue(user_id, read) WHERE read = false;
+CREATE INDEX IF NOT EXISTS idx_notification_queue_type ON public.notification_queue(type);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_created ON public.notification_queue(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_user_created ON public.notification_queue(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_email_pending ON public.notification_queue(sent_via_email, created_at) WHERE sent_via_email = false;
+
+-- Additional indexes for bidding leader features
+CREATE INDEX IF NOT EXISTS idx_bid_team_members_project_role ON public.bid_team_members(project_id, role);
+CREATE INDEX IF NOT EXISTS idx_bid_team_members_user_role ON public.bid_team_members(user_id, role);
+CREATE INDEX IF NOT EXISTS idx_proposals_lead_status ON public.proposals(lead_id, status);
+CREATE INDEX IF NOT EXISTS idx_proposals_project_status ON public.proposals(project_id, status);
+CREATE INDEX IF NOT EXISTS idx_proposals_submitted ON public.proposals(submitted_at DESC) WHERE submitted_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_document_sections_assigned_status ON public.document_sections(assigned_to, status) WHERE assigned_to IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_document_sections_deadline_upcoming ON public.document_sections(deadline, status) WHERE deadline IS NOT NULL AND status NOT IN ('completed');
+
+-- Enable RLS
+ALTER TABLE public.proposal_performance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notification_queue ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Proposal Performance
+CREATE POLICY "proposal_performance_lead_select" ON public.proposal_performance
+FOR SELECT USING (lead_id = auth.uid());
+
+CREATE POLICY "proposal_performance_system_insert" ON public.proposal_performance
+FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "proposal_performance_system_update" ON public.proposal_performance
+FOR UPDATE USING (true) WITH CHECK (true);
+
+CREATE POLICY "proposal_performance_admin_select" ON public.proposal_performance
+FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM auth.users
+        WHERE id = auth.uid() 
+        AND raw_user_meta_data->>'role' = 'admin'
+    )
+);
+
+-- RLS Policies for Notification Queue
+CREATE POLICY "notification_queue_user_select" ON public.notification_queue
+FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "notification_queue_system_insert" ON public.notification_queue
+FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "notification_queue_user_update" ON public.notification_queue
+FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "notification_queue_system_update" ON public.notification_queue
+FOR UPDATE USING (true) WITH CHECK (true);
+
+CREATE POLICY "notification_queue_user_delete" ON public.notification_queue
+FOR DELETE USING (user_id = auth.uid());
+
+CREATE POLICY "notification_queue_admin_select" ON public.notification_queue
+FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM auth.users
+        WHERE id = auth.uid() 
+        AND raw_user_meta_data->>'role' = 'admin'
+    )
+);
+
+-- Functions for Proposal Performance
+CREATE OR REPLACE FUNCTION public.update_proposal_performance(p_proposal_id UUID)
+RETURNS void AS $
+DECLARE
+    v_lead_id UUID;
+    v_team_size INT;
+    v_sections_count INT;
+    v_documents_count INT;
+    v_time_to_submit INTERVAL;
+    v_created_at TIMESTAMPTZ;
+    v_submitted_at TIMESTAMPTZ;
+BEGIN
+    SELECT lead_id, created_at, submitted_at
+    INTO v_lead_id, v_created_at, v_submitted_at
+    FROM public.proposals
+    WHERE id = p_proposal_id;
+    
+    IF v_submitted_at IS NOT NULL THEN
+        v_time_to_submit := v_submitted_at - v_created_at;
+    END IF;
+    
+    SELECT COUNT(DISTINCT user_id)
+    INTO v_team_size
+    FROM public.bid_team_members btm
+    JOIN public.proposals p ON p.project_id = btm.project_id
+    WHERE p.id = p_proposal_id;
+    
+    SELECT COUNT(*)
+    INTO v_sections_count
+    FROM public.document_sections ds
+    JOIN public.workspace_documents wd ON wd.id = ds.document_id
+    JOIN public.workspaces w ON w.id = wd.workspace_id
+    JOIN public.proposals p ON p.project_id = w.project_id
+    WHERE p.id = p_proposal_id;
+    
+    SELECT COUNT(*)
+    INTO v_documents_count
+    FROM public.documents d
+    WHERE d.proposal_id = p_proposal_id;
+    
+    INSERT INTO public.proposal_performance (
+        lead_id,
+        proposal_id,
+        time_to_submit,
+        team_size,
+        sections_count,
+        documents_count,
+        updated_at
+    )
+    VALUES (
+        v_lead_id,
+        p_proposal_id,
+        v_time_to_submit,
+        v_team_size,
+        v_sections_count,
+        v_documents_count,
+        NOW()
+    )
+    ON CONFLICT (proposal_id) DO UPDATE SET
+        time_to_submit = EXCLUDED.time_to_submit,
+        team_size = EXCLUDED.team_size,
+        sections_count = EXCLUDED.sections_count,
+        documents_count = EXCLUDED.documents_count,
+        updated_at = NOW();
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.create_notification(
+    p_user_id UUID,
+    p_type VARCHAR(50),
+    p_title TEXT,
+    p_body TEXT DEFAULT NULL,
+    p_data JSONB DEFAULT NULL
+)
+RETURNS UUID AS $
+DECLARE
+    v_notification_id UUID;
+BEGIN
+    INSERT INTO public.notification_queue (
+        user_id,
+        type,
+        title,
+        body,
+        data
+    )
+    VALUES (
+        p_user_id,
+        p_type,
+        p_title,
+        p_body,
+        p_data
+    )
+    RETURNING id INTO v_notification_id;
+    
+    RETURN v_notification_id;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.mark_notification_read(p_notification_id UUID)
+RETURNS void AS $
+BEGIN
+    UPDATE public.notification_queue
+    SET read = true, read_at = NOW()
+    WHERE id = p_notification_id AND user_id = auth.uid();
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.mark_all_notifications_read(p_user_id UUID)
+RETURNS void AS $
+BEGIN
+    UPDATE public.notification_queue
+    SET read = true, read_at = NOW()
+    WHERE user_id = p_user_id AND user_id = auth.uid() AND read = false;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.get_unread_notification_count(p_user_id UUID)
+RETURNS INT AS $
+DECLARE
+    v_count INT;
+BEGIN
+    SELECT COUNT(*)
+    INTO v_count
+    FROM public.notification_queue
+    WHERE user_id = p_user_id AND read = false;
+    
+    RETURN v_count;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.cleanup_old_notifications()
+RETURNS void AS $
+BEGIN
+    DELETE FROM public.notification_queue
+    WHERE read = true 
+    AND read_at < NOW() - INTERVAL '90 days';
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.get_bid_performance(p_lead_id UUID)
+RETURNS JSONB AS $
+DECLARE
+    v_result JSONB;
+BEGIN
+    SELECT jsonb_build_object(
+        'totalProposals', COUNT(*),
+        'submitted', COUNT(*) FILTER (WHERE status IN ('submitted', 'reviewing', 'approved', 'rejected')),
+        'accepted', COUNT(*) FILTER (WHERE status = 'approved'),
+        'rejected', COUNT(*) FILTER (WHERE status = 'rejected'),
+        'winRate', CASE 
+            WHEN COUNT(*) FILTER (WHERE status IN ('submitted', 'reviewing', 'approved', 'rejected')) > 0 
+            THEN ROUND(
+                (COUNT(*) FILTER (WHERE status = 'approved')::NUMERIC / 
+                COUNT(*) FILTER (WHERE status IN ('submitted', 'reviewing', 'approved', 'rejected'))::NUMERIC) * 100, 
+                2
+            )
+            ELSE 0
+        END,
+        'statusBreakdown', jsonb_build_object(
+            'draft', COUNT(*) FILTER (WHERE status = 'draft'),
+            'submitted', COUNT(*) FILTER (WHERE status = 'submitted'),
+            'reviewing', COUNT(*) FILTER (WHERE status = 'reviewing'),
+            'approved', COUNT(*) FILTER (WHERE status = 'approved'),
+            'rejected', COUNT(*) FILTER (WHERE status = 'rejected')
+        ),
+        'averageTeamSize', COALESCE(ROUND(AVG(pp.team_size), 1), 0),
+        'averageSectionsCount', COALESCE(ROUND(AVG(pp.sections_count), 1), 0),
+        'averageTimeToSubmit', COALESCE(
+            EXTRACT(EPOCH FROM AVG(pp.time_to_submit))::INT, 
+            0
+        )
+    )
+    INTO v_result
+    FROM public.proposals p
+    LEFT JOIN public.proposal_performance pp ON pp.proposal_id = p.id
+    WHERE p.lead_id = p_lead_id;
+    
+    RETURN v_result;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Triggers for Proposal Performance
+CREATE OR REPLACE FUNCTION public.update_proposal_performance_timestamp()
+RETURNS TRIGGER AS $
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_proposal_performance_timestamp ON public.proposal_performance;
+CREATE TRIGGER trigger_update_proposal_performance_timestamp
+    BEFORE UPDATE ON public.proposal_performance
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_proposal_performance_timestamp();
+
+CREATE OR REPLACE FUNCTION public.auto_update_proposal_performance()
+RETURNS TRIGGER AS $
+BEGIN
+    IF NEW.status != OLD.status AND NEW.status IN ('submitted', 'reviewing', 'approved', 'rejected') THEN
+        PERFORM public.update_proposal_performance(NEW.id);
+    END IF;
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_auto_update_proposal_performance ON public.proposals;
+CREATE TRIGGER trigger_auto_update_proposal_performance
+    AFTER UPDATE ON public.proposals
+    FOR EACH ROW
+    WHEN (OLD.status IS DISTINCT FROM NEW.status)
+    EXECUTE FUNCTION public.auto_update_proposal_performance();
+
+COMMENT ON TABLE public.proposal_performance IS 'Tracks performance metrics for proposals including team size, sections, and time to submit';
+COMMENT ON TABLE public.notification_queue IS 'Queue for managing user notifications with email and in-app delivery tracking';
+
+-- ============================================================
+-- MIGRATION 019: PROPOSAL VERSIONS (ENHANCED)
+-- ============================================================
+
+-- Add missing columns to proposal_versions if they don't exist
+DO $ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'proposal_versions' 
+        AND column_name = 'sections_snapshot'
+    ) THEN
+        ALTER TABLE public.proposal_versions 
+        ADD COLUMN sections_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb;
+    END IF;
+    
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'proposal_versions' 
+        AND column_name = 'documents_snapshot'
+    ) THEN
+        ALTER TABLE public.proposal_versions 
+        ADD COLUMN documents_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb;
+    END IF;
+    
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'proposal_versions' 
+        AND column_name = 'change_summary'
+    ) THEN
+        ALTER TABLE public.proposal_versions 
+        ADD COLUMN change_summary TEXT;
+    END IF;
+END $;
+
+-- Additional RLS Policies for Proposal Versions
+CREATE POLICY IF NOT EXISTS "proposal_versions_team_select" ON public.proposal_versions
+FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM public.proposals p
+        WHERE p.id = proposal_versions.proposal_id
+        AND (
+            p.lead_id = auth.uid()
+            OR EXISTS (
+                SELECT 1 FROM public.bid_team_members btm
+                WHERE btm.project_id = p.project_id
+                AND btm.user_id = auth.uid()
+            )
+        )
+    )
+);
+
+CREATE POLICY IF NOT EXISTS "proposal_versions_team_insert" ON public.proposal_versions
+FOR INSERT WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.proposals p
+        WHERE p.id = proposal_versions.proposal_id
+        AND (
+            p.lead_id = auth.uid()
+            OR EXISTS (
+                SELECT 1 FROM public.bid_team_members btm
+                WHERE btm.project_id = p.project_id
+                AND btm.user_id = auth.uid()
+            )
+        )
+    )
+);
+
+CREATE POLICY IF NOT EXISTS "proposal_versions_client_select" ON public.proposal_versions
+FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM public.proposals p
+        JOIN public.projects proj ON proj.id = p.project_id
+        WHERE p.id = proposal_versions.proposal_id
+        AND proj.client_id = auth.uid()
+    )
+);
+
+-- Functions for Proposal Versions
+CREATE OR REPLACE FUNCTION public.get_latest_version(p_proposal_id UUID)
+RETURNS public.proposal_versions AS $
+DECLARE
+    v_version public.proposal_versions;
+BEGIN
+    SELECT *
+    INTO v_version
+    FROM public.proposal_versions
+    WHERE proposal_id = p_proposal_id
+    ORDER BY version_number DESC
+    LIMIT 1;
+    
+    RETURN v_version;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.get_version_count(p_proposal_id UUID)
+RETURNS INT AS $
+DECLARE
+    v_count INT;
+BEGIN
+    SELECT COUNT(*)
+    INTO v_count
+    FROM public.proposal_versions
+    WHERE proposal_id = p_proposal_id;
+    
+    RETURN v_count;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- ============================================================
+-- MIGRATION 020: ADD ARCHIVED STATUS
+-- ============================================================
+
+-- Add 'archived' to the proposal_status enum
+DO $
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum 
+        WHERE enumlabel = 'archived' 
+        AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'proposal_status')
+    ) THEN
+        ALTER TYPE proposal_status ADD VALUE 'archived';
+    END IF;
+END $;
+
+-- Ensure archived columns exist
+DO $
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'proposals' 
+        AND column_name = 'archived_at'
+    ) THEN
+        ALTER TABLE public.proposals ADD COLUMN archived_at TIMESTAMPTZ;
+    END IF;
+    
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'proposals' 
+        AND column_name = 'archived_by'
+    ) THEN
+        ALTER TABLE public.proposals ADD COLUMN archived_by UUID REFERENCES auth.users(id);
+    END IF;
+END $;
+
+-- ============================================================
+-- MIGRATION 021: PROPOSAL WORKSPACE STATES
+-- ============================================================
+
+-- Create proposal_workspace_states table
+CREATE TABLE IF NOT EXISTS public.proposal_workspace_states (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    state JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (proposal_id, user_id)
+);
+
+-- Create indexes for performance
+CREATE INDEX IF NOT EXISTS idx_workspace_states_proposal ON public.proposal_workspace_states(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_states_user ON public.proposal_workspace_states(user_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_states_updated ON public.proposal_workspace_states(updated_at DESC);
+
+-- Enable RLS
+ALTER TABLE public.proposal_workspace_states ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies
+CREATE POLICY "workspace_states_user_select" ON public.proposal_workspace_states
+FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "workspace_states_user_insert" ON public.proposal_workspace_states
+FOR INSERT WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "workspace_states_user_update" ON public.proposal_workspace_states
+FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+CREATE POLICY "workspace_states_user_delete" ON public.proposal_workspace_states
+FOR DELETE USING (user_id = auth.uid());
+
+COMMENT ON TABLE public.proposal_workspace_states IS 'Stores workspace state for each user-proposal combination to preserve UI state when switching between proposals';
+COMMENT ON COLUMN public.proposal_workspace_states.state IS 'JSONB object containing workspace state (scroll position, open panels, filters, etc.)';
+
+-- ============================================================
 -- END OF CONSOLIDATED SCHEMA
+-- ============================================================
+
+-- ============================================================
+-- MIGRATION 012: PROPOSAL SCORING SYSTEM
+-- ============================================================
+
+-- Scoring Templates Table
+CREATE TABLE IF NOT EXISTS public.scoring_templates (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_default BOOLEAN DEFAULT false,
+    created_by UUID NOT NULL REFERENCES auth.users(id),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT scoring_templates_project_unique UNIQUE(project_id)
+);
+
+-- Scoring Criteria Table
+CREATE TABLE IF NOT EXISTS public.scoring_criteria (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    template_id UUID NOT NULL REFERENCES public.scoring_templates(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    description TEXT,
+    weight NUMERIC(5,2) NOT NULL CHECK (weight >= 0 AND weight <= 100),
+    order_index INT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT scoring_criteria_order_positive CHECK (order_index >= 0),
+    CONSTRAINT scoring_criteria_template_order_unique UNIQUE(template_id, order_index)
+);
+
+-- Proposal Scores Table
+CREATE TABLE IF NOT EXISTS public.proposal_scores (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    criterion_id UUID NOT NULL REFERENCES public.scoring_criteria(id) ON DELETE CASCADE,
+    raw_score NUMERIC(4,2) NOT NULL CHECK (raw_score >= 1 AND raw_score <= 10),
+    weighted_score NUMERIC(6,2) NOT NULL,
+    notes TEXT,
+    scored_by UUID NOT NULL REFERENCES auth.users(id),
+    scored_at TIMESTAMPTZ DEFAULT now(),
+    is_final BOOLEAN DEFAULT false,
+    CONSTRAINT proposal_scores_unique_final UNIQUE(proposal_id, criterion_id, is_final) 
+        DEFERRABLE INITIALLY DEFERRED
+);
+
+-- Proposal Score History Table
+CREATE TABLE IF NOT EXISTS public.proposal_score_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    criterion_id UUID NOT NULL REFERENCES public.scoring_criteria(id) ON DELETE CASCADE,
+    previous_raw_score NUMERIC(4,2),
+    new_raw_score NUMERIC(4,2) NOT NULL,
+    previous_notes TEXT,
+    new_notes TEXT,
+    changed_by UUID NOT NULL REFERENCES auth.users(id),
+    changed_at TIMESTAMPTZ DEFAULT now(),
+    reason TEXT
+);
+
+-- Proposal Rankings Table
+CREATE TABLE IF NOT EXISTS public.proposal_rankings (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    total_score NUMERIC(6,2) NOT NULL,
+    rank INT NOT NULL,
+    is_fully_scored BOOLEAN DEFAULT false,
+    calculated_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT proposal_rankings_project_proposal_unique UNIQUE(project_id, proposal_id)
+);
+
+-- Indexes for Scoring System
+CREATE INDEX IF NOT EXISTS idx_scoring_templates_project_id ON public.scoring_templates(project_id);
+CREATE INDEX IF NOT EXISTS idx_scoring_templates_created_by ON public.scoring_templates(created_by);
+CREATE INDEX IF NOT EXISTS idx_scoring_criteria_template_id ON public.scoring_criteria(template_id);
+CREATE INDEX IF NOT EXISTS idx_scoring_criteria_template_order ON public.scoring_criteria(template_id, order_index);
+CREATE INDEX IF NOT EXISTS idx_proposal_scores_proposal_id ON public.proposal_scores(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_scores_criterion_id ON public.proposal_scores(criterion_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_scores_proposal_final ON public.proposal_scores(proposal_id, is_final);
+CREATE INDEX IF NOT EXISTS idx_proposal_scores_scored_by ON public.proposal_scores(scored_by);
+CREATE INDEX IF NOT EXISTS idx_proposal_score_history_proposal_id ON public.proposal_score_history(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_score_history_criterion_id ON public.proposal_score_history(criterion_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_score_history_changed_at ON public.proposal_score_history(changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_proposal_rankings_project_id ON public.proposal_rankings(project_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_rankings_proposal_id ON public.proposal_rankings(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_proposal_rankings_project_score ON public.proposal_rankings(project_id, total_score DESC);
+CREATE INDEX IF NOT EXISTS idx_proposal_rankings_project_rank ON public.proposal_rankings(project_id, rank);
+
+-- Enable RLS
+ALTER TABLE public.scoring_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.scoring_criteria ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.proposal_scores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.proposal_score_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.proposal_rankings ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Scoring Templates
+CREATE POLICY "clients_manage_own_templates" ON public.scoring_templates
+FOR ALL USING (EXISTS (SELECT 1 FROM public.projects p WHERE p.id = scoring_templates.project_id AND p.client_id = auth.uid()))
+WITH CHECK (EXISTS (SELECT 1 FROM public.projects p WHERE p.id = scoring_templates.project_id AND p.client_id = auth.uid()));
+
+-- RLS Policies for Scoring Criteria
+CREATE POLICY "clients_manage_own_criteria" ON public.scoring_criteria
+FOR ALL USING (EXISTS (SELECT 1 FROM public.scoring_templates st JOIN public.projects p ON p.id = st.project_id WHERE st.id = scoring_criteria.template_id AND p.client_id = auth.uid()))
+WITH CHECK (EXISTS (SELECT 1 FROM public.scoring_templates st JOIN public.projects p ON p.id = st.project_id WHERE st.id = scoring_criteria.template_id AND p.client_id = auth.uid()));
+
+-- RLS Policies for Proposal Scores
+CREATE POLICY "clients_score_own_projects" ON public.proposal_scores
+FOR ALL USING (EXISTS (SELECT 1 FROM public.proposals pr JOIN public.projects p ON pr.project_id = p.id WHERE pr.id = proposal_scores.proposal_id AND p.client_id = auth.uid()))
+WITH CHECK (EXISTS (SELECT 1 FROM public.proposals pr JOIN public.projects p ON pr.project_id = p.id WHERE pr.id = proposal_scores.proposal_id AND p.client_id = auth.uid()));
+
+CREATE POLICY "leads_view_own_scores" ON public.proposal_scores
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.proposals pr WHERE pr.id = proposal_scores.proposal_id AND pr.lead_id = auth.uid()));
+
+-- RLS Policies for Proposal Score History
+CREATE POLICY "clients_view_own_history" ON public.proposal_score_history
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.proposals pr JOIN public.projects p ON pr.project_id = p.id WHERE pr.id = proposal_score_history.proposal_id AND p.client_id = auth.uid()));
+
+CREATE POLICY "system_insert_history" ON public.proposal_score_history
+FOR INSERT WITH CHECK (true);
+
+-- RLS Policies for Proposal Rankings
+CREATE POLICY "clients_view_own_rankings" ON public.proposal_rankings
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.projects p WHERE p.id = proposal_rankings.project_id AND p.client_id = auth.uid()));
+
+CREATE POLICY "leads_view_own_ranking" ON public.proposal_rankings
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.proposals pr WHERE pr.id = proposal_rankings.proposal_id AND pr.lead_id = auth.uid()));
+
+CREATE POLICY "system_manage_rankings" ON public.proposal_rankings
+FOR ALL USING (true) WITH CHECK (true);
+
+-- Functions for Scoring System
+CREATE OR REPLACE FUNCTION public.calculate_proposal_total_score(p_proposal_id UUID)
+RETURNS NUMERIC(6,2) AS $
+DECLARE
+  v_total NUMERIC(6,2);
+BEGIN
+  SELECT COALESCE(SUM(weighted_score), 0) INTO v_total FROM public.proposal_scores WHERE proposal_id = p_proposal_id AND is_final = true;
+  RETURN ROUND(v_total, 2);
+END;
+$ LANGUAGE plpgsql STABLE;
+
+CREATE OR REPLACE FUNCTION public.recalculate_project_rankings(p_project_id UUID)
+RETURNS void AS $
+BEGIN
+  DELETE FROM public.proposal_rankings WHERE project_id = p_project_id;
+  INSERT INTO public.proposal_rankings (project_id, proposal_id, total_score, rank, is_fully_scored, calculated_at)
+  SELECT p_project_id, p.id, public.calculate_proposal_total_score(p.id) as total_score,
+    ROW_NUMBER() OVER (ORDER BY public.calculate_proposal_total_score(p.id) DESC, p.created_at ASC) as rank,
+    (SELECT CASE WHEN COUNT(sc.id) = 0 THEN false ELSE COUNT(sc.id) = COUNT(ps.id) FILTER (WHERE ps.is_final = true) END
+     FROM public.scoring_templates st LEFT JOIN public.scoring_criteria sc ON sc.template_id = st.id
+     LEFT JOIN public.proposal_scores ps ON ps.criterion_id = sc.id AND ps.proposal_id = p.id WHERE st.project_id = p_project_id) as is_fully_scored,
+    NOW()
+  FROM public.proposals p WHERE p.project_id = p_project_id ORDER BY total_score DESC, p.created_at ASC;
+END;
+$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION public.is_proposal_scoring_locked(p_proposal_id UUID)
+RETURNS BOOLEAN AS $
+DECLARE
+  v_status TEXT;
+BEGIN
+  SELECT status INTO v_status FROM public.proposals WHERE id = p_proposal_id;
+  RETURN v_status IN ('approved', 'rejected', 'accepted');
+END;
+$ LANGUAGE plpgsql STABLE;
+
+-- Trigger for Scoring Templates
+CREATE OR REPLACE FUNCTION public.update_scoring_template_updated_at()
+RETURNS TRIGGER AS $
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_scoring_template_updated_at
+BEFORE UPDATE ON public.scoring_templates FOR EACH ROW EXECUTE FUNCTION public.update_scoring_template_updated_at();
+
+COMMENT ON TABLE public.scoring_templates IS 'Stores scoring templates for projects with customizable criteria';
+COMMENT ON TABLE public.scoring_criteria IS 'Individual scoring criteria within a template with weights';
+COMMENT ON TABLE public.proposal_scores IS 'Scores assigned to proposals for each criterion';
+COMMENT ON TABLE public.proposal_score_history IS 'Audit trail of all score changes';
+COMMENT ON TABLE public.proposal_rankings IS 'Calculated rankings of proposals within a project';
+
+-- ============================================================
+-- MIGRATION 013: FIX ADMIN FUNCTIONS PERMISSIONS
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION approve_project(p_project_id UUID, p_admin_id UUID, p_notes TEXT DEFAULT NULL)
+RETURNS VOID AS $
+BEGIN
+  UPDATE public.projects SET status = 'open', approved_by = p_admin_id, approved_at = NOW(), approval_notes = p_notes, updated_at = NOW() WHERE id = p_project_id;
+  INSERT INTO public.admin_actions (admin_id, action_type, target_user_id, reason, created_at)
+  SELECT p_admin_id, 'APPROVE_PROJECT', client_id, p_notes, NOW() FROM public.projects WHERE id = p_project_id;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION reject_project(p_project_id UUID, p_admin_id UUID, p_reason TEXT)
+RETURNS VOID AS $
+BEGIN
+  UPDATE public.projects SET status = 'pending_review', approved_by = p_admin_id, approved_at = NOW(), rejection_reason = p_reason, updated_at = NOW() WHERE id = p_project_id;
+  INSERT INTO public.admin_actions (admin_id, action_type, target_user_id, reason, created_at)
+  SELECT p_admin_id, 'REJECT_PROJECT', client_id, p_reason, NOW() FROM public.projects WHERE id = p_project_id;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- ============================================================
+-- MIGRATION 014: ADD PROPOSAL INSERT POLICY
+-- ============================================================
+
+CREATE POLICY "proposals_lead_insert" ON public.proposals
+FOR INSERT WITH CHECK (auth.uid() = lead_id AND EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.status = 'open'));
+
+DROP POLICY IF EXISTS "proposal_write" ON public.proposals;
+CREATE POLICY "proposals_lead_update" ON public.proposals
+FOR UPDATE USING (auth.uid() = lead_id) WITH CHECK (auth.uid() = lead_id);
+
+CREATE POLICY "proposals_lead_delete" ON public.proposals
+FOR DELETE USING (auth.uid() = lead_id AND status = 'draft');
+
+-- ============================================================
+-- MIGRATION 016: TEAM INVITATIONS TABLE (ENHANCED)
+-- ============================================================
+
+-- Add proposal_id column to team_invitations if not exists
+DO $
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = 'team_invitations' 
+        AND column_name = 'proposal_id'
+    ) THEN
+        ALTER TABLE public.team_invitations ADD COLUMN proposal_id UUID REFERENCES public.proposals(id) ON DELETE CASCADE;
+    END IF;
+END $;
+
+-- Add constraint to ensure either project_id or proposal_id is set
+DO $
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'team_invitations_has_project_or_proposal'
+    ) THEN
+        ALTER TABLE public.team_invitations 
+        ADD CONSTRAINT team_invitations_has_project_or_proposal 
+        CHECK (project_id IS NOT NULL OR proposal_id IS NOT NULL);
+    END IF;
+END $;
+
+-- Add index for proposal_id
+CREATE INDEX IF NOT EXISTS idx_team_invitations_proposal ON public.team_invitations(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_team_invitations_proposal_active ON public.team_invitations(proposal_id, expires_at) WHERE used_at IS NULL;
+
+COMMENT ON COLUMN public.team_invitations.proposal_id IS 'NEW: correct approach - invitations are per proposal, not project';
+
+-- ============================================================
+-- MIGRATION 017: ARCHIVED SECTIONS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.archived_sections (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    original_id UUID NOT NULL,
+    document_id UUID NOT NULL REFERENCES public.workspace_documents(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    "order" INT NOT NULL,
+    status TEXT NOT NULL,
+    assigned_to UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    deadline TIMESTAMPTZ,
+    content JSONB NOT NULL DEFAULT '{}'::jsonb,
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    archived_by UUID REFERENCES auth.users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_archived_sections_document ON public.archived_sections(document_id);
+CREATE INDEX IF NOT EXISTS idx_archived_sections_original ON public.archived_sections(original_id);
+CREATE INDEX IF NOT EXISTS idx_archived_sections_archived_at ON public.archived_sections(archived_at DESC);
+
+ALTER TABLE public.archived_sections ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "archived_sections_collaborator_select" ON public.archived_sections
+FOR SELECT USING (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = archived_sections.document_id AND dc.user_id = auth.uid()));
+
+CREATE POLICY "archived_sections_editor_insert" ON public.archived_sections
+FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM public.document_collaborators dc WHERE dc.document_id = archived_sections.document_id AND dc.user_id = auth.uid() AND dc.role IN ('owner', 'editor')));
+
+-- ============================================================
+-- MIGRATION 018: ADD DOCUMENT METADATA
+-- ============================================================
+
+ALTER TABLE public.documents 
+ADD COLUMN IF NOT EXISTS file_name TEXT,
+ADD COLUMN IF NOT EXISTS file_size BIGINT,
+ADD COLUMN IF NOT EXISTS is_required BOOLEAN DEFAULT false;
+
+CREATE INDEX IF NOT EXISTS idx_documents_required ON public.documents(proposal_id, is_required) WHERE is_required = true;
+CREATE INDEX IF NOT EXISTS idx_documents_file_name ON public.documents(file_name);
+
+UPDATE public.documents 
+SET file_name = COALESCE(file_name, 'Unknown'), file_size = COALESCE(file_size, 0), is_required = COALESCE(is_required, false)
+WHERE file_name IS NULL OR file_size IS NULL OR is_required IS NULL;
+
+DO $
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'documents' AND column_name = 'file_name' AND is_nullable = 'YES') THEN
+        ALTER TABLE public.documents ALTER COLUMN file_name SET NOT NULL;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'documents' AND column_name = 'file_size' AND is_nullable = 'YES') THEN
+        ALTER TABLE public.documents ALTER COLUMN file_size SET NOT NULL;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'documents' AND column_name = 'is_required' AND is_nullable = 'YES') THEN
+        ALTER TABLE public.documents ALTER COLUMN is_required SET NOT NULL;
+    END IF;
+END $;
+
+COMMENT ON TABLE public.documents IS 'Stores proposal document attachments with metadata for validation and tracking';
+COMMENT ON COLUMN public.documents.file_name IS 'Original file name';
+COMMENT ON COLUMN public.documents.file_size IS 'File size in bytes';
+COMMENT ON COLUMN public.documents.is_required IS 'Whether this document is required for proposal submission';
+
+-- ============================================================
+-- MIGRATION 032: VERIFY SECURITY MEASURES
+-- ============================================================
+
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS "bid_team_members_read" ON public.bid_team_members;
+DROP POLICY IF EXISTS "bid_team_members_lead_insert" ON public.bid_team_members;
+DROP POLICY IF EXISTS "bid_team_members_lead_delete" ON public.bid_team_members;
+DROP POLICY IF EXISTS "bid_team_members_admin_all" ON public.bid_team_members;
+
+-- Team members can view their own team
+CREATE POLICY "bid_team_members_read" ON public.bid_team_members
+FOR SELECT USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM public.bid_team_members btm WHERE btm.project_id = bid_team_members.project_id AND btm.user_id = auth.uid()));
+
+-- Only leads can add team members to their projects
+CREATE POLICY "bid_team_members_lead_insert" ON public.bid_team_members
+FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM public.bid_team_members btm WHERE btm.project_id = bid_team_members.project_id AND btm.user_id = auth.uid() AND btm.role = 'lead'));
+
+-- Only leads can remove team members from their projects
+CREATE POLICY "bid_team_members_lead_delete" ON public.bid_team_members
+FOR DELETE USING (EXISTS (SELECT 1 FROM public.bid_team_members btm WHERE btm.project_id = bid_team_members.project_id AND btm.user_id = auth.uid() AND btm.role = 'lead'));
+
+-- Admins can view all team members
+CREATE POLICY "bid_team_members_admin_all" ON public.bid_team_members
+FOR ALL USING (EXISTS (SELECT 1 FROM auth.users WHERE id = auth.uid() AND raw_user_meta_data->>'role' = 'admin'));
+
+-- Helper Functions for Authorization
+CREATE OR REPLACE FUNCTION public.is_project_lead(p_project_id UUID, p_user_id UUID)
+RETURNS BOOLEAN AS $
+BEGIN
+    RETURN EXISTS (SELECT 1 FROM public.bid_team_members WHERE project_id = p_project_id AND user_id = p_user_id AND role = 'lead');
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.is_team_member(p_project_id UUID, p_user_id UUID)
+RETURNS BOOLEAN AS $
+BEGIN
+    RETURN EXISTS (SELECT 1 FROM public.bid_team_members WHERE project_id = p_project_id AND user_id = p_user_id);
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.is_project_lead(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_team_member(UUID, UUID) TO authenticated;
+
+-- ============================================================
+-- MIGRATION 033: ADD MISSING PROPOSAL CONTENT FIELDS
+-- ============================================================
+
+ALTER TABLE public.proposals 
+ADD COLUMN IF NOT EXISTS content TEXT,
+ADD COLUMN IF NOT EXISTS additional_info JSONB DEFAULT '{}'::jsonb;
+
+CREATE INDEX IF NOT EXISTS idx_proposals_content_search 
+ON public.proposals USING gin(to_tsvector('english', content)) WHERE content IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_proposals_additional_info ON public.proposals USING gin(additional_info);
+
+COMMENT ON COLUMN public.proposals.content IS 'Main proposal content (rich text/HTML)';
+COMMENT ON COLUMN public.proposals.additional_info IS 'Additional information responses as JSONB';
+
+-- ============================================================
+-- MIGRATION: ADD PROPOSAL TEAM MEMBERS RLS POLICIES
+-- ============================================================
+
+ALTER TABLE public.proposal_team_members ENABLE ROW LEVEL SECURITY;
+
+-- Team members can view their own team
+CREATE POLICY "proposal_team_members_read" ON public.proposal_team_members
+FOR SELECT USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM public.proposal_team_members ptm WHERE ptm.proposal_id = proposal_team_members.proposal_id AND ptm.user_id = auth.uid()));
+
+-- Only leads can add team members
+CREATE POLICY "proposal_team_members_lead_insert" ON public.proposal_team_members
+FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM public.proposal_team_members ptm WHERE ptm.proposal_id = proposal_team_members.proposal_id AND ptm.user_id = auth.uid() AND ptm.role = 'lead'));
+
+-- Only leads can remove team members
+CREATE POLICY "proposal_team_members_lead_delete" ON public.proposal_team_members
+FOR DELETE USING (EXISTS (SELECT 1 FROM public.proposal_team_members ptm WHERE ptm.proposal_id = proposal_team_members.proposal_id AND ptm.user_id = auth.uid() AND ptm.role = 'lead'));
+
+-- Admins can view all team members
+CREATE POLICY "proposal_team_members_admin_all" ON public.proposal_team_members
+FOR ALL USING (EXISTS (SELECT 1 FROM auth.users WHERE id = auth.uid() AND raw_user_meta_data->>'role' = 'admin'));
+
+-- ============================================================
+-- END OF ALL MIGRATIONS - BIDSYNC SCHEMA COMPLETE
 -- ============================================================

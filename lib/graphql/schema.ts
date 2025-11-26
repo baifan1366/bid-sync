@@ -587,6 +587,34 @@ export const typeDefs = /* GraphQL */ `
     
     # Admin Template Management queries
     adminAllTemplates: [Template!]!
+    
+    # Proposal Archival queries
+    getProposals(includeArchived: Boolean, archivedOnly: Boolean, projectId: ID, status: ProposalStatus): ProposalListResult!
+    isProposalArchived(proposalId: ID!): ArchivedCheckResult!
+    getArchivedCount: ArchivedCountResult!
+    
+    # Multi-Proposal Management queries
+    getProposalDashboard(
+      filterStatus: ProposalStatus
+      filterDeadlineBefore: String
+      filterDeadlineAfter: String
+      filterProjectId: ID
+      sortBy: String
+      sortOrder: String
+    ): ProposalDashboardResult!
+    getWorkspaceState(proposalId: ID!): WorkspaceStateResult!
+    getAggregateStatistics: AggregateStatisticsResult!
+    
+    # Bidding Leader Management queries
+    getOpenProjects(filter: ProjectFilterInput): [Project!]!
+    searchProjects(query: String!, filter: ProjectFilterInput): [Project!]!
+    getProjectDetail(projectId: ID!): ProjectDetail!
+    getBidPerformance(leadId: ID!): BidPerformance!
+    getTeamMetrics(projectId: ID!): TeamMetrics!
+    getTeamMembers(projectId: ID): [BidTeamMember!]!
+    getAllProposalTeamMembers: [ProposalTeamInfo!]!
+    getActiveInvitations(projectId: ID!): [TeamInvitation!]!
+    validateInvitation(codeOrToken: String!): ValidationResult!
   }
   
   type AdminProposal {
@@ -691,9 +719,11 @@ export const typeDefs = /* GraphQL */ `
   type ProposalWithProject {
     id: ID!
     title: String
+    content: String
     status: ProposalStatus!
     budgetEstimate: Float
     timelineEstimate: String
+    additionalInfo: JSON
     submissionDate: String
     project: Project!
   }
@@ -820,10 +850,12 @@ export const typeDefs = /* GraphQL */ `
     projectId: ID!
     leadId: ID!
     title: String
+    content: String
     status: ProposalStatus!
     budgetEstimate: Float
     timelineEstimate: String
     executiveSummary: String
+    additionalInfo: JSON
     submissionDate: String
     createdAt: String!
     updatedAt: String!
@@ -1003,6 +1035,238 @@ export const typeDefs = /* GraphQL */ `
     error: String
   }
 
+  type ArchivalResult {
+    success: Boolean!
+    error: String
+  }
+
+  type ProposalListResult {
+    success: Boolean!
+    data: [ProposalSummary!]
+    error: String
+  }
+
+  type ArchivedCheckResult {
+    success: Boolean!
+    data: ArchivedCheck
+    error: String
+  }
+
+  type ArchivedCheck {
+    isArchived: Boolean!
+    archivedAt: String
+    archivedBy: ID
+    archivedByName: String
+  }
+
+  type ArchivedCountResult {
+    success: Boolean!
+    count: Int
+    error: String
+  }
+
+  type ProposalDashboardItem {
+    id: ID!
+    projectId: ID!
+    projectName: String!
+    projectDeadline: String
+    status: ProposalStatus!
+    completionPercentage: Int!
+    teamSize: Int!
+    unreadMessages: Int!
+    lastActivity: String!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type ProposalDashboardResult {
+    success: Boolean!
+    data: [ProposalDashboardItem!]
+    error: String
+  }
+
+  type WorkspaceState {
+    proposalId: ID!
+    state: JSON!
+    savedAt: String!
+  }
+
+  type WorkspaceStateResult {
+    success: Boolean!
+    data: WorkspaceState
+    error: String
+  }
+
+  type AggregateStatistics {
+    totalProposals: Int!
+    activeProposals: Int!
+    draftProposals: Int!
+    submittedProposals: Int!
+    approvedProposals: Int!
+    rejectedProposals: Int!
+    archivedProposals: Int!
+    averageCompletionRate: Int!
+    upcomingDeadlines: Int!
+    overdueProposals: Int!
+    totalTeamMembers: Int!
+    averageTeamSize: Int!
+  }
+
+  type AggregateStatisticsResult {
+    success: Boolean!
+    data: AggregateStatistics
+    error: String
+  }
+
+  type OperationResult {
+    success: Boolean!
+    error: String
+  }
+
+  # Bidding Leader Management Types
+  type TeamInvitation {
+    id: ID!
+    projectId: ID!
+    createdBy: ID!
+    code: String!
+    token: String!
+    expiresAt: String!
+    usedBy: ID
+    usedAt: String
+    isMultiUse: Boolean!
+    createdAt: String!
+  }
+
+  type ValidationResult {
+    valid: Boolean!
+    invitation: TeamInvitation
+    error: String
+  }
+
+  type BidTeamMember {
+    id: ID!
+    projectId: ID!
+    userId: ID!
+    user: User
+    role: String!
+    joinedAt: String!
+    assignedSections: [AssignedSection!]!
+    contributionStats: ContributionStats
+  }
+
+  type ProposalTeamInfo {
+    proposalId: ID!
+    projectId: ID!
+    projectTitle: String!
+    proposalStatus: ProposalStatus!
+    teamMembers: [ProposalTeamMember!]!
+  }
+
+  type ProposalTeamMember {
+    userId: ID!
+    user: ProposalTeamUser
+    role: String!
+    joinedAt: String!
+  }
+
+  type ProposalTeamUser {
+    id: ID!
+    email: String!
+    fullName: String
+    avatarUrl: String
+  }
+
+  type ContributionStats {
+    sectionsAssigned: Int!
+    sectionsCompleted: Int!
+    lastActivity: String
+  }
+
+  type TeamStatistics {
+    totalMembers: Int!
+    activeMembers: Int!
+    leads: Int!
+    members: Int!
+    totalSectionsAssigned: Int!
+    totalSectionsCompleted: Int!
+    averageContribution: Float!
+  }
+
+  type TeamMetrics {
+    totalMembers: Int!
+    activeMembers: Int!
+    averageContribution: Float!
+    topContributors: [Contributor!]!
+  }
+
+  type Contributor {
+    userId: ID!
+    userName: String!
+    email: String!
+    sectionsCompleted: Int!
+    sectionsAssigned: Int!
+    completionRate: Float!
+  }
+
+  type BidPerformance {
+    totalProposals: Int!
+    submitted: Int!
+    accepted: Int!
+    rejected: Int!
+    winRate: Float!
+    statusBreakdown: StatusBreakdown!
+    averageTeamSize: Float!
+    averageSectionsCount: Float!
+    averageTimeToSubmit: Float!
+  }
+
+  type StatusBreakdown {
+    draft: Int!
+    submitted: Int!
+    reviewing: Int!
+    approved: Int!
+    rejected: Int!
+  }
+
+  type ProjectDetail {
+    id: ID!
+    clientId: ID!
+    client: User
+    title: String!
+    description: String!
+    status: ProjectStatus!
+    budget: Float
+    deadline: String
+    additionalInfoRequirements: [AdditionalInfoRequirement!]!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  input GenerateInvitationInput {
+    projectId: ID!
+    expirationDays: Int
+    isMultiUse: Boolean
+  }
+
+  input JoinTeamInput {
+    invitationId: ID!
+  }
+
+  input RemoveTeamMemberInput {
+    projectId: ID!
+    userId: ID!
+  }
+
+  input ProjectFilterInput {
+    budgetMin: Float
+    budgetMax: Float
+    deadlineBefore: String
+    deadlineAfter: String
+    category: String
+    searchTerm: String
+    status: ProjectStatus
+  }
+
   type Mutation {
     verifyClient(userId: ID!, approved: Boolean!, reason: String): User!
     createProject(input: CreateProjectInput!): Project!
@@ -1025,6 +1289,14 @@ export const typeDefs = /* GraphQL */ `
     
     # Proposal creation and submission mutations
     createProposal(projectId: ID!): Proposal!
+    updateProposal(
+      proposalId: ID!
+      title: String
+      content: String
+      budgetEstimate: Float
+      timelineEstimate: String
+      additionalInfo: JSON
+    ): Proposal!
     submitProposal(input: SubmitProposalInput!): SubmissionResult!
     saveSubmissionDraft(proposalId: ID!, step: Int!, data: JSON!): Boolean!
     
@@ -1100,6 +1372,20 @@ export const typeDefs = /* GraphQL */ `
     reviseScore(input: ReviseScoreInput!): ProposalScore!
     recalculateRankings(projectId: ID!): [ProposalRanking!]!
     exportScoring(projectId: ID!): ScoringExport!
+    
+    # Proposal Archival mutations
+    archiveProposal(proposalId: ID!, reason: String): ArchivalResult!
+    unarchiveProposal(proposalId: ID!): ArchivalResult!
+    bulkArchiveProposals(proposalIds: [ID!]!): ArchivalResult!
+    
+    # Multi-Proposal Management mutations
+    saveWorkspaceState(proposalId: ID!, state: JSON!): OperationResult!
+    clearWorkspaceState(proposalId: ID!): OperationResult!
+    
+    # Bidding Leader Management mutations
+    generateInvitation(input: GenerateInvitationInput!): TeamInvitation!
+    joinTeam(input: JoinTeamInput!): BidTeamMember!
+    removeTeamMember(input: RemoveTeamMemberInput!): Boolean!
   }
 
   type Subscription {
@@ -1131,5 +1417,10 @@ export const typeDefs = /* GraphQL */ `
     sectionAssigned(documentId: ID!): DocumentSection!
     sectionDeadlineChanged(documentId: ID!): DocumentSection!
     progressUpdated(documentId: ID!): OverallProgress!
+    
+    # Bidding team subscriptions
+    teamMemberJoined(projectId: ID!): BidTeamMember!
+    teamMemberRemoved(projectId: ID!): BidTeamMember!
+    invitationCreated(projectId: ID!): TeamInvitation!
   }
 `;

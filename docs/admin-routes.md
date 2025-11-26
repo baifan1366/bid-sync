@@ -11,7 +11,7 @@ The admin panel has been restructured to use separate page routes instead of tab
 ├── /overview            → Admin & user management
 ├── /analytics           → Platform analytics and insights
 ├── /admin-projects      → Project approval queue
-├── /proposals           → Proposal oversight
+├── /admin-proposals     → Proposal oversight
 ├── /verifications       → Team verification queue
 ├── /templates           → Template management
 └── /admin-settings      → System settings
@@ -39,7 +39,7 @@ The admin panel has been restructured to use separate page routes instead of tab
 - Review and approve client projects
 - Previously at `/admin-dashboard/projects`
 
-### Proposals (`/proposals`)
+### Proposals (`/admin-proposals`)
 - View all proposals across the platform
 - Filter by status (draft, submitted, under review, accepted, rejected)
 - Search by title, team, or project

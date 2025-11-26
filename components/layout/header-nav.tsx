@@ -22,12 +22,37 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       href: "/projects",
       matchPaths: ["/projects"]
     },
+    { 
+      label: "Profile", 
+      href: "/profile",
+      matchPaths: ["/profile"]
+    },
   ],
   bidding_lead: [
     { 
       label: "Dashboard", 
       href: "/lead-dashboard",
       matchPaths: ["/lead-dashboard"]
+    },
+    { 
+      label: "Projects", 
+      href: "/lead-projects",
+      matchPaths: ["/lead-projects"]
+    },
+    { 
+      label: "Proposals", 
+      href: "/lead-proposals",
+      matchPaths: ["/lead-proposals"]
+    },
+    { 
+      label: "Team", 
+      href: "/team",
+      matchPaths: ["/team"]
+    },
+    { 
+      label: "Performance", 
+      href: "/performance",
+      matchPaths: ["/performance"]
     },
     { 
       label: "Workspace", 
@@ -42,6 +67,11 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
   ],
   bidding_member: [
     { 
+      label: "Dashboard", 
+      href: "/member-dashboard",
+      matchPaths: ["/member-dashboard"]
+    },
+    { 
       label: "Workspace", 
       href: "/workspace",
       matchPaths: ["/workspace"]
@@ -50,6 +80,11 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       label: "Documents", 
       href: "/documents",
       matchPaths: ["/documents", "/editor"]
+    },
+    { 
+      label: "Profile", 
+      href: "/profile",
+      matchPaths: ["/profile"]
     },
   ],
   admin: [

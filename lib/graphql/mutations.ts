@@ -128,6 +128,46 @@ export const CREATE_PROPOSAL = gql`
   }
 `
 
+export const UPDATE_PROPOSAL = gql`
+  mutation UpdateProposal(
+    $proposalId: ID!
+    $title: String
+    $content: String
+    $budgetEstimate: Float
+    $timelineEstimate: String
+    $additionalInfo: JSON
+  ) {
+    updateProposal(
+      proposalId: $proposalId
+      title: $title
+      content: $content
+      budgetEstimate: $budgetEstimate
+      timelineEstimate: $timelineEstimate
+      additionalInfo: $additionalInfo
+    ) {
+      id
+      title
+      content
+      status
+      budgetEstimate
+      timelineEstimate
+      additionalInfo
+      updatedAt
+    }
+  }
+`
+
+export const SUBMIT_PROPOSAL = gql`
+  mutation SubmitProposal($input: SubmitProposalInput!) {
+    submitProposal(input: $input) {
+      success
+      proposalId
+      submittedAt
+      errors
+    }
+  }
+`
+
 export const ROLLBACK_TO_VERSION = gql`
   mutation RollbackToVersion($documentId: ID!, $versionId: ID!) {
     rollbackToVersion(documentId: $documentId, versionId: $versionId) {
@@ -694,5 +734,113 @@ export const EXPORT_SCORING = gql`
       url
       expiresAt
     }
+  }
+`
+
+// ============================================================================
+// Proposal Archival Mutations
+// ============================================================================
+
+export const ARCHIVE_PROPOSAL = gql`
+  mutation ArchiveProposal($proposalId: ID!, $reason: String) {
+    archiveProposal(proposalId: $proposalId, reason: $reason) {
+      success
+      error
+    }
+  }
+`
+
+export const UNARCHIVE_PROPOSAL = gql`
+  mutation UnarchiveProposal($proposalId: ID!) {
+    unarchiveProposal(proposalId: $proposalId) {
+      success
+      error
+    }
+  }
+`
+
+export const BULK_ARCHIVE_PROPOSALS = gql`
+  mutation BulkArchiveProposals($proposalIds: [ID!]!) {
+    bulkArchiveProposals(proposalIds: $proposalIds) {
+      success
+      error
+    }
+  }
+`
+
+// ============================================================================
+// Multi-Proposal Management Mutations
+// ============================================================================
+
+export const SAVE_WORKSPACE_STATE = gql`
+  mutation SaveWorkspaceState($proposalId: ID!, $state: JSON!) {
+    saveWorkspaceState(proposalId: $proposalId, state: $state) {
+      success
+      error
+    }
+  }
+`
+
+export const CLEAR_WORKSPACE_STATE = gql`
+  mutation ClearWorkspaceState($proposalId: ID!) {
+    clearWorkspaceState(proposalId: $proposalId) {
+      success
+      error
+    }
+  }
+`
+
+// ============================================================================
+// Bidding Leader Management Mutations
+// ============================================================================
+
+export const GENERATE_INVITATION = gql`
+  mutation GenerateInvitation($input: GenerateInvitationInput!) {
+    generateInvitation(input: $input) {
+      id
+      projectId
+      createdBy
+      code
+      token
+      expiresAt
+      usedBy
+      usedAt
+      isMultiUse
+      createdAt
+    }
+  }
+`
+
+export const JOIN_TEAM = gql`
+  mutation JoinTeam($input: JoinTeamInput!) {
+    joinTeam(input: $input) {
+      id
+      projectId
+      userId
+      user {
+        id
+        email
+        fullName
+      }
+      role
+      joinedAt
+      assignedSections {
+        id
+        title
+        status
+        deadline
+      }
+      contributionStats {
+        sectionsAssigned
+        sectionsCompleted
+        lastActivity
+      }
+    }
+  }
+`
+
+export const REMOVE_TEAM_MEMBER = gql`
+  mutation RemoveTeamMember($input: RemoveTeamMemberInput!) {
+    removeTeamMember(input: $input)
   }
 `

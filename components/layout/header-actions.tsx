@@ -139,45 +139,74 @@ export const HeaderActions = memo(function HeaderActions({ className }: HeaderAc
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="relative h-8 gap-2 px-2 hover:bg-yellow-100 dark:hover:bg-yellow-900/50"
+                  className="relative h-9 gap-2 px-2 hover:bg-yellow-100 dark:hover:bg-yellow-900/50 rounded-lg"
                   aria-label={`User menu for ${userName || user?.email}`}
                   aria-haspopup="true"
                 >
-                  <Avatar className="h-6 w-6">
+                  <Avatar className="h-7 w-7 ring-2 ring-yellow-400/20">
                     <AvatarImage src={avatarUrl} alt={`${userName || "User"} avatar`} />
-                    <AvatarFallback aria-label={`${userName || user?.email} initials`} className="text-xs">
+                    <AvatarFallback aria-label={`${userName || user?.email} initials`} className="text-xs bg-yellow-400 text-black font-semibold">
                       {getUserInitials(userName, user?.email)}
                     </AvatarFallback>
                   </Avatar>
-                  <span className="hidden lg:block text-sm font-medium">{userName}</span>
+                  <div className="hidden lg:flex flex-col items-start gap-0.5">
+                    <span className="text-sm font-semibold text-black dark:text-white leading-tight">{userName}</span>
+                    <span className="text-xs text-yellow-400 font-medium leading-tight">{getRoleLabel(userRole)}</span>
+                  </div>
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56" role="menu">
-                <DropdownMenuLabel>
-                  <div className="flex flex-col space-y-1">
-                    <p className="text-sm font-medium leading-none">{userName}</p>
-                    <p className="text-xs leading-none text-muted-foreground">
-                      {user?.email}
-                    </p>
-                    <p className="text-xs leading-none text-muted-foreground mt-1">
-                      {getRoleLabel(userRole)}
-                    </p>
+              <DropdownMenuContent align="end" className="w-72 p-0" role="menu">
+                <DropdownMenuLabel className="p-5 pb-4">
+                  <div className="flex items-center gap-4">
+                    <Avatar className="h-16 w-16 ring-2 ring-yellow-400/30 shrink-0">
+                      <AvatarImage src={avatarUrl} alt={`${userName || "User"} avatar`} />
+                      <AvatarFallback className="text-xl bg-yellow-400 text-black font-bold">
+                        {getUserInitials(userName, user?.email)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col gap-2 flex-1 min-w-0">
+                      <div className="space-y-1">
+                        <p className="text-lg font-bold leading-tight text-black dark:text-white truncate">{userName}</p>
+                        <p className="text-xs leading-tight text-muted-foreground truncate break-all">
+                          {user?.email}
+                        </p>
+                      </div>
+                      <Badge className="w-fit text-xs font-semibold bg-yellow-400 text-black hover:bg-yellow-500 border-0 px-2.5 py-1">
+                        {getRoleLabel(userRole)}
+                      </Badge>
+                    </div>
                   </div>
                 </DropdownMenuLabel>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => router.push("/profile")} role="menuitem">
-                  <User className="mr-2 h-4 w-4" aria-hidden="true" />
-                  <span>Profile</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push("/settings")} role="menuitem">
-                  <Settings className="mr-2 h-4 w-4" aria-hidden="true" />
-                  <span>Settings</span>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut} role="menuitem">
-                  <LogOut className="mr-2 h-4 w-4" aria-hidden="true" />
-                  <span>Log out</span>
-                </DropdownMenuItem>
+                <DropdownMenuSeparator className="my-0" />
+                <div className="p-2">
+                  <DropdownMenuItem 
+                    onClick={() => router.push("/profile")} 
+                    role="menuitem"
+                    className="cursor-pointer rounded-md py-2.5 px-3 hover:bg-yellow-400/10 focus:bg-yellow-400/10"
+                  >
+                    <User className="mr-3 h-4 w-4 text-yellow-400" aria-hidden="true" />
+                    <span className="font-medium">Profile</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem 
+                    onClick={() => router.push("/settings")} 
+                    role="menuitem"
+                    className="cursor-pointer rounded-md py-2.5 px-3 hover:bg-yellow-400/10 focus:bg-yellow-400/10"
+                  >
+                    <Settings className="mr-3 h-4 w-4 text-yellow-400" aria-hidden="true" />
+                    <span className="font-medium">Settings</span>
+                  </DropdownMenuItem>
+                </div>
+                <DropdownMenuSeparator className="my-0" />
+                <div className="p-2">
+                  <DropdownMenuItem 
+                    onClick={handleSignOut} 
+                    role="menuitem"
+                    className="cursor-pointer rounded-md py-2.5 px-3 hover:bg-red-50 dark:hover:bg-red-950/20 focus:bg-red-50 dark:focus:bg-red-950/20 text-red-600 dark:text-red-400"
+                  >
+                    <LogOut className="mr-3 h-4 w-4" aria-hidden="true" />
+                    <span className="font-medium">Log out</span>
+                  </DropdownMenuItem>
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

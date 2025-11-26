@@ -240,60 +240,6 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Security Settings */}
-        <Card className="border-yellow-400/20">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Lock className="h-5 w-5 text-yellow-400" />
-              <CardTitle>Security</CardTitle>
-            </div>
-            <CardDescription>
-              Manage your account security settings
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>Password</Label>
-              <p className="text-sm text-muted-foreground mb-2">
-                Change your password to keep your account secure
-              </p>
-              <Button
-                variant="outline"
-                className="border-yellow-400/20 hover:bg-yellow-400/10"
-                onClick={() => {
-                  toast({
-                    title: 'Coming soon',
-                    description: 'Password change functionality will be available soon.',
-                  })
-                }}
-              >
-                Change Password
-              </Button>
-            </div>
-
-            <Separator className="bg-yellow-400/10" />
-
-            <div className="space-y-2">
-              <Label>Two-Factor Authentication</Label>
-              <p className="text-sm text-muted-foreground mb-2">
-                Add an extra layer of security to your account
-              </p>
-              <Button
-                variant="outline"
-                className="border-yellow-400/20 hover:bg-yellow-400/10"
-                onClick={() => {
-                  toast({
-                    title: 'Coming soon',
-                    description: 'Two-factor authentication will be available soon.',
-                  })
-                }}
-              >
-                Enable 2FA
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
         {/* Account Information */}
         <Card className="border-yellow-400/20">
           <CardHeader>

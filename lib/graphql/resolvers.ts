@@ -14,6 +14,7 @@ import { TeamManagementService } from '@/lib/team-management-service';
 import { CollaborationService } from '@/lib/collaboration-service';
 import { SectionLockManager } from '@/lib/section-lock-service';
 import { ProgressTrackerService } from '@/lib/progress-tracker-service';
+import { ProposalService } from '@/lib/proposal-service';
 
 export const resolvers = {
   Query: {
@@ -1124,9 +1125,11 @@ export const resolvers = {
         .select(`
           id,
           title,
+          content,
           status,
           budget_estimate,
           timeline_estimate,
+          additional_info,
           submitted_at,
           created_at,
           projects (
@@ -1151,9 +1154,11 @@ export const resolvers = {
       return (proposals || []).map((proposal: any) => ({
         id: proposal.id,
         title: proposal.title,
+        content: proposal.content,
         status: proposal.status?.toUpperCase() || 'DRAFT',
         budgetEstimate: proposal.budget_estimate,
         timelineEstimate: proposal.timeline_estimate,
+        additionalInfo: proposal.additional_info,
         submissionDate: proposal.submitted_at || proposal.created_at,
         project: {
           id: proposal.projects.id,
@@ -3227,6 +3232,626 @@ export const resolvers = {
         worstScores,
       };
     },
+
+    // ============================================================================
+    // Proposal Archival Queries
+    // ============================================================================
+
+    getProposals: async (
+      _: any,
+      { includeArchived, archivedOnly, projectId, status }: {
+        includeArchived?: boolean;
+        archivedOnly?: boolean;
+        projectId?: string;
+        status?: string;
+      }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { ProposalArchivalService } = await import('@/lib/proposal-archival-service');
+        const result = await ProposalArchivalService.getProposals({
+          userId: user.id,
+          includeArchived: includeArchived || false,
+          archivedOnly: archivedOnly || false,
+          projectId,
+          status: status?.toLowerCase() as any,
+        });
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to get proposals:', error);
+        throw new GraphQLError(error.message || 'Failed to get proposals', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    isProposalArchived: async (
+      _: any,
+      { proposalId }: { proposalId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { ProposalArchivalService } = await import('@/lib/proposal-archival-service');
+        const result = await ProposalArchivalService.isProposalArchived({
+          proposalId,
+        });
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to check archived status:', error);
+        throw new GraphQLError(error.message || 'Failed to check archived status', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getArchivedCount: async () => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { ProposalArchivalService } = await import('@/lib/proposal-archival-service');
+        const result = await ProposalArchivalService.getArchivedCount(user.id);
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to get archived count:', error);
+        throw new GraphQLError(error.message || 'Failed to get archived count', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    // ============================================================================
+    // Multi-Proposal Management Queries
+    // ============================================================================
+
+    getProposalDashboard: async (
+      _: any,
+      { filterStatus, filterDeadlineBefore, filterDeadlineAfter, filterProjectId, sortBy, sortOrder }: {
+        filterStatus?: string;
+        filterDeadlineBefore?: string;
+        filterDeadlineAfter?: string;
+        filterProjectId?: string;
+        sortBy?: string;
+        sortOrder?: string;
+      }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { MultiProposalService } = await import('@/lib/multi-proposal-service');
+        const result = await MultiProposalService.getProposalDashboard({
+          userId: user.id,
+          filterStatus: filterStatus?.toLowerCase() as any,
+          filterDeadlineBefore,
+          filterDeadlineAfter,
+          filterProjectId,
+          sortBy: sortBy as any,
+          sortOrder: sortOrder as any,
+        });
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to get proposal dashboard:', error);
+        throw new GraphQLError(error.message || 'Failed to get proposal dashboard', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getWorkspaceState: async (
+      _: any,
+      { proposalId }: { proposalId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { MultiProposalService } = await import('@/lib/multi-proposal-service');
+        const result = await MultiProposalService.getWorkspaceState({
+          proposalId,
+          userId: user.id,
+        });
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to get workspace state:', error);
+        throw new GraphQLError(error.message || 'Failed to get workspace state', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getAggregateStatistics: async () => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { MultiProposalService } = await import('@/lib/multi-proposal-service');
+        const result = await MultiProposalService.getAggregateStatistics({
+          userId: user.id,
+        });
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to get aggregate statistics:', error);
+        throw new GraphQLError(error.message || 'Failed to get aggregate statistics', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    // ============================================================================
+    // BIDDING LEADER MANAGEMENT QUERIES
+    // ============================================================================
+
+    getOpenProjects: async (
+      _: any,
+      { filter }: { filter?: any }
+    ) => {
+      try {
+        const { ProjectDiscoveryServiceServer } = await import('@/lib/project-discovery-service.server');
+        
+        const projectFilter = filter ? {
+          budgetMin: filter.budgetMin,
+          budgetMax: filter.budgetMax,
+          deadlineBefore: filter.deadlineBefore ? new Date(filter.deadlineBefore) : undefined,
+          deadlineAfter: filter.deadlineAfter ? new Date(filter.deadlineAfter) : undefined,
+          category: filter.category,
+          searchTerm: filter.searchTerm,
+          status: filter.status,
+        } : undefined;
+
+        const projects = await ProjectDiscoveryServiceServer.getOpenProjects(projectFilter);
+        
+        return projects.map((project: any) => ({
+          id: project.id,
+          clientId: project.clientId,
+          title: project.title,
+          description: project.description,
+          status: project.status,
+          budget: project.budget,
+          deadline: project.deadline,
+          additionalInfoRequirements: project.additionalInfoRequirements || [],
+          createdAt: project.createdAt,
+          updatedAt: project.updatedAt,
+        }));
+      } catch (error: any) {
+        console.error('Failed to get open projects:', error);
+        throw new GraphQLError(error.message || 'Failed to get open projects', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    searchProjects: async (
+      _: any,
+      { query, filter }: { query: string; filter?: any }
+    ) => {
+      try {
+        const { ProjectDiscoveryServiceServer } = await import('@/lib/project-discovery-service.server');
+        
+        const projectFilter = filter ? {
+          budgetMin: filter.budgetMin,
+          budgetMax: filter.budgetMax,
+          deadlineBefore: filter.deadlineBefore ? new Date(filter.deadlineBefore) : undefined,
+          deadlineAfter: filter.deadlineAfter ? new Date(filter.deadlineAfter) : undefined,
+          category: filter.category,
+          status: filter.status,
+        } : undefined;
+
+        const projects = await ProjectDiscoveryServiceServer.searchProjects(query, projectFilter);
+        
+        return projects.map((project: any) => ({
+          id: project.id,
+          clientId: project.clientId,
+          title: project.title,
+          description: project.description,
+          status: project.status,
+          budget: project.budget,
+          deadline: project.deadline,
+          additionalInfoRequirements: project.additionalInfoRequirements || [],
+          createdAt: project.createdAt,
+          updatedAt: project.updatedAt,
+        }));
+      } catch (error: any) {
+        console.error('Failed to search projects:', error);
+        throw new GraphQLError(error.message || 'Failed to search projects', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getProjectDetail: async (
+      _: any,
+      { projectId }: { projectId: string }
+    ) => {
+      try {
+        const { ProjectDiscoveryServiceServer } = await import('@/lib/project-discovery-service.server');
+        
+        const project = await ProjectDiscoveryServiceServer.getProjectDetail(projectId);
+        
+        return {
+          id: project.id,
+          clientId: project.clientId,
+          client: project.client ? {
+            id: project.client.id,
+            email: project.client.email,
+            fullName: project.client.name,
+          } : null,
+          title: project.title,
+          description: project.description,
+          status: project.status,
+          budget: project.budget,
+          deadline: project.deadline,
+          additionalInfoRequirements: project.additionalInfoRequirements || [],
+          createdAt: project.createdAt,
+          updatedAt: project.updatedAt,
+        };
+      } catch (error: any) {
+        console.error('Failed to get project detail:', error);
+        throw new GraphQLError(error.message || 'Failed to get project detail', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getBidPerformance: async (
+      _: any,
+      { leadId }: { leadId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Authorization: user can only view their own performance
+      if (user.id !== leadId) {
+        throw new GraphQLError('Forbidden: You can only view your own performance', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      try {
+        const { AnalyticsService } = await import('@/lib/analytics-service');
+        
+        const performance = await AnalyticsService.getBidPerformance(leadId);
+        
+        return performance;
+      } catch (error: any) {
+        console.error('Failed to get bid performance:', error);
+        throw new GraphQLError(error.message || 'Failed to get bid performance', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getTeamMetrics: async (
+      _: any,
+      { projectId }: { projectId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { AnalyticsService } = await import('@/lib/analytics-service');
+        
+        const metrics = await AnalyticsService.getTeamMetrics(projectId);
+        
+        return metrics;
+      } catch (error: any) {
+        console.error('Failed to get team metrics:', error);
+        throw new GraphQLError(error.message || 'Failed to get team metrics', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    // Get all proposal team members for the current user
+    getAllProposalTeamMembers: async (_: any, __: any) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        // First, get all proposals where user is the lead
+        const { data: leadProposals, error: leadError } = await supabase
+          .from('proposals')
+          .select(`
+            id,
+            project_id,
+            lead_id,
+            status,
+            projects!inner(id, title, client_id)
+          `)
+          .eq('lead_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (leadError) {
+          console.error('Failed to fetch lead proposals:', leadError);
+          throw new GraphQLError('Failed to fetch proposals', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        // Then, get projects where user is a team member
+        const { data: teamMemberships } = await supabase
+          .from('bid_team_members')
+          .select('project_id')
+          .eq('user_id', user.id);
+
+        const teamProjectIds = teamMemberships?.map(m => m.project_id) || [];
+
+        // Get proposals for those projects
+        let memberProposals: any[] = [];
+        if (teamProjectIds.length > 0) {
+          const { data: memberProps } = await supabase
+            .from('proposals')
+            .select(`
+              id,
+              project_id,
+              lead_id,
+              status,
+              projects!inner(id, title, client_id)
+            `)
+            .in('project_id', teamProjectIds)
+            .order('created_at', { ascending: false });
+          
+          memberProposals = memberProps || [];
+        }
+
+        // Combine and deduplicate proposals
+        const proposalMap = new Map();
+        [...(leadProposals || []), ...memberProposals].forEach(p => {
+          proposalMap.set(p.id, p);
+        });
+        const proposals = Array.from(proposalMap.values());
+
+        // For each proposal, get team members
+        const adminClient = createAdminClient();
+        const proposalsWithTeams = await Promise.all((proposals || []).map(async (proposal: any) => {
+          // Get team members from bid_team_members (legacy) or proposal_team_members (new)
+          const { data: teamMembers } = await supabase
+            .from('bid_team_members')
+            .select('user_id, role, created_at')
+            .eq('project_id', proposal.project_id);
+
+          // Get user details for each member
+          const membersWithDetails = await Promise.all((teamMembers || []).map(async (member: any) => {
+            const { data: userData } = await adminClient.auth.admin.getUserById(member.user_id);
+            
+            return {
+              userId: member.user_id,
+              user: userData?.user ? {
+                id: userData.user.id,
+                email: userData.user.email,
+                fullName: userData.user.user_metadata?.full_name || userData.user.user_metadata?.name,
+                avatarUrl: userData.user.user_metadata?.avatar_url || null,
+              } : null,
+              role: member.role.toUpperCase(),
+              joinedAt: member.created_at,
+            };
+          }));
+
+          return {
+            proposalId: proposal.id,
+            projectId: proposal.project_id,
+            projectTitle: proposal.projects.title,
+            proposalStatus: proposal.status.toUpperCase(),
+            teamMembers: membersWithDetails,
+          };
+        }));
+
+        return proposalsWithTeams;
+      } catch (error: any) {
+        console.error('Failed to get all proposal team members:', error);
+        throw new GraphQLError(error.message || 'Failed to get all proposal team members', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getTeamMembers: async (
+      _: any,
+      { projectId }: { projectId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Make projectId optional - if not provided, return all teams for user's proposals
+      if (!projectId) {
+        // Redirect to getAllProposalTeamMembers
+        return resolvers.Query.getAllProposalTeamMembers(_, {});
+      }
+
+      try {
+        const { TeamManagementService } = await import('@/lib/team-management-service');
+        const service = new TeamManagementService();
+        
+        const result = await service.getTeamMembers({ projectId });
+
+        if (!result.success || !result.data) {
+          throw new GraphQLError(result.error || 'Failed to get team members', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        // Get user details for each member
+        const adminClient = createAdminClient();
+        const membersWithDetails = await Promise.all(
+          result.data.map(async (member: any) => {
+            const { data: userData } = await adminClient.auth.admin.getUserById(member.userId);
+            
+            return {
+              id: member.id,
+              projectId: member.projectId,
+              userId: member.userId,
+              user: userData?.user ? {
+                id: userData.user.id,
+                email: userData.user.email,
+                fullName: userData.user.user_metadata?.full_name || userData.user.user_metadata?.name,
+              } : null,
+              role: member.role.toUpperCase(),
+              joinedAt: member.joinedAt,
+              assignedSections: member.assignedSections || [],
+              contributionStats: member.contributionStats,
+            };
+          })
+        );
+
+        return membersWithDetails;
+      } catch (error: any) {
+        console.error('Failed to get team members:', error);
+        throw new GraphQLError(error.message || 'Failed to get team members', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getActiveInvitations: async (
+      _: any,
+      { projectId }: { projectId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Validate projectId before proceeding
+      if (!projectId || typeof projectId !== 'string') {
+        throw new GraphQLError('Invalid project ID', {
+          extensions: { code: 'BAD_USER_INPUT' },
+        });
+      }
+
+      try {
+        const { TeamInvitationService } = await import('@/lib/team-invitation-service');
+        const service = new TeamInvitationService();
+        
+        const result = await service.getActiveInvitations(projectId, user.id);
+
+        if (!result.success) {
+          // Return empty array instead of throwing for better UX
+          if (result.error?.includes('Invalid project ID') || result.error?.includes('Only bidding leads')) {
+            return [];
+          }
+          throw new GraphQLError(result.error || 'Failed to get active invitations', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        return result.data || [];
+      } catch (error: any) {
+        console.error('Failed to get active invitations:', error);
+        // Return empty array instead of throwing for better UX
+        return [];
+      }
+    },
+
+    validateInvitation: async (
+      _: any,
+      { codeOrToken }: { codeOrToken: string }
+    ) => {
+      // No authentication required for validation
+      try {
+        const { TeamInvitationService } = await import('@/lib/team-invitation-service');
+        const service = new TeamInvitationService();
+        
+        const result = await service.validateInvitation({ codeOrToken });
+
+        if (!result.success || !result.data) {
+          // Return error in the ValidationResult format instead of throwing
+          return {
+            valid: false,
+            invitation: null,
+            error: result.error || 'Failed to validate invitation',
+          };
+        }
+
+        return result.data;
+      } catch (error: any) {
+        console.error('Failed to validate invitation:', error);
+        return {
+          valid: false,
+          invitation: null,
+          error: error.message || 'Failed to validate invitation',
+        };
+      }
+    },
   },
 
   Mutation: {
@@ -4489,7 +5114,27 @@ export const resolvers = {
         });
       }
 
-      // Verify project exists and is open
+      // Use ProposalService to create proposal with workspace and sections
+      const result = await ProposalService.createProposal(projectId, user.id);
+
+      if (!result.success) {
+        // Map error codes to GraphQL errors
+        const errorCodeMap: Record<string, string> = {
+          'DUPLICATE_PROPOSAL': 'BAD_USER_INPUT',
+          'PROJECT_NOT_FOUND': 'NOT_FOUND',
+          'UNAUTHORIZED': 'FORBIDDEN',
+          'WORKSPACE_CREATION_FAILED': 'INTERNAL_SERVER_ERROR',
+          'UNKNOWN': 'INTERNAL_SERVER_ERROR',
+        };
+
+        throw new GraphQLError(result.error || 'Failed to create proposal', {
+          extensions: { 
+            code: errorCodeMap[result.errorCode || 'UNKNOWN'] || 'INTERNAL_SERVER_ERROR' 
+          },
+        });
+      }
+
+      // Get project details for response
       const { data: project, error: projectError } = await supabase
         .from('projects')
         .select('*')
@@ -4502,68 +5147,31 @@ export const resolvers = {
         });
       }
 
-      if (project.status !== 'open') {
-        throw new GraphQLError('Project is not open for bidding', {
-          extensions: { code: 'BAD_USER_INPUT' },
-        });
-      }
-
-      // Check if user already has a proposal for this project
-      const { data: existingProposal } = await supabase
-        .from('proposals')
-        .select('id')
-        .eq('project_id', projectId)
-        .eq('lead_id', user.id)
-        .single();
-
-      if (existingProposal) {
-        throw new GraphQLError('You already have a proposal for this project', {
-          extensions: { code: 'BAD_USER_INPUT' },
-        });
-      }
-
-      // Create proposal
-      const { data: proposal, error: createError } = await supabase
-        .from('proposals')
-        .insert({
-          project_id: projectId,
-          lead_id: user.id,
-          status: 'draft',
-        })
-        .select()
-        .single();
-
-      if (createError) {
-        console.error('Error creating proposal:', createError);
-        throw new GraphQLError('Failed to create proposal', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
-        });
-      }
-
       // Log activity
       await logActivity({
         userId: user.id,
         action: 'proposal_created',
         resourceType: 'proposal',
-        resourceId: proposal.id,
+        resourceId: result.proposal!.id,
         metadata: {
           projectId,
           projectTitle: project.title,
+          workspaceId: result.workspace!.id,
         },
       });
 
       return {
-        id: proposal.id,
-        projectId: proposal.project_id,
-        leadId: proposal.lead_id,
-        title: proposal.title,
-        status: proposal.status,
-        budgetEstimate: proposal.budget_estimate,
-        timelineEstimate: proposal.timeline_estimate,
-        executiveSummary: proposal.executive_summary,
-        submissionDate: proposal.submission_date,
-        createdAt: proposal.created_at,
-        updatedAt: proposal.updated_at,
+        id: result.proposal!.id,
+        projectId: result.proposal!.projectId,
+        leadId: result.proposal!.leadId,
+        title: null,
+        status: result.proposal!.status,
+        budgetEstimate: null,
+        timelineEstimate: null,
+        executiveSummary: null,
+        submissionDate: null,
+        createdAt: result.proposal!.createdAt,
+        updatedAt: result.proposal!.createdAt,
         project: {
           id: project.id,
           clientId: project.client_id,
@@ -4576,6 +5184,107 @@ export const resolvers = {
           createdAt: project.created_at,
           updatedAt: project.updated_at,
         },
+      };
+    },
+
+    updateProposal: async (
+      _: any,
+      {
+        proposalId,
+        title,
+        content,
+        budgetEstimate,
+        timelineEstimate,
+        additionalInfo,
+      }: {
+        proposalId: string;
+        title?: string;
+        content?: string;
+        budgetEstimate?: number;
+        timelineEstimate?: string;
+        additionalInfo?: Record<string, any>;
+      }
+    ) => {
+      const supabase = await createClient();
+
+      // Get authenticated user
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Verify proposal exists and user owns it
+      const { data: proposal, error: proposalError } = await supabase
+        .from('proposals')
+        .select('*')
+        .eq('id', proposalId)
+        .single();
+
+      if (proposalError || !proposal) {
+        throw new GraphQLError('Proposal not found', {
+          extensions: { code: 'NOT_FOUND' },
+        });
+      }
+
+      if (proposal.lead_id !== user.id) {
+        throw new GraphQLError('Forbidden: You can only update your own proposals', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Only allow updates to draft proposals
+      if (proposal.status !== 'draft') {
+        throw new GraphQLError('Cannot update submitted proposals', {
+          extensions: { code: 'BAD_USER_INPUT' },
+        });
+      }
+
+      // Update proposal
+      const updateData: any = {};
+      if (title !== undefined) updateData.title = title;
+      if (content !== undefined) updateData.content = content;
+      if (budgetEstimate !== undefined) updateData.budget_estimate = budgetEstimate;
+      if (timelineEstimate !== undefined) updateData.timeline_estimate = timelineEstimate;
+      if (additionalInfo !== undefined) updateData.additional_info = additionalInfo;
+
+      const { data: updatedProposal, error: updateError } = await supabase
+        .from('proposals')
+        .update(updateData)
+        .eq('id', proposalId)
+        .select()
+        .single();
+
+      if (updateError || !updatedProposal) {
+        throw new GraphQLError('Failed to update proposal', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      // Log activity
+      await logActivity({
+        userId: user.id,
+        action: 'proposal_updated',
+        resourceType: 'proposal',
+        resourceId: proposalId,
+        metadata: {
+          fields: Object.keys(updateData),
+        },
+      });
+
+      return {
+        id: updatedProposal.id,
+        title: updatedProposal.title,
+        content: updatedProposal.content,
+        status: updatedProposal.status,
+        budgetEstimate: updatedProposal.budget_estimate,
+        timelineEstimate: updatedProposal.timeline_estimate,
+        additionalInfo: updatedProposal.additional_info,
+        updatedAt: updatedProposal.updated_at,
       };
     },
 
@@ -7524,6 +8233,297 @@ export const resolvers = {
       } catch (error: any) {
         console.error('Failed to generate scoring export:', error);
         throw new GraphQLError(error.message || 'Failed to generate scoring export', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    // ============================================================================
+    // Proposal Archival Mutations
+    // ============================================================================
+
+    archiveProposal: async (
+      _: any,
+      { proposalId, reason }: { proposalId: string; reason?: string }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { ProposalArchivalService } = await import('@/lib/proposal-archival-service');
+        const result = await ProposalArchivalService.archiveProposal({
+          proposalId,
+          userId: user.id,
+          reason,
+        });
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to archive proposal:', error);
+        throw new GraphQLError(error.message || 'Failed to archive proposal', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    unarchiveProposal: async (
+      _: any,
+      { proposalId }: { proposalId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { ProposalArchivalService } = await import('@/lib/proposal-archival-service');
+        const result = await ProposalArchivalService.unarchiveProposal({
+          proposalId,
+          userId: user.id,
+        });
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to unarchive proposal:', error);
+        throw new GraphQLError(error.message || 'Failed to unarchive proposal', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    bulkArchiveProposals: async (
+      _: any,
+      { proposalIds }: { proposalIds: string[] }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { ProposalArchivalService } = await import('@/lib/proposal-archival-service');
+        const result = await ProposalArchivalService.bulkArchive(proposalIds, user.id);
+        
+        return {
+          success: result.success,
+          error: result.error,
+        };
+      } catch (error: any) {
+        console.error('Failed to bulk archive proposals:', error);
+        throw new GraphQLError(error.message || 'Failed to bulk archive proposals', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    // ============================================================================
+    // Multi-Proposal Management Mutations
+    // ============================================================================
+
+    saveWorkspaceState: async (
+      _: any,
+      { proposalId, state }: { proposalId: string; state: any }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { MultiProposalService } = await import('@/lib/multi-proposal-service');
+        const result = await MultiProposalService.saveWorkspaceState({
+          proposalId,
+          userId: user.id,
+          state,
+        });
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to save workspace state:', error);
+        throw new GraphQLError(error.message || 'Failed to save workspace state', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    clearWorkspaceState: async (
+      _: any,
+      { proposalId }: { proposalId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { MultiProposalService } = await import('@/lib/multi-proposal-service');
+        const result = await MultiProposalService.clearWorkspaceState(proposalId, user.id);
+        
+        return result;
+      } catch (error: any) {
+        console.error('Failed to clear workspace state:', error);
+        throw new GraphQLError(error.message || 'Failed to clear workspace state', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+    // ============================================================================
+    // BIDDING LEADER MANAGEMENT MUTATIONS
+    // ============================================================================
+
+    generateInvitation: async (
+      _: any,
+      { input }: { input: { projectId: string; expirationDays?: number; isMultiUse?: boolean } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { TeamInvitationService } = await import('@/lib/team-invitation-service');
+        const service = new TeamInvitationService();
+        
+        const result = await service.generateInvitation({
+          projectId: input.projectId,
+          createdBy: user.id,
+          expirationDays: input.expirationDays,
+          isMultiUse: input.isMultiUse,
+        });
+
+        if (!result.success || !result.data) {
+          throw new GraphQLError(result.error || 'Failed to generate invitation', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        return result.data;
+      } catch (error: any) {
+        console.error('Failed to generate invitation:', error);
+        throw new GraphQLError(error.message || 'Failed to generate invitation', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    joinTeam: async (
+      _: any,
+      { input }: { input: { invitationId: string } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { TeamManagementService } = await import('@/lib/team-management-service');
+        const service = new TeamManagementService();
+        
+        const result = await service.joinTeam({
+          invitationId: input.invitationId,
+          userId: user.id,
+        });
+
+        if (!result.success || !result.data) {
+          throw new GraphQLError(result.error || 'Failed to join team', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        // Get user details
+        const adminClient = createAdminClient();
+        const { data: userData } = await adminClient.auth.admin.getUserById(result.data.userId);
+
+        return {
+          id: result.data.id,
+          projectId: result.data.projectId,
+          userId: result.data.userId,
+          user: userData?.user ? {
+            id: userData.user.id,
+            email: userData.user.email,
+            fullName: userData.user.user_metadata?.full_name || userData.user.user_metadata?.name,
+          } : null,
+          role: result.data.role.toUpperCase(),
+          joinedAt: result.data.joinedAt,
+          assignedSections: [],
+          contributionStats: null,
+        };
+      } catch (error: any) {
+        console.error('Failed to join team:', error);
+        throw new GraphQLError(error.message || 'Failed to join team', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    removeTeamMember: async (
+      _: any,
+      { input }: { input: { projectId: string; userId: string } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { TeamManagementService } = await import('@/lib/team-management-service');
+        const service = new TeamManagementService();
+        
+        const result = await service.removeTeamMember({
+          projectId: input.projectId,
+          userId: input.userId,
+          removedBy: user.id,
+        });
+
+        if (!result.success) {
+          throw new GraphQLError(result.error || 'Failed to remove team member', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        return true;
+      } catch (error: any) {
+        console.error('Failed to remove team member:', error);
+        throw new GraphQLError(error.message || 'Failed to remove team member', {
           extensions: { code: 'INTERNAL_SERVER_ERROR' },
         });
       }

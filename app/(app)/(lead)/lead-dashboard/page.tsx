@@ -1,10 +1,10 @@
-import { LeadDashboardContent } from "@/components/lead/lead-dashboard-content"
+import { LeadDashboardOverview } from "@/components/lead/lead-dashboard-overview"
 
 export const metadata = {
-  title: "Lead Dashboard | BidSync",
-  description: "Browse open projects and manage your bids",
+  title: "Dashboard | BidSync",
+  description: "Track your proposals and performance metrics",
 }
 
 export default function LeadDashboardPage() {
-  return <LeadDashboardContent />
+  return <LeadDashboardOverview />
 }

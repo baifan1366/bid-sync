@@ -57,6 +57,7 @@ export function useTipTapEditor(options: UseTipTapEditorOptions = {}): Editor | 
   } = options
 
   const editor = useEditor({
+    immediatelyRender: false, // Fix SSR hydration mismatch
     extensions: [
       // StarterKit includes:
       // - Bold, Italic, Strike, Code (text formatting)

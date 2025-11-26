@@ -1,5 +1,9 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+"use client"
+
+import { useState } from "react"
+import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Project } from "@/types/project"
 import { 
   formatBudget, 
@@ -8,7 +12,7 @@ import {
   isDeadlineOverdue,
   cn 
 } from "@/lib/utils"
-import { Calendar, DollarSign, Clock } from "lucide-react"
+import { Calendar, Clock, ArrowRight, ChevronDown, ChevronUp } from "lucide-react"
 
 interface PublicProjectCardProps {
   project: Project
@@ -16,71 +20,111 @@ interface PublicProjectCardProps {
 }
 
 export function PublicProjectCard({ project, onClick }: PublicProjectCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false)
   const hasDeadline = !!project.deadline
   const daysUntilDeadline = hasDeadline ? calculateDaysUntilDeadline(project.deadline!) : null
   const isOverdue = hasDeadline ? isDeadlineOverdue(project.deadline!) : false
   
-  const truncatedDescription = project.description.length > 120 
-    ? project.description.substring(0, 120) + "..." 
-    : project.description
+  const descriptionLimit = 120
+  const shouldTruncate = project.description.length > descriptionLimit
+  const displayDescription = isExpanded || !shouldTruncate
+    ? project.description
+    : project.description.substring(0, descriptionLimit) + "..."
+
+  const handleToggleExpand = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setIsExpanded(!isExpanded)
+  }
 
   return (
     <Card 
       className={cn(
-        "transition-all duration-200 hover:shadow-lg hover:scale-[1.02] cursor-pointer",
-        "bg-card text-card-foreground border-yellow-400/20 hover:border-yellow-400/40"
+        "group relative overflow-hidden transition-all duration-300 cursor-pointer",
+        "bg-white dark:bg-zinc-900 border-2 border-yellow-400/20",
+        "hover:border-yellow-400 hover:shadow-xl hover:-translate-y-1"
       )}
       onClick={onClick}
     >
-      <CardHeader className="pb-3 p-4 sm:p-6">
-        <CardTitle className="text-base sm:text-lg font-semibold line-clamp-2">
-          {project.title}
-        </CardTitle>
-        <Badge className="w-fit mt-2 text-xs bg-yellow-400 text-black hover:bg-yellow-500">
+      {/* Top accent bar */}
+      <div className="absolute top-0 left-0 right-0 h-1 bg-linear-to-r from-yellow-400 to-yellow-500" />
+      
+      <CardHeader className="pb-4 p-5 sm:p-6">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="text-lg sm:text-xl font-bold wrap-break-word text-black dark:text-white group-hover:text-yellow-400 transition-colors">
+            {project.title}
+          </h3>
+          <ArrowRight className="h-5 w-5 text-yellow-400 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+        
+        <Badge className="w-fit mt-3 text-xs font-semibold bg-yellow-400 text-black hover:bg-yellow-500 border-0">
           Open for Bidding
         </Badge>
       </CardHeader>
       
-      <CardContent className="space-y-3 sm:space-y-4 p-4 sm:p-6 pt-0">
-        <p className="text-xs sm:text-sm text-muted-foreground line-clamp-3">
-          {truncatedDescription}
-        </p>
-        
-        <div className="space-y-2">
-          {/* Budget */}
-          <div className="flex items-center gap-2 text-sm sm:text-base">
-            <DollarSign className="h-4 w-4 text-yellow-400 shrink-0" />
-            <span className="font-semibold text-yellow-400">
-              {formatBudget(project.budget)}
-            </span>
-          </div>
-          
-          {/* Deadline */}
-          {hasDeadline && (
-            <div className="flex items-center gap-2 text-xs sm:text-sm">
-              <Calendar className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-              <span className={cn(
-                "font-medium",
-                isOverdue && "text-red-600 dark:text-red-400"
-              )}>
-                Deadline: {formatDate(project.deadline!)}
-              </span>
-            </div>
-          )}
-
-          {/* Days remaining */}
-          {hasDeadline && daysUntilDeadline !== null && !isOverdue && (
-            <div className="flex items-center gap-2 text-xs sm:text-sm">
-              <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground shrink-0" />
-              <span className="text-muted-foreground">
-                {daysUntilDeadline} days remaining
-              </span>
-            </div>
+      <CardContent className="space-y-4 p-5 sm:p-6 pt-0">
+        <div>
+          <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed wrap-break-word whitespace-pre-wrap">
+            {displayDescription}
+          </p>
+          {shouldTruncate && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleToggleExpand}
+              className="mt-2 h-auto p-0 text-yellow-400 hover:text-yellow-500 hover:bg-transparent font-medium"
+            >
+              {isExpanded ? (
+                <>
+                  Show less <ChevronUp className="h-4 w-4 ml-1" />
+                </>
+              ) : (
+                <>
+                  Show more <ChevronDown className="h-4 w-4 ml-1" />
+                </>
+              )}
+            </Button>
           )}
         </div>
         
-        <div className="pt-2 border-t border-yellow-400/20">
-          <p className="text-xs text-muted-foreground">
+        {/* Budget - Prominent Display */}
+        <div className="bg-yellow-400/10 dark:bg-yellow-400/5 rounded-lg p-4 border border-yellow-400/30">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Budget:</span>
+            <span className="text-2xl font-bold text-yellow-400 wrap-break-word">
+              {formatBudget(project.budget)}
+            </span>
+          </div>
+        </div>
+        
+        {/* Deadline Info */}
+        <div className="space-y-2.5">
+          {hasDeadline && (
+            <>
+              <div className="flex items-center gap-2.5 text-sm flex-wrap">
+                <Calendar className="h-4 w-4 text-gray-400 shrink-0" />
+                <span className={cn(
+                  "font-medium wrap-break-word",
+                  isOverdue ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-300"
+                )}>
+                  Deadline: {formatDate(project.deadline!)}
+                </span>
+              </div>
+              
+              {daysUntilDeadline !== null && !isOverdue && (
+                <div className="flex items-center gap-2.5 text-sm flex-wrap">
+                  <Clock className="h-4 w-4 text-yellow-400 shrink-0" />
+                  <span className="font-medium text-yellow-400">
+                    {daysUntilDeadline} {daysUntilDeadline === 1 ? 'day' : 'days'} remaining
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        
+        {/* Footer */}
+        <div className="pt-3 border-t border-yellow-400/20">
+          <p className="text-xs text-gray-500 dark:text-gray-500 wrap-break-word">
             Posted {formatDate(project.createdAt)}
           </p>
         </div>

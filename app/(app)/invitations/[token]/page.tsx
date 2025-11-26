@@ -1,11 +1,11 @@
 /**
  * Invitation Acceptance Page Route
  * 
- * Handles document collaboration invitation acceptance
+ * Handles both document collaboration and team invitation acceptance
  * Route: /invitations/[token]
  */
 
-import { InvitationAcceptancePage } from '@/components/editor/invitation-acceptance-page'
+import { InvitationJoinPage } from '@/components/lead/invitation-join-page'
 
 interface PageProps {
   params: {
@@ -14,5 +14,5 @@ interface PageProps {
 }
 
 export default function InvitationPage({ params }: PageProps) {
-  return <InvitationAcceptancePage token={params.token} />
+  return <InvitationJoinPage token={params.token} />
 }
