@@ -3,7 +3,7 @@
 import { memo } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Home, Folder, Briefcase, FileText, Shield, TrendingUp, User, Users, ClipboardList } from "lucide-react"
+import { Home, Folder, Briefcase, FileText, Shield, TrendingUp, User, Users, ClipboardList, Settings as SettingsIcon } from "lucide-react"
 import {
   Sheet,
   SheetContent,
@@ -35,6 +35,12 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       href: "/profile", 
       icon: User,
       matchPaths: ["/profile"]
+    },
+    { 
+      label: "Settings", 
+      href: "/settings", 
+      icon: SettingsIcon,
+      matchPaths: ["/settings"]
     },
   ],
   bidding_lead: [
@@ -86,6 +92,12 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       icon: User,
       matchPaths: ["/profile"]
     },
+    { 
+      label: "Settings", 
+      href: "/settings", 
+      icon: SettingsIcon,
+      matchPaths: ["/settings"]
+    },
   ],
   bidding_member: [
     { 
@@ -111,6 +123,12 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       href: "/profile", 
       icon: User,
       matchPaths: ["/profile"]
+    },
+    { 
+      label: "Settings", 
+      href: "/settings", 
+      icon: SettingsIcon,
+      matchPaths: ["/settings"]
     },
   ],
   admin: [

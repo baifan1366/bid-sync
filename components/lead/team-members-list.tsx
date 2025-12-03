@@ -9,6 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { GET_ALL_PROPOSAL_TEAM_MEMBERS } from "@/lib/graphql/queries"
 import { RemoveTeamMemberDialog } from "./remove-team-member-dialog"
+import { TeamInvitationDialog } from "./team-invitation-dialog"
 import {
   Users,
   Crown,
@@ -19,6 +20,7 @@ import {
   Clock,
   AlertCircle,
   Briefcase,
+  UserPlus,
 } from "lucide-react"
 import { cn, formatDate } from "@/lib/utils"
 
@@ -177,6 +179,21 @@ export function TeamMembersList({ projectId }: TeamMembersListProps) {
                     >
                       {proposal.proposalStatus}
                     </Badge>
+                    {/* Invite Button for this Proposal */}
+                    <TeamInvitationDialog
+                      projectId={proposal.projectId}
+                      proposalId={proposal.proposalId}
+                      trigger={
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="border-yellow-400/30 hover:bg-yellow-400/10 text-yellow-400"
+                        >
+                          <UserPlus className="h-4 w-4 mr-2" />
+                          Invite
+                        </Button>
+                      }
+                    />
                   </div>
 
                   {/* Team Members for this Proposal */}

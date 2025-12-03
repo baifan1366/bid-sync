@@ -8,7 +8,12 @@
     "start": "next start",
     "create-admin": "tsx scripts/create-admin.ts",
     "test": "vitest --run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "job:retention": "tsx scripts/retention-policy-job.ts",
+    "job:export-cleanup": "tsx scripts/export-cleanup-job.ts",
+    "job:export-worker": "tsx scripts/export-worker.ts",
+    "job:export-worker-once": "tsx scripts/export-worker.ts --once",
+    "yjs:server": "HOST=localhost PORT=1234 npx y-websocket"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

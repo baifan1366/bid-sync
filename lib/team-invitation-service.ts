@@ -18,7 +18,8 @@ import { z } from 'zod'
  */
 
 const GenerateInvitationInputSchema = z.object({
-  projectId: z.string().uuid('Invalid project ID'),
+  proposalId: z.string().uuid('Invalid proposal ID'),
+  projectId: z.string().uuid('Invalid project ID').optional(), // Legacy support
   createdBy: z.string().uuid('Invalid user ID'),
   expirationDays: z.number().int().positive().default(7),
   isMultiUse: z.boolean().default(false),
@@ -38,7 +39,8 @@ const JoinTeamInputSchema = z.object({
  */
 
 export interface GenerateInvitationInput {
-  projectId: string
+  proposalId: string
+  projectId?: string // Legacy support
   createdBy: string
   expirationDays?: number
   isMultiUse?: boolean
@@ -55,7 +57,8 @@ export interface JoinTeamInput {
 
 export interface TeamInvitation {
   id: string
-  projectId: string
+  proposalId: string
+  projectId?: string // Legacy support
   createdBy: string
   code: string
   token: string
@@ -146,11 +149,11 @@ export class TeamInvitationService {
 
       const supabase = await createClient()
 
-      // Check if creator is a bidding lead for this project
+      // Check if creator is a bidding lead for this proposal
       const { data: teamMember, error: memberError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('role')
-        .eq('project_id', validated.projectId)
+        .eq('proposal_id', validated.proposalId)
         .eq('user_id', validated.createdBy)
         .eq('role', 'lead')
         .maybeSingle()
@@ -158,7 +161,7 @@ export class TeamInvitationService {
       if (memberError || !teamMember) {
         return {
           success: false,
-          error: 'Only bidding leads can generate team invitations',
+          error: 'Only proposal leads can generate team invitations',
         }
       }
 
@@ -173,7 +176,8 @@ export class TeamInvitationService {
       const { data: invitation, error: createError } = await supabase
         .from('team_invitations')
         .insert({
-          project_id: validated.projectId,
+          proposal_id: validated.proposalId,
+          project_id: validated.projectId, // Legacy support
           created_by: validated.createdBy,
           code: code,
           expires_at: expiresAt.toISOString(),
@@ -193,6 +197,7 @@ export class TeamInvitationService {
       // Transform database response to TeamInvitation type
       const result: TeamInvitation = {
         id: invitation.id,
+        proposalId: invitation.proposal_id,
         projectId: invitation.project_id,
         createdBy: invitation.created_by,
         code: invitation.code,
@@ -315,6 +320,7 @@ export class TeamInvitationService {
       // Transform database response to TeamInvitation type
       const result: TeamInvitation = {
         id: invitation.id,
+        proposalId: invitation.proposal_id,
         projectId: invitation.project_id,
         createdBy: invitation.created_by,
         code: invitation.code,
@@ -402,9 +408,9 @@ export class TeamInvitationService {
 
       // Check if user is already a team member
       const { data: existingMember, error: memberCheckError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('id')
-        .eq('project_id', invitation.project_id)
+        .eq('proposal_id', invitation.proposal_id)
         .eq('user_id', validated.userId)
         .maybeSingle()
 
@@ -425,9 +431,9 @@ export class TeamInvitationService {
 
       // Add user to team with 'member' role
       const { data: teamMember, error: createError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .insert({
-          project_id: invitation.project_id,
+          proposal_id: invitation.proposal_id,
           user_id: validated.userId,
           role: 'member',
         })
@@ -456,10 +462,10 @@ export class TeamInvitationService {
       // Transform database response to TeamMember type
       const result: TeamMember = {
         id: teamMember.id,
-        projectId: teamMember.project_id,
+        projectId: invitation.project_id || '', // Legacy support
         userId: teamMember.user_id,
         role: teamMember.role as 'lead' | 'member',
-        joinedAt: teamMember.created_at,
+        joinedAt: teamMember.joined_at || teamMember.created_at,
       }
 
       return {
@@ -483,29 +489,29 @@ export class TeamInvitationService {
   }
 
   /**
-   * Get all active invitations for a project
+   * Get all active invitations for a proposal
    * Returns invitations that haven't expired
    * 
-   * @param projectId - Project ID
+   * @param proposalId - Proposal ID
    * @param userId - User ID for permission check (must be lead)
    * @returns Array of active invitations or error
    */
   async getActiveInvitations(
-    projectId: string,
+    proposalId: string,
     userId: string
   ): Promise<TeamInvitationServiceResult<TeamInvitation[]>> {
     try {
       // Validate IDs
-      z.string().uuid().parse(projectId)
+      z.string().uuid().parse(proposalId)
       z.string().uuid().parse(userId)
 
       const supabase = await createClient()
 
-      // Check if user is a bidding lead for this project
+      // Check if user is a proposal lead
       const { data: teamMember, error: memberError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('role')
-        .eq('project_id', projectId)
+        .eq('proposal_id', proposalId)
         .eq('user_id', userId)
         .eq('role', 'lead')
         .maybeSingle()
@@ -513,7 +519,7 @@ export class TeamInvitationService {
       if (memberError || !teamMember) {
         return {
           success: false,
-          error: 'Only bidding leads can view team invitations',
+          error: 'Only proposal leads can view team invitations',
         }
       }
 
@@ -521,7 +527,7 @@ export class TeamInvitationService {
       const { data: invitations, error } = await supabase
         .from('team_invitations')
         .select('*')
-        .eq('project_id', projectId)
+        .eq('proposal_id', proposalId)
         .gt('expires_at', new Date().toISOString())
         .order('created_at', { ascending: false })
 
@@ -536,6 +542,7 @@ export class TeamInvitationService {
       // Transform database response to TeamInvitation array
       const results: TeamInvitation[] = (invitations || []).map((inv) => ({
         id: inv.id,
+        proposalId: inv.proposal_id,
         projectId: inv.project_id,
         createdBy: inv.created_by,
         code: inv.code,

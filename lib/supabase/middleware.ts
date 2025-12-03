@@ -75,6 +75,7 @@ export async function updateSession(request: NextRequest) {
   if (
     path.startsWith('/admin-dashboard') ||
     path.startsWith('/lead-dashboard') ||
+    path.startsWith('/member-dashboard') ||
     path.startsWith('/projects') ||
     path.startsWith('/workspace') ||
     path.startsWith('/profile') ||
@@ -130,28 +131,73 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url)
     }
 
-    // Client route protection (projects page)
-    // Allow both clients and bidding leads to access projects
-    // Clients can manage their projects, leads can view and create proposals
-    if (path.startsWith('/projects') && role !== 'client' && role !== 'bidding_lead') {
-      await logUnauthorizedAccessAttempt(
-        supabase,
-        user.id,
-        path,
-        `insufficient_permissions: role=${role}, required=client or bidding_lead`
-      )
-      const url = request.nextUrl.clone()
-      url.pathname = '/unauthorized'
-      return NextResponse.redirect(url)
-    }
-
-    // Lead route protection
+    // Lead dashboard protection
     if (path.startsWith('/lead-dashboard') && role !== 'bidding_lead') {
       await logUnauthorizedAccessAttempt(
         supabase,
         user.id,
         path,
         `insufficient_permissions: role=${role}, required=bidding_lead`
+      )
+      const url = request.nextUrl.clone()
+      url.pathname = '/unauthorized'
+      return NextResponse.redirect(url)
+    }
+
+    // Member dashboard protection
+    if (path.startsWith('/member-dashboard') && role !== 'bidding_member') {
+      await logUnauthorizedAccessAttempt(
+        supabase,
+        user.id,
+        path,
+        `insufficient_permissions: role=${role}, required=bidding_member`
+      )
+      const url = request.nextUrl.clone()
+      url.pathname = '/unauthorized'
+      return NextResponse.redirect(url)
+    }
+
+    // Editor and Documents - allow bidding_lead and bidding_member
+    // Document-level permissions are checked in the component
+    if ((path.startsWith('/editor') || path.startsWith('/documents')) && 
+        role !== 'bidding_lead' && 
+        role !== 'bidding_member' && 
+        role !== 'admin') {
+      await logUnauthorizedAccessAttempt(
+        supabase,
+        user.id,
+        path,
+        `insufficient_permissions: role=${role}, required=bidding_lead or bidding_member`
+      )
+      const url = request.nextUrl.clone()
+      url.pathname = '/unauthorized'
+      return NextResponse.redirect(url)
+    }
+
+    // Workspace - allow bidding_lead and bidding_member
+    if (path.startsWith('/workspace') && 
+        role !== 'bidding_lead' && 
+        role !== 'bidding_member' && 
+        role !== 'admin') {
+      await logUnauthorizedAccessAttempt(
+        supabase,
+        user.id,
+        path,
+        `insufficient_permissions: role=${role}, required=bidding_lead or bidding_member`
+      )
+      const url = request.nextUrl.clone()
+      url.pathname = '/unauthorized'
+      return NextResponse.redirect(url)
+    }
+
+    // Client route protection (projects page)
+    // Allow both clients and bidding leads to access projects
+    if (path.startsWith('/projects') && role !== 'client' && role !== 'bidding_lead') {
+      await logUnauthorizedAccessAttempt(
+        supabase,
+        user.id,
+        path,
+        `insufficient_permissions: role=${role}, required=client or bidding_lead`
       )
       const url = request.nextUrl.clone()
       url.pathname = '/unauthorized'

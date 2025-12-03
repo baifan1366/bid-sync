@@ -10,11 +10,12 @@
 import { CollaborativeEditorPage } from '@/components/editor/collaborative-editor-page'
 
 interface EditorPageProps {
-  params: {
+  params: Promise<{
     documentId: string
-  }
+  }>
 }
 
-export default function EditorPage({ params }: EditorPageProps) {
-  return <CollaborativeEditorPage documentId={params.documentId} />
+export default async function EditorPage({ params }: EditorPageProps) {
+  const { documentId } = await params
+  return <CollaborativeEditorPage documentId={documentId} />
 }

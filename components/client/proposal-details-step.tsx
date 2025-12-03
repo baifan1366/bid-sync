@@ -1,12 +1,11 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Form,
   FormControl,
@@ -17,6 +16,8 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 import { AlertCircle } from "lucide-react"
+import { TipTapEditor } from "@/components/editor/tiptap-editor"
+import type { JSONContent } from "@tiptap/core"
 import type { ProposalDetails } from "./proposal-submission-wizard"
 
 // Validation schema for proposal details
@@ -56,6 +57,12 @@ export function ProposalDetailsStep({
   onNext,
   onBack,
 }: ProposalDetailsStepProps) {
+  // State for rich text editor content
+  const [editorContent, setEditorContent] = useState<JSONContent | string>(
+    initialData.executiveSummary || ""
+  )
+  const [editorTextLength, setEditorTextLength] = useState(0)
+
   // Initialize form with react-hook-form and zod validation
   const form = useForm<ProposalDetailsFormData>({
     resolver: zodResolver(proposalDetailsSchema),
@@ -213,18 +220,38 @@ export function ProposalDetailsStep({
               <FormItem>
                 <FormLabel>Executive Summary *</FormLabel>
                 <FormControl>
-                  <Textarea
-                    placeholder="Provide a comprehensive overview of your proposal, including key objectives, approach, and value proposition..."
-                    rows={8}
-                    aria-required="true"
-                    aria-invalid={!!errors.executiveSummary}
-                    aria-describedby={errors.executiveSummary ? "summary-error" : "summary-description"}
-                    {...field}
-                    className={errors.executiveSummary ? "border-red-500 focus-visible:ring-red-500" : ""}
-                  />
+                  <div 
+                    className={`border rounded-lg overflow-hidden ${
+                      errors.executiveSummary 
+                        ? "border-red-500 focus-within:ring-2 focus-within:ring-red-500" 
+                        : "border-yellow-400/20 focus-within:border-yellow-400"
+                    }`}
+                  >
+                    <TipTapEditor
+                      content={editorContent}
+                      placeholder="Provide a comprehensive overview of your proposal, including key objectives, approach, and value proposition..."
+                      onUpdate={(content) => {
+                        // Convert JSONContent to string for storage
+                        const htmlString = typeof content === 'string' 
+                          ? content 
+                          : JSON.stringify(content)
+                        
+                        // Get text length for validation
+                        const textLength = typeof content === 'string'
+                          ? content.length
+                          : JSON.stringify(content).length
+                        
+                        setEditorContent(content)
+                        setEditorTextLength(textLength)
+                        field.onChange(htmlString)
+                      }}
+                      minHeight="300px"
+                      className="bg-white dark:bg-black"
+                    />
+                  </div>
                 </FormControl>
                 <FormDescription id="summary-description">
-                  A detailed summary of your proposal (50-5000 characters) • <span aria-live="polite">{field.value.length} / 5000</span>
+                  A detailed summary of your proposal (50-5000 characters) • <span aria-live="polite">{editorTextLength} / 5000</span>
                 </FormDescription>
                 {errors.executiveSummary && <FormMessage id="summary-error" />}
               </FormItem>

@@ -50,3 +50,8 @@ export {
   TeamInvitationDialogWithErrorBoundary,
   TeamStatisticsCardWithErrorBoundary,
 } from './team-management-with-error-boundary'
+// Deliverable management components
+export { DeliverableUpload } from './deliverable-upload'
+export { DeliverablesList } from './deliverables-list'
+export { ReadyForDeliveryButton } from './ready-for-delivery-button'
+export { DeliverableManagementExample } from './deliverable-management-example'

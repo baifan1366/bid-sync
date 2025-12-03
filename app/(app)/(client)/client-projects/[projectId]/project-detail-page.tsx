@@ -713,7 +713,7 @@ export function ProjectDetailPage() {
                 })
               }}
               onProposalClick={(id) => {
-                router.push(`/projects/${projectId}/proposals/${id}`)
+                router.push(`/client-projects/${projectId}/proposals/${id}`)
               }}
             />
           </CardContent>

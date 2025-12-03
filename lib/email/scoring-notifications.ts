@@ -320,7 +320,7 @@ export async function sendClientAllScoredNotification(
 
     // Generate project URL
     const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com';
-    const projectUrl = `${baseUrl}/projects/${params.projectId}`;
+    const projectUrl = `${baseUrl}/client-projects/${params.projectId}`;
 
     // Generate and send email
     const emailContent = getAllProposalsScoredEmail({

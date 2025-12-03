@@ -8,11 +8,12 @@
 import { InvitationJoinPage } from '@/components/lead/invitation-join-page'
 
 interface PageProps {
-  params: {
+  params: Promise<{
     token: string
-  }
+  }>
 }
 
-export default function InvitationPage({ params }: PageProps) {
-  return <InvitationJoinPage token={params.token} />
+export default async function InvitationPage({ params }: PageProps) {
+  const { token } = await params
+  return <InvitationJoinPage token={token} />
 }

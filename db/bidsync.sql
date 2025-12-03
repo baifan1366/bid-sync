@@ -158,6 +158,32 @@ FROM projects p, auth.users u
 WHERE u.email = 'lead@example.com'
 LIMIT 1;
 
+-- Seed proposal team members (NEW - add lead to their proposal)
+INSERT INTO public.proposal_team_members (proposal_id, user_id, role)
+SELECT pr.id, pr.lead_id, 'lead'
+FROM public.proposals pr
+WHERE pr.lead_id IN (SELECT id FROM auth.users WHERE email = 'lead@example.com')
+ON CONFLICT (proposal_id, user_id) DO NOTHING;
+
+-- Auto-add proposal lead to proposal_team_members when proposal is created
+CREATE OR REPLACE FUNCTION public.auto_add_proposal_lead()
+RETURNS TRIGGER AS $$
+BEGIN
+    INSERT INTO public.proposal_team_members (proposal_id, user_id, role)
+    VALUES (NEW.id, NEW.lead_id, 'lead')
+    ON CONFLICT (proposal_id, user_id) DO NOTHING;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trigger_auto_add_proposal_lead ON public.proposals;
+CREATE TRIGGER trigger_auto_add_proposal_lead
+    AFTER INSERT ON public.proposals
+    FOR EACH ROW
+    EXECUTE FUNCTION public.auto_add_proposal_lead();
+
+COMMENT ON FUNCTION public.auto_add_proposal_lead IS 'Automatically adds proposal lead to proposal_team_members table when a new proposal is created';
+
 
 -- ============================================================
 -- 6. PROPOSAL VERSIONS
@@ -402,11 +428,35 @@ ALTER TABLE public.team_invitations ENABLE ROW LEVEL SECURITY;
 -- RLS POLICIES FOR TEAM INVITATIONS
 -- ============================================================
 
--- Bidding leads can view invitations for their projects
+-- Proposal leads can view invitations for their proposals (NEW)
+CREATE POLICY "team_invitations_proposal_lead_select" ON public.team_invitations
+FOR SELECT
+USING (
+    proposal_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM public.proposal_team_members ptm
+        WHERE ptm.proposal_id = team_invitations.proposal_id
+        AND ptm.user_id = auth.uid()
+        AND ptm.role = 'lead'
+    )
+);
+
+-- Proposal leads can create invitations for their proposals (NEW)
+CREATE POLICY "team_invitations_proposal_lead_insert" ON public.team_invitations
+FOR INSERT
+WITH CHECK (
+    proposal_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM public.proposal_team_members ptm
+        WHERE ptm.proposal_id = team_invitations.proposal_id
+        AND ptm.user_id = auth.uid()
+        AND ptm.role = 'lead'
+    )
+);
+
+-- LEGACY: Bidding leads can view invitations for their projects
 CREATE POLICY "team_invitations_lead_select" ON public.team_invitations
 FOR SELECT
 USING (
-    EXISTS (
+    project_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM public.bid_team_members btm
         WHERE btm.project_id = team_invitations.project_id
         AND btm.user_id = auth.uid()
@@ -414,11 +464,11 @@ USING (
     )
 );
 
--- Bidding leads can create invitations for their projects
+-- LEGACY: Bidding leads can create invitations for their projects
 CREATE POLICY "team_invitations_lead_insert" ON public.team_invitations
 FOR INSERT
 WITH CHECK (
-    EXISTS (
+    project_id IS NOT NULL AND EXISTS (
         SELECT 1 FROM public.bid_team_members btm
         WHERE btm.project_id = team_invitations.project_id
         AND btm.user_id = auth.uid()
@@ -2038,6 +2088,669 @@ COMMENT ON TABLE public.proposal_workspace_states IS 'Stores workspace state for
 COMMENT ON COLUMN public.proposal_workspace_states.state IS 'JSONB object containing workspace state (scroll position, open panels, filters, etc.)';
 
 -- ============================================================
+-- MIGRATION 022: PROJECT DELIVERY AND ARCHIVAL SYSTEM
+-- ============================================================
+
+-- Add new project statuses for completion workflow
+DO $
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum 
+        WHERE enumlabel = 'pending_completion' 
+        AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'project_status')
+    ) THEN
+        ALTER TYPE project_status ADD VALUE 'pending_completion';
+    END IF;
+    
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum 
+        WHERE enumlabel = 'completed' 
+        AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'project_status')
+    ) THEN
+        ALTER TYPE project_status ADD VALUE 'completed';
+    END IF;
+END $;
+
+-- Project Deliverables Table
+CREATE TABLE IF NOT EXISTS public.project_deliverables (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    uploaded_by UUID NOT NULL REFERENCES auth.users(id),
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_type TEXT NOT NULL,
+    file_size BIGINT NOT NULL,
+    description TEXT,
+    version INT NOT NULL DEFAULT 1,
+    is_final BOOLEAN DEFAULT false,
+    uploaded_at TIMESTAMPTZ DEFAULT now(),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT deliverables_file_size_check CHECK (file_size > 0 AND file_size <= 104857600)
+);
+
+CREATE INDEX IF NOT EXISTS idx_deliverables_project ON public.project_deliverables(project_id);
+CREATE INDEX IF NOT EXISTS idx_deliverables_proposal ON public.project_deliverables(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_deliverables_uploaded_by ON public.project_deliverables(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_deliverables_uploaded_at ON public.project_deliverables(uploaded_at DESC);
+
+COMMENT ON TABLE public.project_deliverables IS 'Stores final deliverables uploaded by bidding teams upon project completion';
+
+-- Project Completions Table
+CREATE TABLE IF NOT EXISTS public.project_completions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE UNIQUE,
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    submitted_by UUID NOT NULL REFERENCES auth.users(id),
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_by UUID REFERENCES auth.users(id),
+    reviewed_at TIMESTAMPTZ,
+    review_status TEXT NOT NULL DEFAULT 'pending' CHECK (review_status IN ('pending', 'accepted', 'revision_requested')),
+    review_comments TEXT,
+    revision_count INT DEFAULT 0,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_completions_project ON public.project_completions(project_id);
+CREATE INDEX IF NOT EXISTS idx_completions_proposal ON public.project_completions(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_completions_status ON public.project_completions(review_status);
+CREATE INDEX IF NOT EXISTS idx_completions_submitted_at ON public.project_completions(submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_completions_completed_at ON public.project_completions(completed_at DESC) WHERE completed_at IS NOT NULL;
+
+-- Project Archives Table
+CREATE TABLE IF NOT EXISTS public.project_archives (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE UNIQUE,
+    archive_identifier TEXT NOT NULL UNIQUE,
+    archive_data JSONB NOT NULL,
+    compressed_size BIGINT NOT NULL,
+    original_size BIGINT NOT NULL,
+    compression_ratio NUMERIC(5,2),
+    archived_by UUID NOT NULL REFERENCES auth.users(id),
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    retention_until TIMESTAMPTZ,
+    legal_hold BOOLEAN DEFAULT false,
+    legal_hold_reason TEXT,
+    access_count INT DEFAULT 0,
+    last_accessed_at TIMESTAMPTZ,
+    marked_for_deletion_at TIMESTAMPTZ,
+    scheduled_deletion_at TIMESTAMPTZ,
+    legal_hold_applied_by UUID REFERENCES auth.users(id),
+    legal_hold_applied_at TIMESTAMPTZ,
+    legal_hold_removed_by UUID REFERENCES auth.users(id),
+    legal_hold_removed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_archives_project ON public.project_archives(project_id);
+CREATE INDEX IF NOT EXISTS idx_archives_identifier ON public.project_archives(archive_identifier);
+CREATE INDEX IF NOT EXISTS idx_archives_archived_at ON public.project_archives(archived_at DESC);
+CREATE INDEX IF NOT EXISTS idx_archives_retention ON public.project_archives(retention_until) WHERE retention_until IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_archives_legal_hold ON public.project_archives(legal_hold) WHERE legal_hold = true;
+CREATE INDEX IF NOT EXISTS idx_archives_marked_for_deletion ON public.project_archives(marked_for_deletion_at) WHERE marked_for_deletion_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_archives_scheduled_deletion ON public.project_archives(scheduled_deletion_at) WHERE scheduled_deletion_at IS NOT NULL;
+
+-- Completion Revisions Table
+CREATE TABLE IF NOT EXISTS public.completion_revisions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    completion_id UUID NOT NULL REFERENCES public.project_completions(id) ON DELETE CASCADE,
+    revision_number INT NOT NULL,
+    requested_by UUID NOT NULL REFERENCES auth.users(id),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revision_notes TEXT NOT NULL,
+    resolved_by UUID REFERENCES auth.users(id),
+    resolved_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(completion_id, revision_number)
+);
+
+CREATE INDEX IF NOT EXISTS idx_revisions_completion ON public.completion_revisions(completion_id);
+CREATE INDEX IF NOT EXISTS idx_revisions_requested_at ON public.completion_revisions(requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_revisions_requested_by ON public.completion_revisions(requested_by);
+
+-- Project Exports Table
+CREATE TABLE IF NOT EXISTS public.project_exports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    requested_by UUID NOT NULL REFERENCES auth.users(id),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+    export_path TEXT,
+    export_size BIGINT,
+    expires_at TIMESTAMPTZ,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_exports_project ON public.project_exports(project_id);
+CREATE INDEX IF NOT EXISTS idx_exports_requested_by ON public.project_exports(requested_by);
+CREATE INDEX IF NOT EXISTS idx_exports_status ON public.project_exports(status);
+CREATE INDEX IF NOT EXISTS idx_exports_expires ON public.project_exports(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_exports_requested_at ON public.project_exports(requested_at DESC);
+
+-- Archive Deletion Logs Table
+CREATE TABLE IF NOT EXISTS public.archive_deletion_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    archive_id UUID NOT NULL,
+    project_id UUID NOT NULL,
+    archive_identifier TEXT NOT NULL,
+    deleted_by UUID NOT NULL REFERENCES auth.users(id),
+    deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_deletion_logs_archive ON public.archive_deletion_logs(archive_id);
+CREATE INDEX IF NOT EXISTS idx_deletion_logs_project ON public.archive_deletion_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_deletion_logs_deleted_by ON public.archive_deletion_logs(deleted_by);
+CREATE INDEX IF NOT EXISTS idx_deletion_logs_deleted_at ON public.archive_deletion_logs(deleted_at DESC);
+
+-- Legal Hold Logs Table
+CREATE TABLE IF NOT EXISTS public.legal_hold_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    archive_id UUID NOT NULL REFERENCES public.project_archives(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    action TEXT NOT NULL CHECK (action IN ('applied', 'removed')),
+    reason TEXT NOT NULL,
+    performed_by UUID NOT NULL REFERENCES auth.users(id),
+    performed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_legal_hold_logs_archive ON public.legal_hold_logs(archive_id);
+CREATE INDEX IF NOT EXISTS idx_legal_hold_logs_project ON public.legal_hold_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_legal_hold_logs_performed_by ON public.legal_hold_logs(performed_by);
+CREATE INDEX IF NOT EXISTS idx_legal_hold_logs_performed_at ON public.legal_hold_logs(performed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_legal_hold_logs_action ON public.legal_hold_logs(action);
+
+-- Enable RLS
+ALTER TABLE public.project_deliverables ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_completions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_archives ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.completion_revisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_exports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.archive_deletion_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.legal_hold_logs ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies for Deliverables
+CREATE POLICY "deliverables_team_client_select" ON public.project_deliverables
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_deliverables.project_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+CREATE POLICY "deliverables_team_insert" ON public.project_deliverables
+FOR INSERT WITH CHECK (
+  uploaded_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.bid_team_members btm
+    WHERE btm.project_id = project_deliverables.project_id AND btm.user_id = auth.uid()
+  )
+);
+
+CREATE POLICY "deliverables_team_delete" ON public.project_deliverables
+FOR DELETE USING (
+  uploaded_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_deliverables.project_id AND p.status = 'awarded'
+  )
+);
+
+-- RLS Policies for Completions
+CREATE POLICY "completions_team_client_select" ON public.project_completions
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_completions.project_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+CREATE POLICY "completions_lead_insert" ON public.project_completions
+FOR INSERT WITH CHECK (
+  submitted_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.bid_team_members btm
+    WHERE btm.project_id = project_completions.project_id
+    AND btm.user_id = auth.uid() AND btm.role = 'lead'
+  )
+);
+
+CREATE POLICY "completions_client_update" ON public.project_completions
+FOR UPDATE USING (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_completions.project_id AND p.client_id = auth.uid()
+  )
+);
+
+-- RLS Policies for Archives
+CREATE POLICY "archives_participants_select" ON public.project_archives
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_archives.project_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+CREATE POLICY "archives_system_insert" ON public.project_archives FOR INSERT WITH CHECK (true);
+CREATE POLICY "archives_system_update" ON public.project_archives FOR UPDATE USING (true);
+
+-- RLS Policies for Revisions
+CREATE POLICY "revisions_team_client_select" ON public.completion_revisions
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.project_completions pc
+    JOIN public.projects p ON p.id = pc.project_id
+    WHERE pc.id = completion_revisions.completion_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+CREATE POLICY "revisions_client_insert" ON public.completion_revisions
+FOR INSERT WITH CHECK (
+  requested_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.project_completions pc
+    JOIN public.projects p ON p.id = pc.project_id
+    WHERE pc.id = completion_revisions.completion_id AND p.client_id = auth.uid()
+  )
+);
+
+-- RLS Policies for Exports
+CREATE POLICY "exports_user_select" ON public.project_exports FOR SELECT USING (requested_by = auth.uid());
+CREATE POLICY "exports_user_insert" ON public.project_exports
+FOR INSERT WITH CHECK (
+  requested_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_exports.project_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+CREATE POLICY "exports_system_update" ON public.project_exports FOR UPDATE USING (true);
+
+-- RLS Policies for Logs (Admin only)
+CREATE POLICY "deletion_logs_admin_select" ON public.archive_deletion_logs
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE id = auth.uid() AND raw_user_meta_data->>'role' = 'admin'
+  )
+);
+
+CREATE POLICY "deletion_logs_system_insert" ON public.archive_deletion_logs FOR INSERT WITH CHECK (true);
+
+CREATE POLICY "legal_hold_logs_admin_select" ON public.legal_hold_logs
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE id = auth.uid() AND raw_user_meta_data->>'role' = 'admin'
+  )
+);
+
+CREATE POLICY "legal_hold_logs_system_insert" ON public.legal_hold_logs FOR INSERT WITH CHECK (true);
+
+-- Helper Functions
+CREATE OR REPLACE FUNCTION public.generate_archive_identifier()
+RETURNS TEXT AS $
+DECLARE
+  v_identifier TEXT;
+  v_exists BOOLEAN;
+BEGIN
+  LOOP
+    v_identifier := 'ARCH-' || TO_CHAR(NOW(), 'YYYYMMDD') || '-' || UPPER(SUBSTRING(MD5(RANDOM()::TEXT) FROM 1 FOR 6));
+    SELECT EXISTS(SELECT 1 FROM public.project_archives WHERE archive_identifier = v_identifier) INTO v_exists;
+    EXIT WHEN NOT v_exists;
+  END LOOP;
+  RETURN v_identifier;
+END;
+$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.increment_archive_access(p_archive_id UUID)
+RETURNS VOID AS $
+BEGIN
+  UPDATE public.project_archives
+  SET access_count = access_count + 1, last_accessed_at = NOW()
+  WHERE id = p_archive_id;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.get_completion_statistics(
+  p_client_id UUID DEFAULT NULL,
+  p_date_from TIMESTAMPTZ DEFAULT NULL,
+  p_date_to TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS JSONB AS $
+DECLARE
+  v_result JSONB;
+BEGIN
+  SELECT jsonb_build_object(
+    'totalCompleted', COUNT(*),
+    'averageTimeToCompletion', COALESCE(EXTRACT(EPOCH FROM AVG(pc.completed_at - pc.submitted_at))::INT, 0),
+    'projectsRequiringRevisions', COUNT(*) FILTER (WHERE pc.revision_count > 0),
+    'totalDeliverablesReceived', (
+      SELECT COUNT(*) FROM public.project_deliverables pd
+      JOIN public.projects p ON p.id = pd.project_id
+      WHERE (p_client_id IS NULL OR p.client_id = p_client_id)
+      AND (p_date_from IS NULL OR pd.uploaded_at >= p_date_from)
+      AND (p_date_to IS NULL OR pd.uploaded_at <= p_date_to)
+    )
+  ) INTO v_result
+  FROM public.project_completions pc
+  JOIN public.projects p ON p.id = pc.project_id
+  WHERE pc.completed_at IS NOT NULL
+  AND (p_client_id IS NULL OR p.client_id = p_client_id)
+  AND (p_date_from IS NULL OR pc.completed_at >= p_date_from)
+  AND (p_date_to IS NULL OR pc.completed_at <= p_date_to);
+  RETURN v_result;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.generate_archive_identifier() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.increment_archive_access(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_completion_statistics(UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO authenticated;
+
+-- ============================================================
+-- MIGRATION 023: FIX RLS INFINITE RECURSION
+-- ============================================================
+
+-- Create SECURITY DEFINER helper functions to avoid RLS recursion
+CREATE OR REPLACE FUNCTION public.is_proposal_lead(p_proposal_id UUID, p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM public.proposals 
+        WHERE id = p_proposal_id AND lead_id = p_user_id
+    );
+END;
+$;
+
+CREATE OR REPLACE FUNCTION public.is_user_admin(p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM auth.users 
+        WHERE id = p_user_id AND raw_user_meta_data->>'role' = 'admin'
+    );
+END;
+$;
+
+CREATE OR REPLACE FUNCTION public.is_document_owner(p_document_id UUID, p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM public.workspace_documents 
+        WHERE id = p_document_id AND created_by = p_user_id
+    );
+END;
+$;
+
+CREATE OR REPLACE FUNCTION public.has_document_role(p_document_id UUID, p_user_id UUID, p_min_role TEXT DEFAULT 'viewer')
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $
+DECLARE
+    v_user_role TEXT;
+    v_role_level INT;
+    v_min_level INT;
+BEGIN
+    SELECT role INTO v_user_role
+    FROM public.document_collaborators
+    WHERE document_id = p_document_id AND user_id = p_user_id
+    LIMIT 1;
+    
+    IF v_user_role IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    
+    v_role_level := CASE v_user_role
+        WHEN 'owner' THEN 4
+        WHEN 'editor' THEN 3
+        WHEN 'commenter' THEN 2
+        WHEN 'viewer' THEN 1
+        ELSE 0
+    END;
+    
+    v_min_level := CASE p_min_role
+        WHEN 'owner' THEN 4
+        WHEN 'editor' THEN 3
+        WHEN 'commenter' THEN 2
+        WHEN 'viewer' THEN 1
+        ELSE 0
+    END;
+    
+    RETURN v_role_level >= v_min_level;
+END;
+$;
+
+GRANT EXECUTE ON FUNCTION public.is_proposal_lead(UUID, UUID) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.is_user_admin(UUID) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.is_document_owner(UUID, UUID) TO authenticated, anon;
+GRANT EXECUTE ON FUNCTION public.has_document_role(UUID, UUID, TEXT) TO authenticated, anon;
+
+-- Fix proposal_team_members policies
+DO $ 
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN (SELECT policyname FROM pg_policies WHERE tablename = 'proposal_team_members' AND schemaname = 'public')
+    LOOP
+        EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(r.policyname) || ' ON public.proposal_team_members';
+    END LOOP;
+END $;
+
+CREATE POLICY "ptm_view_own" ON public.proposal_team_members
+FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "ptm_lead_view" ON public.proposal_team_members
+FOR SELECT USING (public.is_proposal_lead(proposal_id, auth.uid()));
+
+CREATE POLICY "ptm_lead_insert" ON public.proposal_team_members
+FOR INSERT WITH CHECK (public.is_proposal_lead(proposal_id, auth.uid()));
+
+CREATE POLICY "ptm_lead_update" ON public.proposal_team_members
+FOR UPDATE USING (public.is_proposal_lead(proposal_id, auth.uid()));
+
+CREATE POLICY "ptm_lead_delete" ON public.proposal_team_members
+FOR DELETE USING (public.is_proposal_lead(proposal_id, auth.uid()));
+
+CREATE POLICY "ptm_admin_all" ON public.proposal_team_members
+FOR ALL USING (public.is_user_admin(auth.uid()));
+
+-- Fix document_collaborators policies
+DO $ 
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN (SELECT policyname FROM pg_policies WHERE tablename = 'document_collaborators' AND schemaname = 'public')
+    LOOP
+        EXECUTE 'DROP POLICY IF EXISTS ' || quote_ident(r.policyname) || ' ON public.document_collaborators';
+    END LOOP;
+END $;
+
+CREATE POLICY "dc_view_own" ON public.document_collaborators
+FOR SELECT USING (user_id = auth.uid());
+
+CREATE POLICY "dc_doc_owner_view" ON public.document_collaborators
+FOR SELECT USING (public.is_document_owner(document_id, auth.uid()));
+
+CREATE POLICY "dc_owner_insert" ON public.document_collaborators
+FOR INSERT WITH CHECK (
+    added_by = auth.uid() 
+    AND public.has_document_role(document_id, auth.uid(), 'owner')
+);
+
+CREATE POLICY "dc_owner_update" ON public.document_collaborators
+FOR UPDATE USING (public.has_document_role(document_id, auth.uid(), 'owner'))
+WITH CHECK (public.has_document_role(document_id, auth.uid(), 'owner'));
+
+CREATE POLICY "dc_owner_delete" ON public.document_collaborators
+FOR DELETE USING (public.has_document_role(document_id, auth.uid(), 'owner'));
+
+CREATE POLICY "dc_admin_all" ON public.document_collaborators
+FOR ALL USING (public.is_user_admin(auth.uid()));
+
+-- ============================================================
+-- MIGRATION 024: ERROR HANDLING AND LOGGING
+-- ============================================================
+
+-- Error Logs Table
+CREATE TABLE IF NOT EXISTS public.error_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    error_code TEXT NOT NULL,
+    error_category TEXT NOT NULL,
+    error_message TEXT NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    project_id UUID REFERENCES public.projects(id) ON DELETE SET NULL,
+    operation TEXT NOT NULL,
+    details JSONB,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
+    retryable BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_error_logs_error_code ON public.error_logs(error_code);
+CREATE INDEX IF NOT EXISTS idx_error_logs_error_category ON public.error_logs(error_category);
+CREATE INDEX IF NOT EXISTS idx_error_logs_user_id ON public.error_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_error_logs_project_id ON public.error_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_error_logs_operation ON public.error_logs(operation);
+CREATE INDEX IF NOT EXISTS idx_error_logs_timestamp ON public.error_logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_error_logs_retryable ON public.error_logs(retryable) WHERE retryable = true;
+
+-- Operation Logs Table
+CREATE TABLE IF NOT EXISTS public.operation_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    level TEXT NOT NULL CHECK (level IN ('DEBUG', 'INFO', 'WARN', 'ERROR')),
+    operation TEXT NOT NULL,
+    message TEXT NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    project_id UUID REFERENCES public.projects(id) ON DELETE SET NULL,
+    deliverable_id UUID REFERENCES public.project_deliverables(id) ON DELETE SET NULL,
+    archive_id UUID REFERENCES public.project_archives(id) ON DELETE SET NULL,
+    export_id UUID REFERENCES public.project_exports(id) ON DELETE SET NULL,
+    completion_id UUID REFERENCES public.project_completions(id) ON DELETE SET NULL,
+    metadata JSONB,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT now(),
+    duration_ms INTEGER,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_operation_logs_level ON public.operation_logs(level);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_operation ON public.operation_logs(operation);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_user_id ON public.operation_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_project_id ON public.operation_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_timestamp ON public.operation_logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_deliverable_id ON public.operation_logs(deliverable_id);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_archive_id ON public.operation_logs(archive_id);
+CREATE INDEX IF NOT EXISTS idx_operation_logs_export_id ON public.operation_logs(export_id);
+
+-- Enable RLS
+ALTER TABLE public.error_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.operation_logs ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies (Admin only)
+CREATE POLICY "error_logs_admin_select" ON public.error_logs
+FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM auth.users
+        WHERE id = auth.uid() AND raw_user_meta_data->>'role' = 'admin'
+    )
+);
+
+CREATE POLICY "operation_logs_admin_select" ON public.operation_logs
+FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM auth.users
+        WHERE id = auth.uid() AND raw_user_meta_data->>'role' = 'admin'
+    )
+);
+
+CREATE POLICY "error_logs_service_insert" ON public.error_logs FOR INSERT WITH CHECK (true);
+CREATE POLICY "operation_logs_service_insert" ON public.operation_logs FOR INSERT WITH CHECK (true);
+
+-- Cleanup function for old logs
+CREATE OR REPLACE FUNCTION public.cleanup_old_logs(days_to_keep INTEGER DEFAULT 90)
+RETURNS TABLE (
+    error_logs_deleted BIGINT,
+    operation_logs_deleted BIGINT
+) AS $
+DECLARE
+    cutoff_date TIMESTAMPTZ;
+    error_count BIGINT;
+    operation_count BIGINT;
+BEGIN
+    cutoff_date := now() - (days_to_keep || ' days')::INTERVAL;
+    
+    DELETE FROM public.error_logs WHERE timestamp < cutoff_date;
+    GET DIAGNOSTICS error_count = ROW_COUNT;
+    
+    DELETE FROM public.operation_logs WHERE timestamp < cutoff_date AND level != 'ERROR';
+    GET DIAGNOSTICS operation_count = ROW_COUNT;
+    
+    RETURN QUERY SELECT error_count, operation_count;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION public.cleanup_old_logs TO authenticated;
+
+COMMENT ON TABLE public.error_logs IS 'Stores error events for debugging and monitoring';
+COMMENT ON TABLE public.operation_logs IS 'Stores structured logs for all operations';
+COMMENT ON FUNCTION public.cleanup_old_logs IS 'Removes logs older than specified days (default 90)';
+
+-- ============================================================
 -- END OF CONSOLIDATED SCHEMA
 -- ============================================================
 
@@ -2429,15 +3142,34 @@ ALTER TABLE public.proposal_team_members ENABLE ROW LEVEL SECURITY;
 
 -- Team members can view their own team
 CREATE POLICY "proposal_team_members_read" ON public.proposal_team_members
-FOR SELECT USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM public.proposal_team_members ptm WHERE ptm.proposal_id = proposal_team_members.proposal_id AND ptm.user_id = auth.uid()));
+FOR SELECT USING (
+    user_id = auth.uid() 
+    OR EXISTS (
+        SELECT 1 FROM public.proposals p 
+        WHERE p.id = proposal_team_members.proposal_id 
+        AND p.lead_id = auth.uid()
+    )
+);
 
 -- Only leads can add team members
 CREATE POLICY "proposal_team_members_lead_insert" ON public.proposal_team_members
-FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM public.proposal_team_members ptm WHERE ptm.proposal_id = proposal_team_members.proposal_id AND ptm.user_id = auth.uid() AND ptm.role = 'lead'));
+FOR INSERT WITH CHECK (
+    EXISTS (
+        SELECT 1 FROM public.proposals p 
+        WHERE p.id = proposal_team_members.proposal_id 
+        AND p.lead_id = auth.uid()
+    )
+);
 
 -- Only leads can remove team members
 CREATE POLICY "proposal_team_members_lead_delete" ON public.proposal_team_members
-FOR DELETE USING (EXISTS (SELECT 1 FROM public.proposal_team_members ptm WHERE ptm.proposal_id = proposal_team_members.proposal_id AND ptm.user_id = auth.uid() AND ptm.role = 'lead'));
+FOR DELETE USING (
+    EXISTS (
+        SELECT 1 FROM public.proposals p 
+        WHERE p.id = proposal_team_members.proposal_id 
+        AND p.lead_id = auth.uid()
+    )
+);
 
 -- Admins can view all team members
 CREATE POLICY "proposal_team_members_admin_all" ON public.proposal_team_members
@@ -2445,4 +3177,654 @@ FOR ALL USING (EXISTS (SELECT 1 FROM auth.users WHERE id = auth.uid() AND raw_us
 
 -- ============================================================
 -- END OF ALL MIGRATIONS - BIDSYNC SCHEMA COMPLETE
+-- ============================================================
+
+-- ============================================================
+-- MIGRATION: PROJECT DELIVERY AND ARCHIVAL SYSTEM
+-- ============================================================
+-- This migration adds tables and infrastructure for:
+-- - Deliverable uploads and management
+-- - Project completion workflow
+-- - Project archival and retention
+-- - Export functionality
+-- - Completion statistics
+-- ============================================================
+
+-- ============================================================
+-- 1. UPDATE PROJECT STATUS ENUM
+-- ============================================================
+
+-- Add new project statuses for completion workflow
+DO $
+BEGIN
+    -- Add 'awarded' status if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum 
+        WHERE enumlabel = 'awarded' 
+        AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'project_status')
+    ) THEN
+        ALTER TYPE project_status ADD VALUE 'awarded';
+    END IF;
+    
+    -- Add 'pending_completion' status if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum 
+        WHERE enumlabel = 'pending_completion' 
+        AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'project_status')
+    ) THEN
+        ALTER TYPE project_status ADD VALUE 'pending_completion';
+    END IF;
+    
+    -- Add 'completed' status if it doesn't exist
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_enum 
+        WHERE enumlabel = 'completed' 
+        AND enumtypid = (SELECT oid FROM pg_type WHERE typname = 'project_status')
+    ) THEN
+        ALTER TYPE project_status ADD VALUE 'completed';
+    END IF;
+END $;
+
+-- ============================================================
+-- 2. PROJECT DELIVERABLES TABLE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.project_deliverables (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    uploaded_by UUID NOT NULL REFERENCES auth.users(id),
+    file_name TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    file_type TEXT NOT NULL,
+    file_size BIGINT NOT NULL,
+    description TEXT,
+    version INT NOT NULL DEFAULT 1,
+    is_final BOOLEAN DEFAULT false,
+    uploaded_at TIMESTAMPTZ DEFAULT now(),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    CONSTRAINT deliverables_file_size_check CHECK (file_size > 0 AND file_size <= 104857600)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_deliverables_project ON public.project_deliverables(project_id);
+CREATE INDEX IF NOT EXISTS idx_deliverables_proposal ON public.project_deliverables(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_deliverables_uploaded_by ON public.project_deliverables(uploaded_by);
+CREATE INDEX IF NOT EXISTS idx_deliverables_uploaded_at ON public.project_deliverables(uploaded_at DESC);
+
+COMMENT ON TABLE public.project_deliverables IS 'Stores final deliverables uploaded by bidding teams upon project completion';
+COMMENT ON COLUMN public.project_deliverables.file_path IS 'Path to file in Supabase Storage';
+COMMENT ON COLUMN public.project_deliverables.file_size IS 'File size in bytes (max 100MB)';
+COMMENT ON COLUMN public.project_deliverables.is_final IS 'Whether this is the final version of the deliverable';
+
+-- ============================================================
+-- 3. PROJECT COMPLETIONS TABLE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.project_completions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE UNIQUE,
+    proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
+    submitted_by UUID NOT NULL REFERENCES auth.users(id),
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    reviewed_by UUID REFERENCES auth.users(id),
+    reviewed_at TIMESTAMPTZ,
+    review_status TEXT NOT NULL DEFAULT 'pending' CHECK (review_status IN ('pending', 'accepted', 'revision_requested')),
+    review_comments TEXT,
+    revision_count INT DEFAULT 0,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_completions_project ON public.project_completions(project_id);
+CREATE INDEX IF NOT EXISTS idx_completions_proposal ON public.project_completions(proposal_id);
+CREATE INDEX IF NOT EXISTS idx_completions_status ON public.project_completions(review_status);
+CREATE INDEX IF NOT EXISTS idx_completions_submitted_at ON public.project_completions(submitted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_completions_completed_at ON public.project_completions(completed_at DESC) WHERE completed_at IS NOT NULL;
+
+COMMENT ON TABLE public.project_completions IS 'Tracks project completion submissions and review status';
+COMMENT ON COLUMN public.project_completions.review_status IS 'Current review status: pending, accepted, or revision_requested';
+COMMENT ON COLUMN public.project_completions.revision_count IS 'Number of times revisions have been requested';
+
+-- ============================================================
+-- 4. PROJECT ARCHIVES TABLE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.project_archives (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE UNIQUE,
+    archive_identifier TEXT NOT NULL UNIQUE,
+    archive_data JSONB NOT NULL,
+    compressed_size BIGINT NOT NULL,
+    original_size BIGINT NOT NULL,
+    compression_ratio NUMERIC(5,2),
+    archived_by UUID NOT NULL REFERENCES auth.users(id),
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    retention_until TIMESTAMPTZ,
+    legal_hold BOOLEAN DEFAULT false,
+    legal_hold_reason TEXT,
+    access_count INT DEFAULT 0,
+    last_accessed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_archives_project ON public.project_archives(project_id);
+CREATE INDEX IF NOT EXISTS idx_archives_identifier ON public.project_archives(archive_identifier);
+CREATE INDEX IF NOT EXISTS idx_archives_archived_at ON public.project_archives(archived_at DESC);
+CREATE INDEX IF NOT EXISTS idx_archives_retention ON public.project_archives(retention_until) WHERE retention_until IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_archives_legal_hold ON public.project_archives(legal_hold) WHERE legal_hold = true;
+
+COMMENT ON TABLE public.project_archives IS 'Stores compressed archives of completed projects';
+COMMENT ON COLUMN public.project_archives.archive_data IS 'JSONB containing all project data (proposals, deliverables, documents, comments)';
+COMMENT ON COLUMN public.project_archives.archive_identifier IS 'Unique identifier for archive retrieval';
+COMMENT ON COLUMN public.project_archives.legal_hold IS 'Prevents deletion when true, regardless of retention period';
+
+-- ============================================================
+-- 5. COMPLETION REVISIONS TABLE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.completion_revisions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    completion_id UUID NOT NULL REFERENCES public.project_completions(id) ON DELETE CASCADE,
+    revision_number INT NOT NULL,
+    requested_by UUID NOT NULL REFERENCES auth.users(id),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    revision_notes TEXT NOT NULL,
+    resolved_by UUID REFERENCES auth.users(id),
+    resolved_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(completion_id, revision_number)
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_revisions_completion ON public.completion_revisions(completion_id);
+CREATE INDEX IF NOT EXISTS idx_revisions_requested_at ON public.completion_revisions(requested_at DESC);
+CREATE INDEX IF NOT EXISTS idx_revisions_requested_by ON public.completion_revisions(requested_by);
+
+COMMENT ON TABLE public.completion_revisions IS 'Tracks revision requests and their resolution';
+COMMENT ON COLUMN public.completion_revisions.revision_notes IS 'Client feedback explaining what needs to be revised';
+
+-- ============================================================
+-- 6. PROJECT EXPORTS TABLE
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.project_exports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
+    requested_by UUID NOT NULL REFERENCES auth.users(id),
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+    export_path TEXT,
+    export_size BIGINT,
+    expires_at TIMESTAMPTZ,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_exports_project ON public.project_exports(project_id);
+CREATE INDEX IF NOT EXISTS idx_exports_requested_by ON public.project_exports(requested_by);
+CREATE INDEX IF NOT EXISTS idx_exports_status ON public.project_exports(status);
+CREATE INDEX IF NOT EXISTS idx_exports_expires ON public.project_exports(expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_exports_requested_at ON public.project_exports(requested_at DESC);
+
+COMMENT ON TABLE public.project_exports IS 'Tracks export requests and their processing status';
+COMMENT ON COLUMN public.project_exports.export_path IS 'Path to export file in storage';
+COMMENT ON COLUMN public.project_exports.expires_at IS 'Export download link expiration (7 days from creation)';
+
+-- ============================================================
+-- 7. ENABLE ROW LEVEL SECURITY
+-- ============================================================
+
+ALTER TABLE public.project_deliverables ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_completions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_archives ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.completion_revisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_exports ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================
+-- 8. RLS POLICIES FOR PROJECT DELIVERABLES
+-- ============================================================
+
+-- Team members and client can view deliverables
+CREATE POLICY "deliverables_team_client_select" ON public.project_deliverables
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_deliverables.project_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id
+        AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+-- Team members can insert deliverables
+CREATE POLICY "deliverables_team_insert" ON public.project_deliverables
+FOR INSERT WITH CHECK (
+  uploaded_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.bid_team_members btm
+    WHERE btm.project_id = project_deliverables.project_id
+    AND btm.user_id = auth.uid()
+  )
+);
+
+-- Team members can delete their own deliverables (before submission)
+CREATE POLICY "deliverables_team_delete" ON public.project_deliverables
+FOR DELETE USING (
+  uploaded_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_deliverables.project_id
+    AND p.status = 'awarded'
+  )
+);
+
+-- Admins can view all deliverables
+CREATE POLICY "deliverables_admin_select" ON public.project_deliverables
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE id = auth.uid() 
+    AND raw_user_meta_data->>'role' = 'admin'
+  )
+);
+
+-- ============================================================
+-- 9. RLS POLICIES FOR PROJECT COMPLETIONS
+-- ============================================================
+
+-- Team members and client can view completions
+CREATE POLICY "completions_team_client_select" ON public.project_completions
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_completions.project_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id
+        AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+-- Team leads can insert completions
+CREATE POLICY "completions_lead_insert" ON public.project_completions
+FOR INSERT WITH CHECK (
+  submitted_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.bid_team_members btm
+    WHERE btm.project_id = project_completions.project_id
+    AND btm.user_id = auth.uid()
+    AND btm.role = 'lead'
+  )
+);
+
+-- Clients can update completions (for review)
+CREATE POLICY "completions_client_update" ON public.project_completions
+FOR UPDATE USING (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_completions.project_id
+    AND p.client_id = auth.uid()
+  )
+) WITH CHECK (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_completions.project_id
+    AND p.client_id = auth.uid()
+  )
+);
+
+-- Admins can view all completions
+CREATE POLICY "completions_admin_select" ON public.project_completions
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE id = auth.uid() 
+    AND raw_user_meta_data->>'role' = 'admin'
+  )
+);
+
+-- ============================================================
+-- 10. RLS POLICIES FOR PROJECT ARCHIVES
+-- ============================================================
+
+-- Participants can view archives
+CREATE POLICY "archives_participants_select" ON public.project_archives
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_archives.project_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id
+        AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+-- System can insert archives (via service role)
+CREATE POLICY "archives_system_insert" ON public.project_archives
+FOR INSERT WITH CHECK (true);
+
+-- System can update archives (for access tracking)
+CREATE POLICY "archives_system_update" ON public.project_archives
+FOR UPDATE USING (true) WITH CHECK (true);
+
+-- Admins can manage archives
+CREATE POLICY "archives_admin_all" ON public.project_archives
+FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE id = auth.uid() 
+    AND raw_user_meta_data->>'role' = 'admin'
+  )
+);
+
+-- ============================================================
+-- 11. RLS POLICIES FOR COMPLETION REVISIONS
+-- ============================================================
+
+-- Team members and client can view revisions
+CREATE POLICY "revisions_team_client_select" ON public.completion_revisions
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM public.project_completions pc
+    JOIN public.projects p ON p.id = pc.project_id
+    WHERE pc.id = completion_revisions.completion_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id
+        AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+-- Clients can insert revisions
+CREATE POLICY "revisions_client_insert" ON public.completion_revisions
+FOR INSERT WITH CHECK (
+  requested_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.project_completions pc
+    JOIN public.projects p ON p.id = pc.project_id
+    WHERE pc.id = completion_revisions.completion_id
+    AND p.client_id = auth.uid()
+  )
+);
+
+-- Team leads can update revisions (mark as resolved)
+CREATE POLICY "revisions_lead_update" ON public.completion_revisions
+FOR UPDATE USING (
+  EXISTS (
+    SELECT 1 FROM public.project_completions pc
+    JOIN public.bid_team_members btm ON btm.project_id = pc.project_id
+    WHERE pc.id = completion_revisions.completion_id
+    AND btm.user_id = auth.uid()
+    AND btm.role = 'lead'
+  )
+) WITH CHECK (
+  EXISTS (
+    SELECT 1 FROM public.project_completions pc
+    JOIN public.bid_team_members btm ON btm.project_id = pc.project_id
+    WHERE pc.id = completion_revisions.completion_id
+    AND btm.user_id = auth.uid()
+    AND btm.role = 'lead'
+  )
+);
+
+-- ============================================================
+-- 12. RLS POLICIES FOR PROJECT EXPORTS
+-- ============================================================
+
+-- Users can view their own export requests
+CREATE POLICY "exports_user_select" ON public.project_exports
+FOR SELECT USING (requested_by = auth.uid());
+
+-- Users can create export requests for projects they have access to
+CREATE POLICY "exports_user_insert" ON public.project_exports
+FOR INSERT WITH CHECK (
+  requested_by = auth.uid()
+  AND EXISTS (
+    SELECT 1 FROM public.projects p
+    WHERE p.id = project_exports.project_id
+    AND (
+      p.client_id = auth.uid()
+      OR EXISTS (
+        SELECT 1 FROM public.bid_team_members btm
+        WHERE btm.project_id = p.id
+        AND btm.user_id = auth.uid()
+      )
+    )
+  )
+);
+
+-- System can update exports (for processing)
+CREATE POLICY "exports_system_update" ON public.project_exports
+FOR UPDATE USING (true) WITH CHECK (true);
+
+-- Admins can view all exports
+CREATE POLICY "exports_admin_select" ON public.project_exports
+FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM auth.users
+    WHERE id = auth.uid() 
+    AND raw_user_meta_data->>'role' = 'admin'
+  )
+);
+
+-- ============================================================
+-- 13. HELPER FUNCTIONS
+-- ============================================================
+
+-- Generate unique archive identifier
+CREATE OR REPLACE FUNCTION public.generate_archive_identifier()
+RETURNS TEXT AS $
+DECLARE
+  v_identifier TEXT;
+  v_exists BOOLEAN;
+BEGIN
+  LOOP
+    -- Generate identifier: ARCH-YYYYMMDD-XXXXXX (random 6 chars)
+    v_identifier := 'ARCH-' || 
+                    TO_CHAR(NOW(), 'YYYYMMDD') || '-' || 
+                    UPPER(SUBSTRING(MD5(RANDOM()::TEXT) FROM 1 FOR 6));
+    
+    -- Check if it exists
+    SELECT EXISTS(
+      SELECT 1 FROM public.project_archives WHERE archive_identifier = v_identifier
+    ) INTO v_exists;
+    
+    -- Exit loop if unique
+    EXIT WHEN NOT v_exists;
+  END LOOP;
+  
+  RETURN v_identifier;
+END;
+$ LANGUAGE plpgsql VOLATILE SECURITY DEFINER;
+
+-- Update completion timestamp trigger
+CREATE OR REPLACE FUNCTION public.update_completion_timestamp()
+RETURNS TRIGGER AS $
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_completion_timestamp ON public.project_completions;
+CREATE TRIGGER trigger_update_completion_timestamp
+  BEFORE UPDATE ON public.project_completions
+  FOR EACH ROW
+  EXECUTE FUNCTION public.update_completion_timestamp();
+
+-- Update export timestamp trigger
+CREATE OR REPLACE FUNCTION public.update_export_timestamp()
+RETURNS TRIGGER AS $
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_update_export_timestamp ON public.project_exports;
+CREATE TRIGGER trigger_update_export_timestamp
+  BEFORE UPDATE ON public.project_exports
+  FOR EACH ROW
+  EXECUTE FUNCTION public.update_export_timestamp();
+
+-- Increment archive access count
+CREATE OR REPLACE FUNCTION public.increment_archive_access(p_archive_id UUID)
+RETURNS VOID AS $
+BEGIN
+  UPDATE public.project_archives
+  SET 
+    access_count = access_count + 1,
+    last_accessed_at = NOW()
+  WHERE id = p_archive_id;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Get deliverables count for a project
+CREATE OR REPLACE FUNCTION public.get_deliverables_count(p_project_id UUID)
+RETURNS INT AS $
+DECLARE
+  v_count INT;
+BEGIN
+  SELECT COUNT(*)
+  INTO v_count
+  FROM public.project_deliverables
+  WHERE project_id = p_project_id;
+  
+  RETURN v_count;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Check if project can be marked ready for delivery
+CREATE OR REPLACE FUNCTION public.can_mark_ready_for_delivery(p_project_id UUID)
+RETURNS BOOLEAN AS $
+DECLARE
+  v_deliverables_count INT;
+  v_project_status TEXT;
+BEGIN
+  -- Get project status
+  SELECT status INTO v_project_status
+  FROM public.projects
+  WHERE id = p_project_id;
+  
+  -- Must be in awarded status
+  IF v_project_status != 'awarded' THEN
+    RETURN FALSE;
+  END IF;
+  
+  -- Must have at least one deliverable
+  SELECT COUNT(*) INTO v_deliverables_count
+  FROM public.project_deliverables
+  WHERE project_id = p_project_id;
+  
+  RETURN v_deliverables_count > 0;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Calculate completion statistics
+CREATE OR REPLACE FUNCTION public.get_completion_statistics(
+  p_client_id UUID DEFAULT NULL,
+  p_date_from TIMESTAMPTZ DEFAULT NULL,
+  p_date_to TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS JSONB AS $
+DECLARE
+  v_result JSONB;
+BEGIN
+  SELECT jsonb_build_object(
+    'totalCompleted', COUNT(*),
+    'averageTimeToCompletion', COALESCE(
+      EXTRACT(EPOCH FROM AVG(pc.completed_at - pc.submitted_at))::INT,
+      0
+    ),
+    'projectsRequiringRevisions', COUNT(*) FILTER (WHERE pc.revision_count > 0),
+    'totalDeliverablesReceived', (
+      SELECT COUNT(*)
+      FROM public.project_deliverables pd
+      JOIN public.projects p ON p.id = pd.project_id
+      WHERE (p_client_id IS NULL OR p.client_id = p_client_id)
+      AND (p_date_from IS NULL OR pd.uploaded_at >= p_date_from)
+      AND (p_date_to IS NULL OR pd.uploaded_at <= p_date_to)
+    ),
+    'completionsByMonth', (
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'month', TO_CHAR(month_date, 'YYYY-MM'),
+          'count', month_count
+        )
+        ORDER BY month_date
+      )
+      FROM (
+        SELECT 
+          DATE_TRUNC('month', pc2.completed_at) as month_date,
+          COUNT(*) as month_count
+        FROM public.project_completions pc2
+        JOIN public.projects p2 ON p2.id = pc2.project_id
+        WHERE pc2.completed_at IS NOT NULL
+        AND (p_client_id IS NULL OR p2.client_id = p_client_id)
+        AND (p_date_from IS NULL OR pc2.completed_at >= p_date_from)
+        AND (p_date_to IS NULL OR pc2.completed_at <= p_date_to)
+        GROUP BY DATE_TRUNC('month', pc2.completed_at)
+      ) monthly_data
+    )
+  )
+  INTO v_result
+  FROM public.project_completions pc
+  JOIN public.projects p ON p.id = pc.project_id
+  WHERE pc.completed_at IS NOT NULL
+  AND (p_client_id IS NULL OR p.client_id = p_client_id)
+  AND (p_date_from IS NULL OR pc.completed_at >= p_date_from)
+  AND (p_date_to IS NULL OR pc.completed_at <= p_date_to);
+  
+  RETURN v_result;
+END;
+$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Grant execute permissions
+GRANT EXECUTE ON FUNCTION public.generate_archive_identifier() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.increment_archive_access(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_deliverables_count(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.can_mark_ready_for_delivery(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_completion_statistics(UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO authenticated;
+
+-- ============================================================
+-- 14. STORAGE BUCKET SETUP (INSTRUCTIONS)
+-- ============================================================
+
+-- NOTE: Supabase Storage buckets must be created via the Supabase Dashboard or API
+-- Create a bucket named 'deliverables' with the following settings:
+-- - Public: false (private bucket)
+-- - File size limit: 100MB
+-- - Allowed MIME types: all (or restrict as needed)
+--
+-- Storage policies should be configured to allow:
+-- - Team members to upload files to their project folders
+-- - Team members and clients to download files from their projects
+-- - Automatic cleanup of orphaned files (optional)
+
+-- ============================================================
+-- END OF PROJECT DELIVERY AND ARCHIVAL MIGRATION
 -- ============================================================

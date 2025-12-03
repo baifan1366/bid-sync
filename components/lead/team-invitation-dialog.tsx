@@ -30,6 +30,7 @@ import { cn } from "@/lib/utils"
 
 interface TeamInvitationDialogProps {
   projectId: string
+  proposalId?: string
   trigger?: React.ReactNode
 }
 
@@ -43,6 +44,7 @@ interface GeneratedInvitation {
 
 export function TeamInvitationDialog({
   projectId,
+  proposalId,
   trigger,
 }: TeamInvitationDialogProps) {
   const [open, setOpen] = useState(false)
@@ -66,6 +68,7 @@ export function TeamInvitationDialog({
           variables: {
             input: {
               projectId,
+              proposalId,
               expirationDays,
               isMultiUse,
             },

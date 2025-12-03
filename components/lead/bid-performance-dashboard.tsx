@@ -9,7 +9,6 @@ import { GET_BID_PERFORMANCE } from "@/lib/graphql/queries"
 import { WinRateChart } from "./win-rate-chart"
 import { ProposalStatusBreakdown } from "./proposal-status-breakdown"
 import { ActivityTimelineChart } from "./activity-timeline-chart"
-import { TeamMetricsCard } from "./team-metrics-card"
 
 interface BidPerformance {
   totalProposals: number
@@ -83,29 +82,61 @@ export function BidPerformanceDashboard({ leadId }: BidPerformanceDashboardProps
     setError(null)
 
     try {
-      // Fetch bid performance via GraphQL
-      const perfResponse = await fetch('/api/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: GET_BID_PERFORMANCE,
-          variables: { leadId },
+      // Fetch bid performance via GraphQL with timeout
+      const perfResponse = await Promise.race([
+        fetch('/api/graphql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: GET_BID_PERFORMANCE,
+            variables: { leadId },
+          }),
         }),
-      })
+        new Promise<Response>((_, reject) => 
+          setTimeout(() => reject(new Error('GraphQL request timeout')), 15000)
+        )
+      ])
+
+      if (!perfResponse.ok) {
+        throw new Error(`GraphQL request failed: ${perfResponse.status} ${perfResponse.statusText}`)
+      }
 
       const perfResult = await perfResponse.json()
 
       if (perfResult.errors) {
+        console.error('GraphQL errors:', perfResult.errors)
         throw new Error(perfResult.errors[0]?.message || 'Failed to fetch bid performance')
       }
 
-      const perfData = perfResult.data.getBidPerformance
+      const perfData = perfResult.data?.getBidPerformance
 
-      // Fetch statistics and timeline via API routes
+      if (!perfData) {
+        throw new Error('No performance data returned from GraphQL')
+      }
+
+      // Fetch statistics and timeline via API routes with timeout
       const [statsResponse, timelineResponse] = await Promise.all([
-        fetch(`/api/analytics/statistics?leadId=${leadId}`),
-        fetch(`/api/analytics/timeline?leadId=${leadId}&days=${timeRange}`),
+        Promise.race([
+          fetch(`/api/analytics/statistics?leadId=${leadId}`),
+          new Promise<Response>((_, reject) => 
+            setTimeout(() => reject(new Error('Statistics request timeout')), 10000)
+          )
+        ]),
+        Promise.race([
+          fetch(`/api/analytics/timeline?leadId=${leadId}&days=${timeRange}`),
+          new Promise<Response>((_, reject) => 
+            setTimeout(() => reject(new Error('Timeline request timeout')), 10000)
+          )
+        ])
       ])
+
+      if (!statsResponse.ok) {
+        throw new Error(`Statistics request failed: ${statsResponse.status}`)
+      }
+
+      if (!timelineResponse.ok) {
+        throw new Error(`Timeline request failed: ${timelineResponse.status}`)
+      }
 
       const statsData = await statsResponse.json()
       const timelineData = await timelineResponse.json()
@@ -114,6 +145,7 @@ export function BidPerformanceDashboard({ leadId }: BidPerformanceDashboardProps
       setStatistics(statsData)
       setTimeline(timelineData)
     } catch (err) {
+      console.error('Analytics loading error:', err)
       setError(err instanceof Error ? err.message : "Failed to load analytics")
     } finally {
       setIsLoading(false)

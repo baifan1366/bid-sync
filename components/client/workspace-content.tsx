@@ -26,7 +26,8 @@ import {
   XCircle,
   Loader2,
   Edit3,
-  Eye
+  Eye,
+  Users2
 } from "lucide-react"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 
@@ -219,7 +220,7 @@ export function WorkspaceContent() {
   }
 
   const handleViewProject = (projectId: string) => {
-    router.push(`/projects/${projectId}`)
+    router.push(`/client-projects/${projectId}`)
   }
 
   const handleSaveProposal = async (data: ProposalFormData) => {
@@ -436,8 +437,8 @@ export function WorkspaceContent() {
               <div className="space-y-6">
                 {/* Header with Mode Toggle */}
                 <Card className="p-4 border-yellow-400/20">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1">
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex-1 min-w-0">
                       <h2 className="text-xl font-bold text-black dark:text-white">
                         {selectedProposal.project.title}
                       </h2>
@@ -445,7 +446,7 @@ export function WorkspaceContent() {
                         {selectedProposal.status === "draft" ? "Draft Proposal" : "Submitted Proposal"}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Button
                         variant="outline"
                         size="sm"
@@ -456,18 +457,28 @@ export function WorkspaceContent() {
                         View Project
                       </Button>
                       {selectedProposal.status?.toLowerCase() === "draft" && (
-                        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "view" | "edit")}>
-                          <TabsList className="bg-yellow-400/10">
-                            <TabsTrigger value="edit" className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black">
-                              <Edit3 className="h-4 w-4 mr-2" />
-                              Edit
-                            </TabsTrigger>
-                            <TabsTrigger value="view" className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black">
-                              <Eye className="h-4 w-4 mr-2" />
-                              Preview
-                            </TabsTrigger>
-                          </TabsList>
-                        </Tabs>
+                        <>
+                          <Button
+                            size="sm"
+                            onClick={() => router.push(`/editor/${selectedProposal.id}`)}
+                            className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold"
+                          >
+                            <Users2 className="h-4 w-4 mr-2" />
+                            Collaborative Editor
+                          </Button>
+                          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "view" | "edit")}>
+                            <TabsList className="bg-yellow-400/10">
+                              <TabsTrigger value="edit" className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black">
+                                <Edit3 className="h-4 w-4 mr-2" />
+                                Edit
+                              </TabsTrigger>
+                              <TabsTrigger value="view" className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black">
+                                <Eye className="h-4 w-4 mr-2" />
+                                Preview
+                              </TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+                        </>
                       )}
                     </div>
                   </div>

@@ -84,7 +84,7 @@ interface Project {
     id: string
     email: string
     fullName: string | null
-  }
+  } | null
   additionalInfoRequirements: Array<{
     id: string
     fieldName: string
@@ -224,7 +224,7 @@ export function ProjectApprovalQueue() {
                 <div className="flex-1">
                   <CardTitle className="text-xl mb-2">{project.title}</CardTitle>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span>By {project.client.fullName || project.client.email}</span>
+                    <span>By {project.client?.fullName || project.client?.email || 'Unknown'}</span>
                     <span>•</span>
                     <span>{formatDistanceToNow(new Date(project.createdAt), { addSuffix: true })}</span>
                   </div>

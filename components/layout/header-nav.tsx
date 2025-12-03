@@ -19,13 +19,8 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
   client: [
     { 
       label: "Projects", 
-      href: "/projects",
-      matchPaths: ["/projects"]
-    },
-    { 
-      label: "Profile", 
-      href: "/profile",
-      matchPaths: ["/profile"]
+      href: "/client-projects",
+      matchPaths: ["/client-projects"]
     },
   ],
   bidding_lead: [
@@ -80,11 +75,6 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       label: "Documents", 
       href: "/documents",
       matchPaths: ["/documents", "/editor"]
-    },
-    { 
-      label: "Profile", 
-      href: "/profile",
-      matchPaths: ["/profile"]
     },
   ],
   admin: [

@@ -3,10 +3,11 @@ import { createClient } from '@/lib/supabase/server'
 
 export async function PUT(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createClient()
+    const { id } = await params
     
     const { data: { user } } = await supabase.auth.getUser()
     if (!user || user.user_metadata?.role !== 'admin') {
@@ -25,7 +26,7 @@ export async function PUT(
         content: JSON.parse(content),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
@@ -43,10 +44,11 @@ export async function PUT(
 
 export async function DELETE(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const supabase = await createClient()
+    const { id } = await params
     
     const { data: { user } } = await supabase.auth.getUser()
     if (!user || user.user_metadata?.role !== 'admin') {
@@ -56,7 +58,7 @@ export async function DELETE(
     const { error } = await supabase
       .from('templates')
       .delete()
-      .eq('id', params.id)
+      .eq('id', id)
 
     if (error) throw error
 

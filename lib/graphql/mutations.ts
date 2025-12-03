@@ -844,3 +844,141 @@ export const REMOVE_TEAM_MEMBER = gql`
     removeTeamMember(input: $input)
   }
 `
+
+// ============================================================================
+// Project Delivery and Archival Mutations
+// ============================================================================
+
+export const UPLOAD_DELIVERABLE = gql`
+  mutation UploadDeliverable($input: UploadDeliverableInput!) {
+    uploadDeliverable(input: $input) {
+      id
+      projectId
+      proposalId
+      uploadedBy {
+        id
+        email
+        fullName
+      }
+      fileName
+      filePath
+      fileType
+      fileSize
+      description
+      version
+      isFinal
+      uploadedAt
+      downloadUrl
+    }
+  }
+`
+
+export const DELETE_DELIVERABLE = gql`
+  mutation DeleteDeliverable($deliverableId: ID!) {
+    deleteDeliverable(deliverableId: $deliverableId)
+  }
+`
+
+export const MARK_READY_FOR_DELIVERY = gql`
+  mutation MarkReadyForDelivery($input: MarkReadyForDeliveryInput!) {
+    markReadyForDelivery(input: $input) {
+      id
+      projectId
+      proposalId
+      submittedBy {
+        id
+        email
+        fullName
+      }
+      submittedAt
+      reviewStatus
+      revisionCount
+    }
+  }
+`
+
+export const REVIEW_COMPLETION = gql`
+  mutation ReviewCompletion($input: ReviewCompletionInput!) {
+    reviewCompletion(input: $input) {
+      id
+      projectId
+      reviewStatus
+      reviewComments
+      reviewedBy {
+        id
+        email
+        fullName
+      }
+      reviewedAt
+    }
+  }
+`
+
+export const ACCEPT_COMPLETION = gql`
+  mutation AcceptCompletion($completionId: ID!) {
+    acceptCompletion(completionId: $completionId) {
+      id
+      projectId
+      reviewStatus
+      completedAt
+    }
+  }
+`
+
+export const REQUEST_REVISION = gql`
+  mutation RequestRevision($input: RequestRevisionInput!) {
+    requestRevision(input: $input) {
+      id
+      revisionNumber
+      requestedBy {
+        id
+        email
+        fullName
+      }
+      requestedAt
+      revisionNotes
+    }
+  }
+`
+
+export const REQUEST_EXPORT = gql`
+  mutation RequestExport($input: RequestExportInput!) {
+    requestExport(input: $input) {
+      id
+      projectId
+      requestedBy {
+        id
+        email
+        fullName
+      }
+      requestedAt
+      status
+    }
+  }
+`
+
+export const APPLY_LEGAL_HOLD = gql`
+  mutation ApplyLegalHold($archiveId: ID!, $reason: String!) {
+    applyLegalHold(archiveId: $archiveId, reason: $reason) {
+      id
+      projectId
+      archiveIdentifier
+      legalHold
+      legalHoldReason
+      retentionUntil
+    }
+  }
+`
+
+export const REMOVE_LEGAL_HOLD = gql`
+  mutation RemoveLegalHold($archiveId: ID!) {
+    removeLegalHold(archiveId: $archiveId) {
+      id
+      projectId
+      archiveIdentifier
+      legalHold
+      legalHoldReason
+      retentionUntil
+    }
+  }
+`

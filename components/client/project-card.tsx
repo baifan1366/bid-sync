@@ -54,7 +54,7 @@ export function ProjectCard({ project, onClick, onViewBids }: ProjectCardProps) 
     if (onViewBids) {
       onViewBids(e)
     } else {
-      router.push(`/projects/${project.id}/decision`)
+      router.push(`/client-projects/${project.id}/decision`)
     }
   }
 

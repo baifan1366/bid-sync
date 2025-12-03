@@ -615,6 +615,16 @@ export const typeDefs = /* GraphQL */ `
     getAllProposalTeamMembers: [ProposalTeamInfo!]!
     getActiveInvitations(projectId: ID!): [TeamInvitation!]!
     validateInvitation(codeOrToken: String!): ValidationResult!
+    
+    # Project Delivery and Archival queries
+    deliverables(projectId: ID!): [Deliverable!]!
+    projectCompletion(projectId: ID!): ProjectCompletion
+    projectArchive(projectId: ID!): ProjectArchive
+    projectArchiveByIdentifier(archiveIdentifier: String!): ProjectArchive
+    searchArchives(query: String!, limit: Int, offset: Int): [ProjectArchive!]!
+    projectExport(exportId: ID!): ProjectExport
+    projectExports(projectId: ID!): [ProjectExport!]!
+    completionStatistics(dateFrom: String, dateTo: String): CompletionStatistics!
   }
   
   type AdminProposal {
@@ -1244,6 +1254,7 @@ export const typeDefs = /* GraphQL */ `
 
   input GenerateInvitationInput {
     projectId: ID!
+    proposalId: ID
     expirationDays: Int
     isMultiUse: Boolean
   }
@@ -1386,6 +1397,191 @@ export const typeDefs = /* GraphQL */ `
     generateInvitation(input: GenerateInvitationInput!): TeamInvitation!
     joinTeam(input: JoinTeamInput!): BidTeamMember!
     removeTeamMember(input: RemoveTeamMemberInput!): Boolean!
+    
+    # Project Delivery and Archival mutations
+    uploadDeliverable(input: UploadDeliverableInput!): Deliverable!
+    deleteDeliverable(deliverableId: ID!): Boolean!
+    markReadyForDelivery(input: MarkReadyForDeliveryInput!): ProjectCompletion!
+    reviewCompletion(input: ReviewCompletionInput!): ProjectCompletion!
+    acceptCompletion(completionId: ID!): ProjectCompletion!
+    requestRevision(input: RequestRevisionInput!): CompletionRevision!
+    requestExport(input: RequestExportInput!): ProjectExport!
+    applyLegalHold(archiveId: ID!, reason: String!): ProjectArchive!
+    removeLegalHold(archiveId: ID!): ProjectArchive!
+  }
+
+  # Project Delivery and Archival Types
+  type Deliverable {
+    id: ID!
+    projectId: ID!
+    proposalId: ID!
+    uploadedBy: User!
+    fileName: String!
+    filePath: String!
+    fileType: String!
+    fileSize: Int!
+    description: String
+    version: Int!
+    isFinal: Boolean!
+    uploadedAt: String!
+    downloadUrl: String!
+  }
+
+  type ProjectCompletion {
+    id: ID!
+    projectId: ID!
+    proposalId: ID!
+    submittedBy: User!
+    submittedAt: String!
+    reviewedBy: User
+    reviewedAt: String
+    reviewStatus: ReviewStatus!
+    reviewComments: String
+    revisionCount: Int!
+    completedAt: String
+    deliverables: [Deliverable!]!
+    revisions: [CompletionRevision!]!
+  }
+
+  enum ReviewStatus {
+    PENDING
+    ACCEPTED
+    REVISION_REQUESTED
+  }
+
+  type CompletionRevision {
+    id: ID!
+    revisionNumber: Int!
+    requestedBy: User!
+    requestedAt: String!
+    revisionNotes: String!
+    resolvedBy: User
+    resolvedAt: String
+  }
+
+  type ProjectArchive {
+    id: ID!
+    projectId: ID!
+    archiveIdentifier: String!
+    compressedSize: Int!
+    originalSize: Int!
+    compressionRatio: Float!
+    archivedBy: User!
+    archivedAt: String!
+    retentionUntil: String
+    legalHold: Boolean!
+    legalHoldReason: String
+    accessCount: Int!
+    lastAccessedAt: String
+    project: ArchivedProject!
+  }
+
+  type ArchivedProject {
+    id: ID!
+    title: String!
+    description: String!
+    budget: Float
+    deadline: String
+    clientId: ID!
+    status: String!
+    proposals: [ArchivedProposal!]!
+    deliverables: [Deliverable!]!
+    documents: [ArchivedDocument!]!
+    comments: [ArchivedComment!]!
+  }
+
+  type ArchivedProposal {
+    id: ID!
+    leadId: ID!
+    status: String!
+    submittedAt: String
+    versions: [ArchivedVersion!]!
+  }
+
+  type ArchivedVersion {
+    versionNumber: Int!
+    content: String!
+    createdBy: ID!
+    createdAt: String!
+  }
+
+  type ArchivedDocument {
+    id: ID!
+    title: String!
+    content: String!
+    createdBy: ID!
+    createdAt: String!
+  }
+
+  type ArchivedComment {
+    id: ID!
+    authorId: ID!
+    message: String!
+    visibility: String!
+    createdAt: String!
+  }
+
+  type ProjectExport {
+    id: ID!
+    projectId: ID!
+    requestedBy: User!
+    requestedAt: String!
+    status: ExportStatus!
+    exportPath: String
+    exportSize: Int
+    expiresAt: String
+    downloadUrl: String
+    errorMessage: String
+  }
+
+  enum ExportStatus {
+    PENDING
+    PROCESSING
+    COMPLETED
+    FAILED
+  }
+
+  type CompletionStatistics {
+    totalCompleted: Int!
+    averageTimeToCompletion: Float!
+    projectsRequiringRevisions: Int!
+    totalDeliverablesReceived: Int!
+    completionsByMonth: [MonthlyCompletion!]!
+  }
+
+  type MonthlyCompletion {
+    month: String!
+    count: Int!
+  }
+
+  input UploadDeliverableInput {
+    projectId: ID!
+    proposalId: ID!
+    fileName: String!
+    filePath: String!
+    fileType: String!
+    fileSize: Int!
+    description: String
+  }
+
+  input MarkReadyForDeliveryInput {
+    projectId: ID!
+    proposalId: ID!
+  }
+
+  input ReviewCompletionInput {
+    completionId: ID!
+    reviewStatus: ReviewStatus!
+    reviewComments: String
+  }
+
+  input RequestRevisionInput {
+    completionId: ID!
+    revisionNotes: String!
+  }
+
+  input RequestExportInput {
+    projectId: ID!
   }
 
   type Subscription {

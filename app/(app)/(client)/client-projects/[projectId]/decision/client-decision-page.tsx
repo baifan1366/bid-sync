@@ -211,8 +211,8 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
     }
 
     const newUrl = params.toString() 
-      ? `/projects/${projectId}/decision?${params.toString()}`
-      : `/projects/${projectId}/decision`
+      ? `/client-projects/${projectId}/decision?${params.toString()}`
+      : `/client-projects/${projectId}/decision`
     
     router.replace(newUrl, { scroll: false })
   }, [selectedProposalId, viewMode, filterStatus, sortBy, sortOrder, projectId, router])
@@ -255,14 +255,14 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
   const handleProposalClick = (proposalId: string) => {
     const params = new URLSearchParams(searchParams.toString())
     params.set("proposal", proposalId)
-    router.push(`/projects/${projectId}/decision?${params.toString()}`)
+    router.push(`/client-projects/${projectId}/decision?${params.toString()}`)
   }
 
   // Handle closing detail view
   const handleCloseDetail = () => {
     const params = new URLSearchParams(searchParams.toString())
     params.delete("proposal")
-    router.push(`/projects/${projectId}/decision?${params.toString()}`)
+    router.push(`/client-projects/${projectId}/decision?${params.toString()}`)
   }
 
   // Handle comparison click

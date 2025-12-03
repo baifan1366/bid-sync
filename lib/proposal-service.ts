@@ -62,7 +62,10 @@ export class ProposalService {
    * - 2.2: Associate with project and bidding lead
    * - 2.3: Automatically create workspace
    * - 2.4: Initialize with default sections
-   * - 2.5: Prevent duplicate proposals
+   * 
+   * Note: Multiple proposals per project are allowed. A bidding leader can create
+   * multiple proposals for the same project (different approaches, teams, etc.)
+   * but only one can be submitted to the client at a time.
    * 
    * @param projectId - The project ID to create proposal for
    * @param leadId - The bidding lead user ID
@@ -90,30 +93,10 @@ export class ProposalService {
         };
       }
 
-      // Check if lead already has a proposal for this project (Requirement 2.5)
-      const { data: existingProposal, error: checkError } = await supabase
-        .from('proposals')
-        .select('id')
-        .eq('project_id', projectId)
-        .eq('lead_id', leadId)
-        .maybeSingle();
-
-      if (checkError) {
-        console.error('Error checking for existing proposal:', checkError);
-        return {
-          success: false,
-          error: 'Failed to check for existing proposal',
-          errorCode: 'UNKNOWN',
-        };
-      }
-
-      if (existingProposal) {
-        return {
-          success: false,
-          error: 'A proposal already exists for this project',
-          errorCode: 'DUPLICATE_PROPOSAL',
-        };
-      }
+      // Note: Multiple proposals per project are allowed
+      // A bidding leader can create multiple proposals for the same project
+      // (e.g., different approaches, different team compositions)
+      // Only one can be submitted to the client at a time
 
       // Create the proposal (Requirements 2.1, 2.2)
       const { data: proposal, error: proposalError } = await supabase

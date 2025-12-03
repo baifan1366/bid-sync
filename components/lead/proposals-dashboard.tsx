@@ -475,17 +475,30 @@ export function ProposalsDashboard() {
                   </div>
                 </div>
 
-                {/* View Button */}
-                <Button
-                  className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-semibold shadow-lg shadow-yellow-400/20 hover:shadow-yellow-400/30 transition-all"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    handleViewProposal(proposal.id)
-                  }}
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Open Workspace
-                </Button>
+                {/* Action Buttons */}
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    variant="outline"
+                    className="border-yellow-400/20 hover:bg-yellow-400/10 text-black dark:text-white font-medium"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      router.push(`/editor/${proposal.id}`)
+                    }}
+                  >
+                    <Users className="h-4 w-4 mr-2" />
+                    Editor
+                  </Button>
+                  <Button
+                    className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold shadow-lg shadow-yellow-400/20 hover:shadow-yellow-400/30 transition-all"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleViewProposal(proposal.id)
+                    }}
+                  >
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    Workspace
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}

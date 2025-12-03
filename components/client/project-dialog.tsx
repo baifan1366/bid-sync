@@ -74,12 +74,12 @@ export function ProjectDialog({ project, open, onOpenChange }: ProjectDialogProp
 
   const handleViewFullPage = () => {
     onOpenChange(false)
-    router.push(`/projects/${project.id}`)
+    router.push(`/client-projects/${project.id}`)
   }
 
   const handleViewBids = () => {
     onOpenChange(false)
-    router.push(`/projects/${project.id}/decision`)
+    router.push(`/client-projects/${project.id}/decision`)
   }
   
   // Check if project can show bids (OPEN or AWARDED status)

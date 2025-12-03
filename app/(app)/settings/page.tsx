@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createGraphQLClient } from '@/lib/graphql/client'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -37,10 +37,16 @@ export default function SettingsPage() {
     queryFn: async () => {
       const client = createGraphQLClient()
       const result = await client.request<any>(ME_QUERY)
-      setFullName(result.me?.fullName || '')
       return result
     }
   })
+
+  // Sync fullName state when data changes
+  useEffect(() => {
+    if (data?.me?.fullName) {
+      setFullName(data.me.fullName)
+    }
+  }, [data?.me?.fullName])
 
   const updateProfileMutation = useMutation({
     mutationFn: async (newFullName: string) => {

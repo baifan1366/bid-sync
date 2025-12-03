@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/retention-policy",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/archive-deletion",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/export-cleanup",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

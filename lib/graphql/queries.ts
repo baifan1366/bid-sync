@@ -1111,3 +1111,196 @@ export const VALIDATE_INVITATION = gql`
     }
   }
 `
+
+// ============================================================================
+// Project Archive Queries
+// ============================================================================
+
+export const GET_PROJECT_ARCHIVE = gql`
+  query GetProjectArchive($projectId: ID!) {
+    projectArchive(projectId: $projectId) {
+      id
+      projectId
+      archiveIdentifier
+      compressedSize
+      originalSize
+      compressionRatio
+      archivedBy {
+        id
+        email
+        fullName
+      }
+      archivedAt
+      retentionUntil
+      legalHold
+      legalHoldReason
+      accessCount
+      lastAccessedAt
+      project {
+        id
+        title
+        description
+        budget
+        deadline
+        clientId
+        status
+        proposals {
+          id
+          leadId
+          status
+          submittedAt
+          versions {
+            versionNumber
+            content
+            createdBy
+            createdAt
+          }
+        }
+        deliverables {
+          id
+          projectId
+          proposalId
+          uploadedBy {
+            id
+            email
+            fullName
+          }
+          fileName
+          filePath
+          fileType
+          fileSize
+          description
+          version
+          isFinal
+          uploadedAt
+          downloadUrl
+        }
+        documents {
+          id
+          title
+          content
+          createdBy
+          createdAt
+        }
+        comments {
+          id
+          authorId
+          message
+          visibility
+          createdAt
+        }
+      }
+    }
+  }
+`
+
+export const GET_PROJECT_ARCHIVE_BY_IDENTIFIER = gql`
+  query GetProjectArchiveByIdentifier($archiveIdentifier: String!) {
+    projectArchiveByIdentifier(archiveIdentifier: $archiveIdentifier) {
+      id
+      projectId
+      archiveIdentifier
+      compressedSize
+      originalSize
+      compressionRatio
+      archivedBy {
+        id
+        email
+        fullName
+      }
+      archivedAt
+      retentionUntil
+      legalHold
+      legalHoldReason
+      accessCount
+      lastAccessedAt
+      project {
+        id
+        title
+        description
+        budget
+        deadline
+        clientId
+        status
+        proposals {
+          id
+          leadId
+          status
+          submittedAt
+          versions {
+            versionNumber
+            content
+            createdBy
+            createdAt
+          }
+        }
+        deliverables {
+          id
+          projectId
+          proposalId
+          uploadedBy {
+            id
+            email
+            fullName
+          }
+          fileName
+          filePath
+          fileType
+          fileSize
+          description
+          version
+          isFinal
+          uploadedAt
+          downloadUrl
+        }
+        documents {
+          id
+          title
+          content
+          createdBy
+          createdAt
+        }
+        comments {
+          id
+          authorId
+          message
+          visibility
+          createdAt
+        }
+      }
+    }
+  }
+`
+
+export const SEARCH_ARCHIVES = gql`
+  query SearchArchives($query: String!, $limit: Int, $offset: Int) {
+    searchArchives(query: $query, limit: $limit, offset: $offset) {
+      id
+      projectId
+      archiveIdentifier
+      compressedSize
+      originalSize
+      compressionRatio
+      archivedBy {
+        id
+        email
+        fullName
+      }
+      archivedAt
+      retentionUntil
+      legalHold
+      legalHoldReason
+      accessCount
+      lastAccessedAt
+      project {
+        id
+        title
+        description
+        budget
+        deadline
+        clientId
+        status
+      }
+    }
+  }
+`

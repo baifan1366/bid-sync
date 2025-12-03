@@ -339,7 +339,7 @@ export async function sendAdminNotifications(
     // Generate URLs
     const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com';
     const proposalUrl = `${baseUrl}/proposals/${params.proposalId}`;
-    const projectUrl = `${baseUrl}/projects/${params.projectId}`;
+    const projectUrl = `${baseUrl}/client-projects/${params.projectId}`;
 
     // Get all admin users
     const { data: allUsers, error: usersError } = await supabase.auth.admin.listUsers();

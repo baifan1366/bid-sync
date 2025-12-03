@@ -1988,15 +1988,8 @@ export const resolvers = {
       // Get pending projects
       const { data: projects, error } = await supabase
         .from('projects')
-        .select(`
-          *,
-          client:client_id (
-            id,
-            email,
-            raw_user_meta_data
-          )
-        `)
-        .eq('status', 'PENDING_REVIEW')
+        .select('*')
+        .eq('status', 'pending_review')
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -2005,15 +1998,26 @@ export const resolvers = {
         });
       }
 
-      return projects.map((project: any) => ({
+      // Fetch client data separately using admin API
+      const clientIds = [...new Set(projects?.map((p: any) => p.client_id) || [])];
+      const clientsMap = new Map();
+
+      for (const clientId of clientIds) {
+        const { data: { user: clientUser }, error: clientError } = await supabase.auth.admin.getUserById(clientId);
+        if (!clientError && clientUser) {
+          clientsMap.set(clientId, {
+            id: clientUser.id,
+            email: clientUser.email,
+            fullName: clientUser.user_metadata?.full_name || clientUser.user_metadata?.name,
+            role: (clientUser.user_metadata?.role || 'client').toUpperCase(),
+          });
+        }
+      }
+
+      return (projects || []).map((project: any) => ({
         id: project.id,
         clientId: project.client_id,
-        client: project.client ? {
-          id: project.client.id,
-          email: project.client.email,
-          fullName: project.client.raw_user_meta_data?.full_name,
-          role: (project.client.raw_user_meta_data?.role || 'client').toUpperCase(),
-        } : null,
+        client: clientsMap.get(project.client_id) || null,
         title: project.title,
         description: project.description,
         budget: project.budget,
@@ -3852,6 +3856,618 @@ export const resolvers = {
         };
       }
     },
+
+    // Project Delivery and Archival Queries
+    deliverables: async (_: any, { projectId }: { projectId: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { DeliverableService } = await import('@/lib/deliverable-service');
+      const result = await DeliverableService.getDeliverables(projectId);
+
+      if (!result.success || !result.deliverables) {
+        throw new GraphQLError(result.error || 'Failed to fetch deliverables', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      // Get user details and download URLs for each deliverable
+      const adminClient = createAdminClient();
+      const deliverablesWithDetails = await Promise.all(
+        result.deliverables.map(async (deliverable) => {
+          const { data: userData } = await adminClient.auth.admin.getUserById(deliverable.uploadedBy);
+          const downloadUrlResult = await DeliverableService.generateDownloadUrl(deliverable.id);
+
+          return {
+            id: deliverable.id,
+            projectId: deliverable.projectId,
+            proposalId: deliverable.proposalId,
+            uploadedBy: {
+              id: deliverable.uploadedBy,
+              email: userData?.user?.email || '',
+              fullName: userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || 'Unknown',
+            },
+            fileName: deliverable.fileName,
+            filePath: deliverable.filePath,
+            fileType: deliverable.fileType,
+            fileSize: deliverable.fileSize,
+            description: deliverable.description,
+            version: deliverable.version,
+            isFinal: deliverable.isFinal,
+            uploadedAt: deliverable.uploadedAt.toISOString(),
+            downloadUrl: downloadUrlResult.url || '',
+          };
+        })
+      );
+
+      return deliverablesWithDetails;
+    },
+
+    projectCompletion: async (_: any, { projectId }: { projectId: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { CompletionService } = await import('@/lib/completion-service');
+      const completion = await CompletionService.getCompletion(projectId);
+
+      if (!completion) {
+        return null;
+      }
+
+      // Get deliverables
+      const { DeliverableService } = await import('@/lib/deliverable-service');
+      const deliverablesResult = await DeliverableService.getDeliverables(projectId);
+      const deliverables = deliverablesResult.deliverables || [];
+
+      // Get revisions
+      const revisions = await CompletionService.getRevisions(completion.id);
+
+      // Get user details
+      const adminClient = createAdminClient();
+      const { data: submittedByData } = await adminClient.auth.admin.getUserById(completion.submittedBy);
+      const reviewedByData = completion.reviewedBy 
+        ? await adminClient.auth.admin.getUserById(completion.reviewedBy)
+        : null;
+
+      // Get deliverables with details
+      const deliverablesWithDetails = await Promise.all(
+        deliverables.map(async (deliverable) => {
+          const { data: userData } = await adminClient.auth.admin.getUserById(deliverable.uploadedBy);
+          const downloadUrlResult = await DeliverableService.generateDownloadUrl(deliverable.id);
+
+          return {
+            id: deliverable.id,
+            projectId: deliverable.projectId,
+            proposalId: deliverable.proposalId,
+            uploadedBy: {
+              id: deliverable.uploadedBy,
+              email: userData?.user?.email || '',
+              fullName: userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || 'Unknown',
+            },
+            fileName: deliverable.fileName,
+            filePath: deliverable.filePath,
+            fileType: deliverable.fileType,
+            fileSize: deliverable.fileSize,
+            description: deliverable.description,
+            version: deliverable.version,
+            isFinal: deliverable.isFinal,
+            uploadedAt: deliverable.uploadedAt.toISOString(),
+            downloadUrl: downloadUrlResult.url || '',
+          };
+        })
+      );
+
+      // Get revisions with details
+      const revisionsWithDetails = await Promise.all(
+        revisions.map(async (revision) => {
+          const { data: requestedByData } = await adminClient.auth.admin.getUserById(revision.requestedBy);
+          const resolvedByData = revision.resolvedBy 
+            ? await adminClient.auth.admin.getUserById(revision.resolvedBy)
+            : null;
+
+          return {
+            id: revision.id,
+            revisionNumber: revision.revisionNumber,
+            requestedBy: {
+              id: revision.requestedBy,
+              email: requestedByData?.user?.email || '',
+              fullName: requestedByData?.user?.user_metadata?.full_name || requestedByData?.user?.user_metadata?.name || 'Unknown',
+            },
+            requestedAt: revision.requestedAt.toISOString(),
+            revisionNotes: revision.revisionNotes,
+            resolvedBy: revision.resolvedBy ? {
+              id: revision.resolvedBy,
+              email: resolvedByData?.user?.email || '',
+              fullName: resolvedByData?.user?.user_metadata?.full_name || resolvedByData?.user?.user_metadata?.name || 'Unknown',
+            } : null,
+            resolvedAt: revision.resolvedAt?.toISOString(),
+          };
+        })
+      );
+
+      return {
+        id: completion.id,
+        projectId: completion.projectId,
+        proposalId: completion.proposalId,
+        submittedBy: {
+          id: completion.submittedBy,
+          email: submittedByData?.user?.email || '',
+          fullName: submittedByData?.user?.user_metadata?.full_name || submittedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        submittedAt: completion.submittedAt.toISOString(),
+        reviewedBy: completion.reviewedBy ? {
+          id: completion.reviewedBy,
+          email: reviewedByData?.user?.email || '',
+          fullName: reviewedByData?.user?.user_metadata?.full_name || reviewedByData?.user?.user_metadata?.name || 'Unknown',
+        } : null,
+        reviewedAt: completion.reviewedAt?.toISOString(),
+        reviewStatus: completion.reviewStatus.toUpperCase(),
+        reviewComments: completion.reviewComments,
+        revisionCount: completion.revisionCount,
+        completedAt: completion.completedAt?.toISOString(),
+        deliverables: deliverablesWithDetails,
+        revisions: revisionsWithDetails,
+      };
+    },
+
+    projectArchive: async (_: any, { projectId }: { projectId: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { ArchiveService } = await import('@/lib/archive-service');
+      const result = await ArchiveService.getArchive(projectId, user.id);
+
+      if (!result.success || !result.archive) {
+        if (result.errorCode === 'NOT_FOUND') {
+          return null;
+        }
+        throw new GraphQLError(result.error || 'Failed to fetch archive', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const archive = result.archive;
+      const adminClient = createAdminClient();
+      const { data: archivedByData } = await adminClient.auth.admin.getUserById(archive.archivedBy);
+
+      return {
+        id: archive.id,
+        projectId: archive.projectId,
+        archiveIdentifier: archive.archiveIdentifier,
+        compressedSize: archive.compressedSize,
+        originalSize: archive.originalSize,
+        compressionRatio: archive.compressionRatio,
+        archivedBy: {
+          id: archive.archivedBy,
+          email: archivedByData?.user?.email || '',
+          fullName: archivedByData?.user?.user_metadata?.full_name || archivedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        archivedAt: archive.archivedAt.toISOString(),
+        retentionUntil: archive.retentionUntil?.toISOString(),
+        legalHold: archive.legalHold,
+        legalHoldReason: archive.legalHoldReason,
+        accessCount: archive.accessCount,
+        lastAccessedAt: archive.lastAccessedAt?.toISOString(),
+        project: {
+          id: archive.archiveData.project.id,
+          title: archive.archiveData.project.title,
+          description: archive.archiveData.project.description,
+          budget: archive.archiveData.project.budget,
+          deadline: archive.archiveData.project.deadline?.toISOString(),
+          clientId: archive.archiveData.project.clientId,
+          status: archive.archiveData.project.status,
+          proposals: archive.archiveData.proposals.map((p) => ({
+            id: p.id,
+            leadId: p.leadId,
+            status: p.status,
+            submittedAt: p.submittedAt?.toISOString(),
+            versions: p.versions.map((v) => ({
+              versionNumber: v.versionNumber,
+              content: JSON.stringify(v.content),
+              createdBy: v.createdBy,
+              createdAt: v.createdAt.toISOString(),
+            })),
+          })),
+          deliverables: archive.archiveData.deliverables.map((d) => ({
+            id: d.id,
+            projectId: archive.projectId,
+            proposalId: archive.archiveData.proposals[0]?.id || '',
+            uploadedBy: {
+              id: d.uploadedBy,
+              email: '',
+              fullName: 'Archived User',
+            },
+            fileName: d.fileName,
+            filePath: d.filePath,
+            fileType: d.fileType,
+            fileSize: d.fileSize,
+            description: d.description,
+            version: 1,
+            isFinal: true,
+            uploadedAt: d.uploadedAt.toISOString(),
+            downloadUrl: '',
+          })),
+          documents: archive.archiveData.workspaces.flatMap((w) =>
+            w.documents.map((doc) => ({
+              id: doc.id,
+              title: doc.title,
+              content: JSON.stringify(doc.content),
+              createdBy: doc.createdBy,
+              createdAt: doc.createdAt.toISOString(),
+            }))
+          ),
+          comments: archive.archiveData.comments.map((c) => ({
+            id: c.id,
+            authorId: c.authorId,
+            message: c.message,
+            visibility: c.visibility,
+            createdAt: c.createdAt.toISOString(),
+          })),
+        },
+      };
+    },
+
+    projectArchiveByIdentifier: async (_: any, { archiveIdentifier }: { archiveIdentifier: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { ArchiveService } = await import('@/lib/archive-service');
+      const result = await ArchiveService.getArchiveByIdentifier(archiveIdentifier, user.id);
+
+      if (!result.success || !result.archive) {
+        if (result.errorCode === 'NOT_FOUND') {
+          return null;
+        }
+        throw new GraphQLError(result.error || 'Failed to fetch archive', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const archive = result.archive;
+      const adminClient = createAdminClient();
+      const { data: archivedByData } = await adminClient.auth.admin.getUserById(archive.archivedBy);
+
+      return {
+        id: archive.id,
+        projectId: archive.projectId,
+        archiveIdentifier: archive.archiveIdentifier,
+        compressedSize: archive.compressedSize,
+        originalSize: archive.originalSize,
+        compressionRatio: archive.compressionRatio,
+        archivedBy: {
+          id: archive.archivedBy,
+          email: archivedByData?.user?.email || '',
+          fullName: archivedByData?.user?.user_metadata?.full_name || archivedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        archivedAt: archive.archivedAt.toISOString(),
+        retentionUntil: archive.retentionUntil?.toISOString(),
+        legalHold: archive.legalHold,
+        legalHoldReason: archive.legalHoldReason,
+        accessCount: archive.accessCount,
+        lastAccessedAt: archive.lastAccessedAt?.toISOString(),
+        project: {
+          id: archive.archiveData.project.id,
+          title: archive.archiveData.project.title,
+          description: archive.archiveData.project.description,
+          budget: archive.archiveData.project.budget,
+          deadline: archive.archiveData.project.deadline?.toISOString(),
+          clientId: archive.archiveData.project.clientId,
+          status: archive.archiveData.project.status,
+          proposals: archive.archiveData.proposals.map((p) => ({
+            id: p.id,
+            leadId: p.leadId,
+            status: p.status,
+            submittedAt: p.submittedAt?.toISOString(),
+            versions: p.versions.map((v) => ({
+              versionNumber: v.versionNumber,
+              content: JSON.stringify(v.content),
+              createdBy: v.createdBy,
+              createdAt: v.createdAt.toISOString(),
+            })),
+          })),
+          deliverables: archive.archiveData.deliverables.map((d) => ({
+            id: d.id,
+            projectId: archive.projectId,
+            proposalId: archive.archiveData.proposals[0]?.id || '',
+            uploadedBy: {
+              id: d.uploadedBy,
+              email: '',
+              fullName: 'Archived User',
+            },
+            fileName: d.fileName,
+            filePath: d.filePath,
+            fileType: d.fileType,
+            fileSize: d.fileSize,
+            description: d.description,
+            version: 1,
+            isFinal: true,
+            uploadedAt: d.uploadedAt.toISOString(),
+            downloadUrl: '',
+          })),
+          documents: archive.archiveData.workspaces.flatMap((w) =>
+            w.documents.map((doc) => ({
+              id: doc.id,
+              title: doc.title,
+              content: JSON.stringify(doc.content),
+              createdBy: doc.createdBy,
+              createdAt: doc.createdAt.toISOString(),
+            }))
+          ),
+          comments: archive.archiveData.comments.map((c) => ({
+            id: c.id,
+            authorId: c.authorId,
+            message: c.message,
+            visibility: c.visibility,
+            createdAt: c.createdAt.toISOString(),
+          })),
+        },
+      };
+    },
+
+    searchArchives: async (
+      _: any,
+      { query, limit = 50, offset = 0 }: { query: string; limit?: number; offset?: number }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { ArchiveService } = await import('@/lib/archive-service');
+      const result = await ArchiveService.searchArchives(query, user.id, limit, offset);
+
+      if (!result.success || !result.archives) {
+        throw new GraphQLError(result.error || 'Failed to search archives', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const archivesWithDetails = await Promise.all(
+        result.archives.map(async (archive) => {
+          const { data: archivedByData } = await adminClient.auth.admin.getUserById(archive.archivedBy);
+
+          return {
+            id: archive.id,
+            projectId: archive.projectId,
+            archiveIdentifier: archive.archiveIdentifier,
+            compressedSize: archive.compressedSize,
+            originalSize: archive.originalSize,
+            compressionRatio: archive.compressionRatio,
+            archivedBy: {
+              id: archive.archivedBy,
+              email: archivedByData?.user?.email || '',
+              fullName: archivedByData?.user?.user_metadata?.full_name || archivedByData?.user?.user_metadata?.name || 'Unknown',
+            },
+            archivedAt: archive.archivedAt.toISOString(),
+            retentionUntil: archive.retentionUntil?.toISOString(),
+            legalHold: archive.legalHold,
+            legalHoldReason: archive.legalHoldReason,
+            accessCount: archive.accessCount,
+            lastAccessedAt: archive.lastAccessedAt?.toISOString(),
+            project: {
+              id: archive.archiveData.project.id,
+              title: archive.archiveData.project.title,
+              description: archive.archiveData.project.description,
+              budget: archive.archiveData.project.budget,
+              deadline: archive.archiveData.project.deadline?.toISOString(),
+              clientId: archive.archiveData.project.clientId,
+              status: archive.archiveData.project.status,
+              proposals: archive.archiveData.proposals.map((p) => ({
+                id: p.id,
+                leadId: p.leadId,
+                status: p.status,
+                submittedAt: p.submittedAt?.toISOString(),
+                versions: p.versions.map((v) => ({
+                  versionNumber: v.versionNumber,
+                  content: JSON.stringify(v.content),
+                  createdBy: v.createdBy,
+                  createdAt: v.createdAt.toISOString(),
+                })),
+              })),
+              deliverables: archive.archiveData.deliverables.map((d) => ({
+                id: d.id,
+                projectId: archive.projectId,
+                proposalId: archive.archiveData.proposals[0]?.id || '',
+                uploadedBy: {
+                  id: d.uploadedBy,
+                  email: '',
+                  fullName: 'Archived User',
+                },
+                fileName: d.fileName,
+                filePath: d.filePath,
+                fileType: d.fileType,
+                fileSize: d.fileSize,
+                description: d.description,
+                version: 1,
+                isFinal: true,
+                uploadedAt: d.uploadedAt.toISOString(),
+                downloadUrl: '',
+              })),
+              documents: archive.archiveData.workspaces.flatMap((w) =>
+                w.documents.map((doc) => ({
+                  id: doc.id,
+                  title: doc.title,
+                  content: JSON.stringify(doc.content),
+                  createdBy: doc.createdBy,
+                  createdAt: doc.createdAt.toISOString(),
+                }))
+              ),
+              comments: archive.archiveData.comments.map((c) => ({
+                id: c.id,
+                authorId: c.authorId,
+                message: c.message,
+                visibility: c.visibility,
+                createdAt: c.createdAt.toISOString(),
+              })),
+            },
+          };
+        })
+      );
+
+      return archivesWithDetails;
+    },
+
+    projectExport: async (_: any, { exportId }: { exportId: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { ExportService } = await import('@/lib/export-service');
+      const exportRecord = await ExportService.getExport(exportId);
+
+      if (!exportRecord) {
+        return null;
+      }
+
+      // Verify user is the requester
+      if (exportRecord.requestedBy !== user.id) {
+        throw new GraphQLError('Forbidden: You can only view your own exports', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: requestedByData } = await adminClient.auth.admin.getUserById(exportRecord.requestedBy);
+
+      // Generate download URL if export is completed
+      let downloadUrl = null;
+      if (exportRecord.status === 'completed' && exportRecord.exportPath) {
+        const urlResult = await ExportService.generateDownloadUrl(exportId);
+        downloadUrl = urlResult.url || null;
+      }
+
+      return {
+        id: exportRecord.id,
+        projectId: exportRecord.projectId,
+        requestedBy: {
+          id: exportRecord.requestedBy,
+          email: requestedByData?.user?.email || '',
+          fullName: requestedByData?.user?.user_metadata?.full_name || requestedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        requestedAt: exportRecord.requestedAt.toISOString(),
+        status: exportRecord.status.toUpperCase(),
+        exportPath: exportRecord.exportPath,
+        exportSize: exportRecord.exportSize,
+        expiresAt: exportRecord.expiresAt?.toISOString(),
+        downloadUrl,
+        errorMessage: exportRecord.errorMessage,
+      };
+    },
+
+    projectExports: async (_: any, { projectId }: { projectId: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { ExportService } = await import('@/lib/export-service');
+      const exports = await ExportService.getExportsByProject(projectId);
+
+      // Filter to only show user's own exports
+      const userExports = exports.filter((exp) => exp.requestedBy === user.id);
+
+      const adminClient = createAdminClient();
+      const exportsWithDetails = await Promise.all(
+        userExports.map(async (exportRecord) => {
+          const { data: requestedByData } = await adminClient.auth.admin.getUserById(exportRecord.requestedBy);
+
+          // Generate download URL if export is completed
+          let downloadUrl = null;
+          if (exportRecord.status === 'completed' && exportRecord.exportPath) {
+            const urlResult = await ExportService.generateDownloadUrl(exportRecord.id);
+            downloadUrl = urlResult.url || null;
+          }
+
+          return {
+            id: exportRecord.id,
+            projectId: exportRecord.projectId,
+            requestedBy: {
+              id: exportRecord.requestedBy,
+              email: requestedByData?.user?.email || '',
+              fullName: requestedByData?.user?.user_metadata?.full_name || requestedByData?.user?.user_metadata?.name || 'Unknown',
+            },
+            requestedAt: exportRecord.requestedAt.toISOString(),
+            status: exportRecord.status.toUpperCase(),
+            exportPath: exportRecord.exportPath,
+            exportSize: exportRecord.exportSize,
+            expiresAt: exportRecord.expiresAt?.toISOString(),
+            downloadUrl,
+            errorMessage: exportRecord.errorMessage,
+          };
+        })
+      );
+
+      return exportsWithDetails;
+    },
+
+    completionStatistics: async (
+      _: any,
+      { dateFrom, dateTo }: { dateFrom?: string; dateTo?: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { StatisticsService } = await import('@/lib/statistics-service');
+      const fromDate = dateFrom ? new Date(dateFrom) : undefined;
+      const toDate = dateTo ? new Date(dateTo) : undefined;
+
+      const statistics = await StatisticsService.getCompletionStatistics(fromDate, toDate);
+
+      return {
+        totalCompleted: statistics.totalCompleted,
+        averageTimeToCompletion: statistics.averageTimeToCompletion,
+        projectsRequiringRevisions: statistics.projectsRequiringRevisions,
+        totalDeliverablesReceived: statistics.totalDeliverablesReceived,
+        completionsByMonth: statistics.completionsByMonth.map((m) => ({
+          month: m.month,
+          count: m.count,
+        })),
+      };
+    },
   },
 
   Mutation: {
@@ -5165,7 +5781,7 @@ export const resolvers = {
         projectId: result.proposal!.projectId,
         leadId: result.proposal!.leadId,
         title: null,
-        status: result.proposal!.status,
+        status: result.proposal!.status.toUpperCase(),
         budgetEstimate: null,
         timelineEstimate: null,
         executiveSummary: null,
@@ -5177,7 +5793,7 @@ export const resolvers = {
           clientId: project.client_id,
           title: project.title,
           description: project.description,
-          status: project.status,
+          status: project.status.toUpperCase(),
           budget: project.budget,
           deadline: project.deadline,
           additionalInfoRequirements: project.additional_info_requirements || [],
@@ -8400,7 +9016,7 @@ export const resolvers = {
 
     generateInvitation: async (
       _: any,
-      { input }: { input: { projectId: string; expirationDays?: number; isMultiUse?: boolean } }
+      { input }: { input: { projectId: string; proposalId?: string; expirationDays?: number; isMultiUse?: boolean } }
     ) => {
       const supabase = await createClient();
       
@@ -8415,7 +9031,30 @@ export const resolvers = {
         const { TeamInvitationService } = await import('@/lib/team-invitation-service');
         const service = new TeamInvitationService();
         
+        // If proposalId is not provided, try to get it from projectId
+        let proposalId = input.proposalId;
+        if (!proposalId && input.projectId) {
+          // Get the user's proposal for this project
+          const { data: proposal } = await supabase
+            .from('proposals')
+            .select('id')
+            .eq('project_id', input.projectId)
+            .eq('lead_id', user.id)
+            .single();
+          
+          if (proposal) {
+            proposalId = proposal.id;
+          }
+        }
+        
+        if (!proposalId) {
+          throw new GraphQLError('Proposal ID is required', {
+            extensions: { code: 'BAD_REQUEST' },
+          });
+        }
+        
         const result = await service.generateInvitation({
+          proposalId,
           projectId: input.projectId,
           createdBy: user.id,
           expirationDays: input.expirationDays,
@@ -8527,6 +9166,633 @@ export const resolvers = {
           extensions: { code: 'INTERNAL_SERVER_ERROR' },
         });
       }
+    },
+
+    // Project Delivery and Archival Mutations
+    uploadDeliverable: async (
+      _: any,
+      { input }: { input: {
+        projectId: string;
+        proposalId: string;
+        fileName: string;
+        filePath: string;
+        fileType: string;
+        fileSize: number;
+        description?: string;
+      } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Note: In a real implementation, the file would be uploaded via a separate endpoint
+      // This mutation just creates the database record after the file is uploaded
+      const { DeliverableService } = await import('@/lib/deliverable-service');
+      
+      // For GraphQL, we assume the file is already uploaded to the filePath
+      // In practice, you'd use a multipart upload or separate file upload endpoint
+      const result = await DeliverableService.uploadDeliverable(
+        {
+          projectId: input.projectId,
+          proposalId: input.proposalId,
+          fileName: input.fileName,
+          fileType: input.fileType,
+          fileSize: input.fileSize,
+          description: input.description,
+          file: Buffer.from(''), // Placeholder - file already uploaded
+        },
+        user.id
+      );
+
+      if (!result.success || !result.deliverable) {
+        throw new GraphQLError(result.error || 'Failed to upload deliverable', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: userData } = await adminClient.auth.admin.getUserById(result.deliverable.uploadedBy);
+      const downloadUrlResult = await DeliverableService.generateDownloadUrl(result.deliverable.id);
+
+      return {
+        id: result.deliverable.id,
+        projectId: result.deliverable.projectId,
+        proposalId: result.deliverable.proposalId,
+        uploadedBy: {
+          id: result.deliverable.uploadedBy,
+          email: userData?.user?.email || '',
+          fullName: userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || 'Unknown',
+        },
+        fileName: result.deliverable.fileName,
+        filePath: result.deliverable.filePath,
+        fileType: result.deliverable.fileType,
+        fileSize: result.deliverable.fileSize,
+        description: result.deliverable.description,
+        version: result.deliverable.version,
+        isFinal: result.deliverable.isFinal,
+        uploadedAt: result.deliverable.uploadedAt.toISOString(),
+        downloadUrl: downloadUrlResult.url || '',
+      };
+    },
+
+    deleteDeliverable: async (_: any, { deliverableId }: { deliverableId: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { DeliverableService } = await import('@/lib/deliverable-service');
+      const result = await DeliverableService.deleteDeliverable(deliverableId, user.id);
+
+      if (!result.success) {
+        throw new GraphQLError(result.error || 'Failed to delete deliverable', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      return true;
+    },
+
+    markReadyForDelivery: async (
+      _: any,
+      { input }: { input: { projectId: string; proposalId: string } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { CompletionService } = await import('@/lib/completion-service');
+      const result = await CompletionService.markReadyForDelivery(input, user.id);
+
+      if (!result.success || !result.completion) {
+        throw new GraphQLError(result.error || 'Failed to mark ready for delivery', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: submittedByData } = await adminClient.auth.admin.getUserById(result.completion.submittedBy);
+
+      // Get deliverables
+      const { DeliverableService } = await import('@/lib/deliverable-service');
+      const deliverablesResult = await DeliverableService.getDeliverables(input.projectId);
+      const deliverables = deliverablesResult.deliverables || [];
+
+      const deliverablesWithDetails = await Promise.all(
+        deliverables.map(async (deliverable) => {
+          const { data: userData } = await adminClient.auth.admin.getUserById(deliverable.uploadedBy);
+          const downloadUrlResult = await DeliverableService.generateDownloadUrl(deliverable.id);
+
+          return {
+            id: deliverable.id,
+            projectId: deliverable.projectId,
+            proposalId: deliverable.proposalId,
+            uploadedBy: {
+              id: deliverable.uploadedBy,
+              email: userData?.user?.email || '',
+              fullName: userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || 'Unknown',
+            },
+            fileName: deliverable.fileName,
+            filePath: deliverable.filePath,
+            fileType: deliverable.fileType,
+            fileSize: deliverable.fileSize,
+            description: deliverable.description,
+            version: deliverable.version,
+            isFinal: deliverable.isFinal,
+            uploadedAt: deliverable.uploadedAt.toISOString(),
+            downloadUrl: downloadUrlResult.url || '',
+          };
+        })
+      );
+
+      return {
+        id: result.completion.id,
+        projectId: result.completion.projectId,
+        proposalId: result.completion.proposalId,
+        submittedBy: {
+          id: result.completion.submittedBy,
+          email: submittedByData?.user?.email || '',
+          fullName: submittedByData?.user?.user_metadata?.full_name || submittedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        submittedAt: result.completion.submittedAt.toISOString(),
+        reviewedBy: null,
+        reviewedAt: null,
+        reviewStatus: result.completion.reviewStatus.toUpperCase(),
+        reviewComments: result.completion.reviewComments,
+        revisionCount: result.completion.revisionCount,
+        completedAt: result.completion.completedAt?.toISOString(),
+        deliverables: deliverablesWithDetails,
+        revisions: [],
+      };
+    },
+
+    reviewCompletion: async (
+      _: any,
+      { input }: { input: {
+        completionId: string;
+        reviewStatus: string;
+        reviewComments?: string;
+      } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { CompletionService } = await import('@/lib/completion-service');
+      const result = await CompletionService.reviewCompletion(
+        {
+          completionId: input.completionId,
+          reviewStatus: input.reviewStatus.toLowerCase() as any,
+          reviewComments: input.reviewComments,
+        },
+        user.id
+      );
+
+      if (!result.success || !result.completion) {
+        throw new GraphQLError(result.error || 'Failed to review completion', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: submittedByData } = await adminClient.auth.admin.getUserById(result.completion.submittedBy);
+      const reviewedByData = result.completion.reviewedBy 
+        ? await adminClient.auth.admin.getUserById(result.completion.reviewedBy)
+        : null;
+
+      // Get deliverables
+      const { DeliverableService } = await import('@/lib/deliverable-service');
+      const deliverablesResult = await DeliverableService.getDeliverables(result.completion.projectId);
+      const deliverables = deliverablesResult.deliverables || [];
+
+      const deliverablesWithDetails = await Promise.all(
+        deliverables.map(async (deliverable) => {
+          const { data: userData } = await adminClient.auth.admin.getUserById(deliverable.uploadedBy);
+          const downloadUrlResult = await DeliverableService.generateDownloadUrl(deliverable.id);
+
+          return {
+            id: deliverable.id,
+            projectId: deliverable.projectId,
+            proposalId: deliverable.proposalId,
+            uploadedBy: {
+              id: deliverable.uploadedBy,
+              email: userData?.user?.email || '',
+              fullName: userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || 'Unknown',
+            },
+            fileName: deliverable.fileName,
+            filePath: deliverable.filePath,
+            fileType: deliverable.fileType,
+            fileSize: deliverable.fileSize,
+            description: deliverable.description,
+            version: deliverable.version,
+            isFinal: deliverable.isFinal,
+            uploadedAt: deliverable.uploadedAt.toISOString(),
+            downloadUrl: downloadUrlResult.url || '',
+          };
+        })
+      );
+
+      // Get revisions
+      const revisions = await CompletionService.getRevisions(result.completion.id);
+      const revisionsWithDetails = await Promise.all(
+        revisions.map(async (revision) => {
+          const { data: requestedByData } = await adminClient.auth.admin.getUserById(revision.requestedBy);
+          const resolvedByData = revision.resolvedBy 
+            ? await adminClient.auth.admin.getUserById(revision.resolvedBy)
+            : null;
+
+          return {
+            id: revision.id,
+            revisionNumber: revision.revisionNumber,
+            requestedBy: {
+              id: revision.requestedBy,
+              email: requestedByData?.user?.email || '',
+              fullName: requestedByData?.user?.user_metadata?.full_name || requestedByData?.user?.user_metadata?.name || 'Unknown',
+            },
+            requestedAt: revision.requestedAt.toISOString(),
+            revisionNotes: revision.revisionNotes,
+            resolvedBy: revision.resolvedBy ? {
+              id: revision.resolvedBy,
+              email: resolvedByData?.user?.email || '',
+              fullName: resolvedByData?.user?.user_metadata?.full_name || resolvedByData?.user?.user_metadata?.name || 'Unknown',
+            } : null,
+            resolvedAt: revision.resolvedAt?.toISOString(),
+          };
+        })
+      );
+
+      return {
+        id: result.completion.id,
+        projectId: result.completion.projectId,
+        proposalId: result.completion.proposalId,
+        submittedBy: {
+          id: result.completion.submittedBy,
+          email: submittedByData?.user?.email || '',
+          fullName: submittedByData?.user?.user_metadata?.full_name || submittedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        submittedAt: result.completion.submittedAt.toISOString(),
+        reviewedBy: result.completion.reviewedBy ? {
+          id: result.completion.reviewedBy,
+          email: reviewedByData?.user?.email || '',
+          fullName: reviewedByData?.user?.user_metadata?.full_name || reviewedByData?.user?.user_metadata?.name || 'Unknown',
+        } : null,
+        reviewedAt: result.completion.reviewedAt?.toISOString(),
+        reviewStatus: result.completion.reviewStatus.toUpperCase(),
+        reviewComments: result.completion.reviewComments,
+        revisionCount: result.completion.revisionCount,
+        completedAt: result.completion.completedAt?.toISOString(),
+        deliverables: deliverablesWithDetails,
+        revisions: revisionsWithDetails,
+      };
+    },
+
+    acceptCompletion: async (_: any, { completionId }: { completionId: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { CompletionService } = await import('@/lib/completion-service');
+      const result = await CompletionService.acceptCompletion(completionId, user.id);
+
+      if (!result.success || !result.completion) {
+        throw new GraphQLError(result.error || 'Failed to accept completion', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: submittedByData } = await adminClient.auth.admin.getUserById(result.completion.submittedBy);
+      const reviewedByData = result.completion.reviewedBy 
+        ? await adminClient.auth.admin.getUserById(result.completion.reviewedBy)
+        : null;
+
+      // Get deliverables
+      const { DeliverableService } = await import('@/lib/deliverable-service');
+      const deliverablesResult = await DeliverableService.getDeliverables(result.completion.projectId);
+      const deliverables = deliverablesResult.deliverables || [];
+
+      const deliverablesWithDetails = await Promise.all(
+        deliverables.map(async (deliverable) => {
+          const { data: userData } = await adminClient.auth.admin.getUserById(deliverable.uploadedBy);
+          const downloadUrlResult = await DeliverableService.generateDownloadUrl(deliverable.id);
+
+          return {
+            id: deliverable.id,
+            projectId: deliverable.projectId,
+            proposalId: deliverable.proposalId,
+            uploadedBy: {
+              id: deliverable.uploadedBy,
+              email: userData?.user?.email || '',
+              fullName: userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || 'Unknown',
+            },
+            fileName: deliverable.fileName,
+            filePath: deliverable.filePath,
+            fileType: deliverable.fileType,
+            fileSize: deliverable.fileSize,
+            description: deliverable.description,
+            version: deliverable.version,
+            isFinal: deliverable.isFinal,
+            uploadedAt: deliverable.uploadedAt.toISOString(),
+            downloadUrl: downloadUrlResult.url || '',
+          };
+        })
+      );
+
+      // Get revisions
+      const revisions = await CompletionService.getRevisions(result.completion.id);
+      const revisionsWithDetails = await Promise.all(
+        revisions.map(async (revision) => {
+          const { data: requestedByData } = await adminClient.auth.admin.getUserById(revision.requestedBy);
+          const resolvedByData = revision.resolvedBy 
+            ? await adminClient.auth.admin.getUserById(revision.resolvedBy)
+            : null;
+
+          return {
+            id: revision.id,
+            revisionNumber: revision.revisionNumber,
+            requestedBy: {
+              id: revision.requestedBy,
+              email: requestedByData?.user?.email || '',
+              fullName: requestedByData?.user?.user_metadata?.full_name || requestedByData?.user?.user_metadata?.name || 'Unknown',
+            },
+            requestedAt: revision.requestedAt.toISOString(),
+            revisionNotes: revision.revisionNotes,
+            resolvedBy: revision.resolvedBy ? {
+              id: revision.resolvedBy,
+              email: resolvedByData?.user?.email || '',
+              fullName: resolvedByData?.user?.user_metadata?.full_name || resolvedByData?.user?.user_metadata?.name || 'Unknown',
+            } : null,
+            resolvedAt: revision.resolvedAt?.toISOString(),
+          };
+        })
+      );
+
+      return {
+        id: result.completion.id,
+        projectId: result.completion.projectId,
+        proposalId: result.completion.proposalId,
+        submittedBy: {
+          id: result.completion.submittedBy,
+          email: submittedByData?.user?.email || '',
+          fullName: submittedByData?.user?.user_metadata?.full_name || submittedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        submittedAt: result.completion.submittedAt.toISOString(),
+        reviewedBy: result.completion.reviewedBy ? {
+          id: result.completion.reviewedBy,
+          email: reviewedByData?.user?.email || '',
+          fullName: reviewedByData?.user?.user_metadata?.full_name || reviewedByData?.user?.user_metadata?.name || 'Unknown',
+        } : null,
+        reviewedAt: result.completion.reviewedAt?.toISOString(),
+        reviewStatus: result.completion.reviewStatus.toUpperCase(),
+        reviewComments: result.completion.reviewComments,
+        revisionCount: result.completion.revisionCount,
+        completedAt: result.completion.completedAt?.toISOString(),
+        deliverables: deliverablesWithDetails,
+        revisions: revisionsWithDetails,
+      };
+    },
+
+    requestRevision: async (
+      _: any,
+      { input }: { input: { completionId: string; revisionNotes: string } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { CompletionService } = await import('@/lib/completion-service');
+      const result = await CompletionService.requestRevision(input, user.id);
+
+      if (!result.success || !result.revision) {
+        throw new GraphQLError(result.error || 'Failed to request revision', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: requestedByData } = await adminClient.auth.admin.getUserById(result.revision.requestedBy);
+      const resolvedByData = result.revision.resolvedBy 
+        ? await adminClient.auth.admin.getUserById(result.revision.resolvedBy)
+        : null;
+
+      return {
+        id: result.revision.id,
+        revisionNumber: result.revision.revisionNumber,
+        requestedBy: {
+          id: result.revision.requestedBy,
+          email: requestedByData?.user?.email || '',
+          fullName: requestedByData?.user?.user_metadata?.full_name || requestedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        requestedAt: result.revision.requestedAt.toISOString(),
+        revisionNotes: result.revision.revisionNotes,
+        resolvedBy: result.revision.resolvedBy ? {
+          id: result.revision.resolvedBy,
+          email: resolvedByData?.user?.email || '',
+          fullName: resolvedByData?.user?.user_metadata?.full_name || resolvedByData?.user?.user_metadata?.name || 'Unknown',
+        } : null,
+        resolvedAt: result.revision.resolvedAt?.toISOString(),
+      };
+    },
+
+    requestExport: async (
+      _: any,
+      { input }: { input: { projectId: string } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { ExportService } = await import('@/lib/export-service');
+      const result = await ExportService.requestExport(input.projectId, user.id);
+
+      if (!result.success || !result.export) {
+        throw new GraphQLError(result.error || 'Failed to request export', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: requestedByData } = await adminClient.auth.admin.getUserById(result.export.requestedBy);
+
+      return {
+        id: result.export.id,
+        projectId: result.export.projectId,
+        requestedBy: {
+          id: result.export.requestedBy,
+          email: requestedByData?.user?.email || '',
+          fullName: requestedByData?.user?.user_metadata?.full_name || requestedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        requestedAt: result.export.requestedAt.toISOString(),
+        status: result.export.status.toUpperCase(),
+        exportPath: result.export.exportPath,
+        exportSize: result.export.exportSize,
+        expiresAt: result.export.expiresAt?.toISOString(),
+        downloadUrl: null,
+        errorMessage: result.export.errorMessage,
+      };
+    },
+
+    applyLegalHold: async (
+      _: any,
+      { archiveId, reason }: { archiveId: string; reason: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Only admins can apply legal hold
+      if (user.user_metadata?.role !== 'admin') {
+        throw new GraphQLError('Only administrators can apply legal hold', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      const { RetentionService } = await import('@/lib/retention-service');
+      const result = await RetentionService.applyLegalHold(archiveId, reason, user.id);
+
+      if (!result.success || !result.archive) {
+        throw new GraphQLError(result.error || 'Failed to apply legal hold', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: archivedByData } = await adminClient.auth.admin.getUserById(result.archive.archivedBy);
+
+      return {
+        id: result.archive.id,
+        projectId: result.archive.projectId,
+        archiveIdentifier: result.archive.archiveIdentifier,
+        compressedSize: result.archive.compressedSize,
+        originalSize: result.archive.originalSize,
+        compressionRatio: result.archive.compressionRatio,
+        archivedBy: {
+          id: result.archive.archivedBy,
+          email: archivedByData?.user?.email || '',
+          fullName: archivedByData?.user?.user_metadata?.full_name || archivedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        archivedAt: result.archive.archivedAt.toISOString(),
+        retentionUntil: result.archive.retentionUntil?.toISOString(),
+        legalHold: result.archive.legalHold,
+        legalHoldReason: result.archive.legalHoldReason,
+        accessCount: result.archive.accessCount,
+        lastAccessedAt: result.archive.lastAccessedAt?.toISOString(),
+        project: {
+          id: result.archive.archiveData.project.id,
+          title: result.archive.archiveData.project.title,
+          description: result.archive.archiveData.project.description,
+          budget: result.archive.archiveData.project.budget,
+          deadline: result.archive.archiveData.project.deadline?.toISOString(),
+          clientId: result.archive.archiveData.project.clientId,
+          status: result.archive.archiveData.project.status,
+          proposals: [],
+          deliverables: [],
+          documents: [],
+          comments: [],
+        },
+      };
+    },
+
+    removeLegalHold: async (_: any, { archiveId }: { archiveId: string }) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Only admins can remove legal hold
+      if (user.user_metadata?.role !== 'admin') {
+        throw new GraphQLError('Only administrators can remove legal hold', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      const { RetentionService } = await import('@/lib/retention-service');
+      const result = await RetentionService.removeLegalHold(archiveId, user.id);
+
+      if (!result.success || !result.archive) {
+        throw new GraphQLError(result.error || 'Failed to remove legal hold', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const adminClient = createAdminClient();
+      const { data: archivedByData } = await adminClient.auth.admin.getUserById(result.archive.archivedBy);
+
+      return {
+        id: result.archive.id,
+        projectId: result.archive.projectId,
+        archiveIdentifier: result.archive.archiveIdentifier,
+        compressedSize: result.archive.compressedSize,
+        originalSize: result.archive.originalSize,
+        compressionRatio: result.archive.compressionRatio,
+        archivedBy: {
+          id: result.archive.archivedBy,
+          email: archivedByData?.user?.email || '',
+          fullName: archivedByData?.user?.user_metadata?.full_name || archivedByData?.user?.user_metadata?.name || 'Unknown',
+        },
+        archivedAt: result.archive.archivedAt.toISOString(),
+        retentionUntil: result.archive.retentionUntil?.toISOString(),
+        legalHold: result.archive.legalHold,
+        legalHoldReason: result.archive.legalHoldReason,
+        accessCount: result.archive.accessCount,
+        lastAccessedAt: result.archive.lastAccessedAt?.toISOString(),
+        project: {
+          id: result.archive.archiveData.project.id,
+          title: result.archive.archiveData.project.title,
+          description: result.archive.archiveData.project.description,
+          budget: result.archive.archiveData.project.budget,
+          deadline: result.archive.archiveData.project.deadline?.toISOString(),
+          clientId: result.archive.archiveData.project.clientId,
+          status: result.archive.archiveData.project.status,
+          proposals: [],
+          deliverables: [],
+          documents: [],
+          comments: [],
+        },
+      };
     },
   },
 

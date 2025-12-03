@@ -283,3 +283,15 @@ export type {
   LeadScoreUpdatedNotificationParams,
   ClientAllScoredNotificationParams,
 } from './scoring-notifications';
+
+// Re-export completion notification functions
+export {
+  sendClientReadyForDeliveryNotification,
+  sendTeamCompletionNotifications,
+  sendLeadRevisionRequestNotification,
+} from './completion-notifications';
+export type {
+  ClientReadyForDeliveryParams,
+  TeamCompletionParams,
+  LeadRevisionRequestParams,
+} from './completion-notifications';

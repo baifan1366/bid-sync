@@ -12,13 +12,13 @@ export const metadata: Metadata = {
 }
 
 interface JoinPageProps {
-    params: {
+    params: Promise<{
         code: string
-    }
+    }>
 }
 
 export default async function JoinPage({ params }: JoinPageProps) {
-    const { code } = params
+    const { code } = await params
 
     // Validate that code exists
     if (!code) {
