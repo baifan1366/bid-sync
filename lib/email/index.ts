@@ -242,7 +242,15 @@ export async function sendAccessRevocationEmail(params: {
 }
 
 // Re-export service functions for advanced usage
-export { sendEmail, getEmailQueueStatus, clearEmailQueue } from './service';
+export { 
+  sendEmail, 
+  sendBulkEmails,
+  processQueue,
+  retryFailedEmails,
+  getEmailQueueStatus, 
+  clearEmailQueue 
+} from './service';
+export type { EmailOptions, EmailResult, QueueStatus } from './service';
 
 // Re-export template functions for custom usage
 export {
@@ -295,3 +303,10 @@ export type {
   TeamCompletionParams,
   LeadRevisionRequestParams,
 } from './completion-notifications';
+
+// Re-export notification template functions
+export {
+  getNotificationEmail,
+  getProjectNotificationEmail,
+  getDeadlineReminderEmail,
+} from './notification-templates';

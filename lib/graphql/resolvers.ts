@@ -14,6 +14,7 @@ import { TeamManagementService } from '@/lib/team-management-service';
 import { CollaborationService } from '@/lib/collaboration-service';
 import { SectionLockManager } from '@/lib/section-lock-service';
 import { ProgressTrackerService } from '@/lib/progress-tracker-service';
+import { SectionManagementService } from '@/lib/section-management-service';
 import { ProposalService } from '@/lib/proposal-service';
 
 export const resolvers = {
@@ -4575,10 +4576,10 @@ export const resolvers = {
         });
       }
 
-      // Verify user is the project client
+      // Verify user is the project client and get project details
       const { data: project, error: projectError } = await supabase
         .from('projects')
-        .select('client_id')
+        .select('client_id, title')
         .eq('id', projectId)
         .single();
 
@@ -4591,6 +4592,19 @@ export const resolvers = {
       if (project.client_id !== user.id) {
         throw new GraphQLError('Forbidden: Only the project client can accept proposals', {
           extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Get proposal details for notifications
+      const { data: proposal, error: proposalFetchError } = await supabase
+        .from('proposals')
+        .select('lead_id')
+        .eq('id', proposalId)
+        .single();
+
+      if (proposalFetchError || !proposal) {
+        throw new GraphQLError('Proposal not found', {
+          extensions: { code: 'NOT_FOUND' },
         });
       }
 
@@ -4649,6 +4663,59 @@ export const resolvers = {
         });
       }
 
+      // Send notifications (non-blocking)
+      // Requirement 6.2: Notify bidding leader and all team members
+      const { NotificationService } = await import('./notification-service');
+      
+      // Notify the bidding leader
+      NotificationService.createNotification({
+        userId: proposal.lead_id,
+        type: 'proposal_accepted',
+        title: `Proposal Accepted: ${project.title}`,
+        body: `Congratulations! Your proposal for "${project.title}" has been accepted by the client.`,
+        data: {
+          proposalId,
+          projectId,
+          projectTitle: project.title,
+        },
+        sendEmail: true,
+        priority: NotificationService.NotificationPriority.HIGH,
+      }).catch(error => {
+        console.error('Failed to send notification to lead:', error);
+      });
+
+      // Notify all team members
+      supabase
+        .from('bid_team_members')
+        .select('user_id')
+        .eq('project_id', projectId)
+        .neq('user_id', proposal.lead_id)
+        .then(({ data: teamMembers }) => {
+          if (teamMembers && teamMembers.length > 0) {
+            teamMembers.forEach(member => {
+              NotificationService.createNotification({
+                userId: member.user_id,
+                type: 'proposal_accepted',
+                title: `Proposal Accepted: ${project.title}`,
+                body: `Great news! Your team's proposal for "${project.title}" has been accepted by the client.`,
+                data: {
+                  proposalId,
+                  projectId,
+                  projectTitle: project.title,
+                  leadId: proposal.lead_id,
+                },
+                sendEmail: true,
+                priority: NotificationService.NotificationPriority.HIGH,
+              }).catch(error => {
+                console.error(`Failed to send notification to team member ${member.user_id}:`, error);
+              });
+            });
+          }
+        })
+        .catch(error => {
+          console.error('Failed to fetch team members for notifications:', error);
+        });
+
       return {
         id: decision.id,
         proposalId: decision.proposal_id,
@@ -4681,10 +4748,10 @@ export const resolvers = {
         });
       }
 
-      // Verify user is the project client
+      // Verify user is the project client and get project details
       const { data: project, error: projectError } = await supabase
         .from('projects')
-        .select('client_id')
+        .select('client_id, title')
         .eq('id', input.projectId)
         .single();
 
@@ -4697,6 +4764,19 @@ export const resolvers = {
       if (project.client_id !== user.id) {
         throw new GraphQLError('Forbidden: Only the project client can reject proposals', {
           extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Get proposal details for notifications
+      const { data: proposal, error: proposalFetchError } = await supabase
+        .from('proposals')
+        .select('lead_id')
+        .eq('id', input.proposalId)
+        .single();
+
+      if (proposalFetchError || !proposal) {
+        throw new GraphQLError('Proposal not found', {
+          extensions: { code: 'NOT_FOUND' },
         });
       }
 
@@ -4730,6 +4810,27 @@ export const resolvers = {
           extensions: { code: 'INTERNAL_SERVER_ERROR' },
         });
       }
+
+      // Send notification to bidding leader (non-blocking)
+      // Requirement 6.4: Notify bidding leader when proposal is rejected
+      const { NotificationService } = await import('./notification-service');
+      
+      NotificationService.createNotification({
+        userId: proposal.lead_id,
+        type: 'proposal_rejected',
+        title: `Proposal Not Selected: ${project.title}`,
+        body: `Your proposal for "${project.title}" was not selected. The client has provided feedback for your review.`,
+        data: {
+          proposalId: input.proposalId,
+          projectId: input.projectId,
+          projectTitle: project.title,
+          feedback: input.feedback,
+        },
+        sendEmail: true,
+        priority: NotificationService.NotificationPriority.MEDIUM,
+      }).catch(error => {
+        console.error('Failed to send rejection notification to lead:', error);
+      });
 
       return {
         id: decision.id,
@@ -4933,6 +5034,39 @@ export const resolvers = {
         },
       });
 
+      // Requirement 10.1: Notify all administrators when a project is created
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        // Get all admin users
+        const adminClient = createAdminClient();
+        const { data: allUsers } = await adminClient.auth.admin.listUsers();
+        const admins = allUsers?.users.filter((u: any) => u.user_metadata?.role === 'admin') || [];
+        
+        // Send notification to each admin (in-app only per requirement 10.4)
+        for (const admin of admins) {
+          await NotificationService.createNotification({
+            userId: admin.id,
+            type: 'project_created',
+            title: `New Project Created: ${project.title}`,
+            body: `A new project "${project.title}" has been created by ${user.user_metadata?.full_name || user.email} and requires review.`,
+            data: {
+              projectId: project.id,
+              clientId: user.id,
+              title: project.title,
+              budget: project.budget,
+              deadline: project.deadline,
+            },
+            sendEmail: false, // Requirement 10.4: In-app only for admin project notifications
+          }).catch(error => {
+            console.error('Failed to send admin notification:', error);
+          });
+        }
+      } catch (error) {
+        // Non-blocking: log error but don't fail project creation
+        console.error('Error sending admin notifications for project creation:', error);
+      }
+
       return {
         id: project.id,
         clientId: project.client_id,
@@ -5127,6 +5261,48 @@ export const resolvers = {
           clientEmail,
           reason: reason || 'Your verification request did not meet our requirements.',
         });
+      }
+
+      // Requirements 11.1, 11.2, 11.4, 11.5: Send in-app and email notifications for verification status
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        if (approved) {
+          // Requirement 11.1: Notify user of verification approval
+          await NotificationService.createNotification({
+            userId: userId,
+            type: 'verification_approved',
+            title: 'Account Verified',
+            body: 'Your account has been verified! You can now create projects and access all platform features.',
+            data: {
+              verifiedAt: updatedUser.user.user_metadata?.verified_at,
+              verifiedBy: user.id,
+            },
+            sendEmail: true, // Requirement 11.4: Send both in-app and email
+            priority: 'critical' as any, // Requirement 11.5: Critical notifications bypass preferences
+          }).catch(error => {
+            console.error('Failed to send verification approval notification:', error);
+          });
+        } else {
+          // Requirement 11.2: Notify user of verification rejection with reason
+          await NotificationService.createNotification({
+            userId: userId,
+            type: 'verification_rejected',
+            title: 'Account Verification Rejected',
+            body: `Your account verification request has been rejected. Reason: ${reason || 'Your verification request did not meet our requirements.'}`,
+            data: {
+              reason: reason || 'Your verification request did not meet our requirements.',
+              rejectedBy: user.id,
+            },
+            sendEmail: true, // Requirement 11.4: Send both in-app and email
+            priority: 'critical' as any, // Requirement 11.5: Critical notifications bypass preferences
+          }).catch(error => {
+            console.error('Failed to send verification rejection notification:', error);
+          });
+        }
+      } catch (error) {
+        // Non-blocking: log error but don't fail verification process
+        console.error('Error sending verification notifications:', error);
       }
 
       const u = updatedUser.user;
@@ -5564,6 +5740,30 @@ export const resolvers = {
         reason,
         suspendedAt: updatedUser.user.user_metadata?.suspended_at,
       });
+
+      // Requirement 11.3, 11.5: Send critical notification for account suspension
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        await NotificationService.createNotification({
+          userId: userId,
+          type: 'account_suspended',
+          title: 'Account Suspended',
+          body: `Your account has been suspended. Reason: ${reason}`,
+          data: {
+            reason: reason,
+            suspendedAt: updatedUser.user.user_metadata?.suspended_at,
+            suspendedBy: user.id,
+          },
+          sendEmail: true,
+          priority: 'critical' as any, // Requirement 11.5: Critical notifications bypass preferences
+        }).catch(error => {
+          console.error('Failed to send account suspension notification:', error);
+        });
+      } catch (error) {
+        // Non-blocking: log error but don't fail suspension process
+        console.error('Error sending suspension notifications:', error);
+      }
 
       const u = updatedUser.user;
       const role = u.user_metadata?.role || 'bidding_member';
@@ -6843,46 +7043,31 @@ export const resolvers = {
         });
       }
 
-      const progressTracker = new ProgressTrackerService();
-      await progressTracker.initialize(user.id);
-
       try {
-        await progressTracker.updateSectionStatus(sectionId, status.toLowerCase() as any);
+        // Use SectionManagementService which includes notification integration
+        // Requirements: 12.3, 12.4, 12.5
+        const result = await SectionManagementService.updateSection(
+          sectionId,
+          { status: status.toLowerCase() as any }
+        );
 
-        // Fetch the updated section
-        const { data: section, error: sectionError } = await supabase
-          .from('document_sections')
-          .select('*')
-          .eq('id', sectionId)
-          .single();
-
-        if (sectionError || !section) {
+        if (!result.success || !result.section) {
           return {
             success: false,
             section: null,
-            error: 'Failed to fetch updated section',
+            error: result.error || 'Failed to update section status',
           };
         }
+
+        const section = result.section;
 
         // Get user info for assigned and locked by users
         const adminClient = createAdminClient();
         let assignedToUser = null;
-        if (section.assigned_to) {
-          const { data: userData } = await adminClient.auth.admin.getUserById(section.assigned_to);
+        if (section.assignedTo) {
+          const { data: userData } = await adminClient.auth.admin.getUserById(section.assignedTo);
           if (userData?.user) {
             assignedToUser = {
-              id: userData.user.id,
-              email: userData.user.email,
-              fullName: userData.user.user_metadata?.full_name || userData.user.user_metadata?.name || null,
-            };
-          }
-        }
-
-        let lockedByUser = null;
-        if (section.locked_by) {
-          const { data: userData } = await adminClient.auth.admin.getUserById(section.locked_by);
-          if (userData?.user) {
-            lockedByUser = {
               id: userData.user.id,
               email: userData.user.email,
               fullName: userData.user.user_metadata?.full_name || userData.user.user_metadata?.name || null,
@@ -6894,20 +7079,20 @@ export const resolvers = {
           success: true,
           section: {
             id: section.id,
-            documentId: section.document_id,
+            documentId: section.documentId,
             title: section.title,
             order: section.order,
             status: section.status.toUpperCase(),
-            assignedTo: section.assigned_to,
+            assignedTo: section.assignedTo,
             assignedToUser,
             deadline: section.deadline,
             content: section.content,
-            lockedBy: section.locked_by,
-            lockedByUser,
-            lockedAt: section.locked_at,
-            lockExpiresAt: section.lock_expires_at,
-            createdAt: section.created_at,
-            updatedAt: section.updated_at,
+            lockedBy: null,
+            lockedByUser: null,
+            lockedAt: null,
+            lockExpiresAt: null,
+            createdAt: section.createdAt,
+            updatedAt: section.updatedAt,
           },
           error: null,
         };
@@ -6917,8 +7102,6 @@ export const resolvers = {
           section: null,
           error: error.message || 'Failed to update section status',
         };
-      } finally {
-        await progressTracker.cleanup();
       }
     },
 
@@ -6935,32 +7118,29 @@ export const resolvers = {
         });
       }
 
-      const progressTracker = new ProgressTrackerService();
-      await progressTracker.initialize(user.id);
-
       try {
-        await progressTracker.assignSection(input.sectionId, input.userId);
+        // Use SectionManagementService which includes notification integration
+        // Requirements: 12.1, 12.2, 12.4, 12.5
+        const result = await SectionManagementService.assignSection(
+          input.sectionId,
+          input.userId
+        );
 
-        // Fetch the updated section
-        const { data: section, error: sectionError } = await supabase
-          .from('document_sections')
-          .select('*')
-          .eq('id', input.sectionId)
-          .single();
-
-        if (sectionError || !section) {
+        if (!result.success || !result.section) {
           return {
             success: false,
             section: null,
-            error: 'Failed to fetch updated section',
+            error: result.error || 'Failed to assign section',
           };
         }
+
+        const section = result.section;
 
         // Get user info for assigned and locked by users
         const adminClient = createAdminClient();
         let assignedToUser = null;
-        if (section.assigned_to) {
-          const { data: userData } = await adminClient.auth.admin.getUserById(section.assigned_to);
+        if (section.assignedTo) {
+          const { data: userData } = await adminClient.auth.admin.getUserById(section.assignedTo);
           if (userData?.user) {
             assignedToUser = {
               id: userData.user.id,
@@ -6970,39 +7150,24 @@ export const resolvers = {
           }
         }
 
-        let lockedByUser = null;
-        if (section.locked_by) {
-          const { data: userData } = await adminClient.auth.admin.getUserById(section.locked_by);
-          if (userData?.user) {
-            lockedByUser = {
-              id: userData.user.id,
-              email: userData.user.email,
-              fullName: userData.user.user_metadata?.full_name || userData.user.user_metadata?.name || null,
-            };
-          }
-        }
-
-        // TODO: Send notification to assigned user (Requirement 6.3)
-        // This would integrate with the notification system
-
         return {
           success: true,
           section: {
             id: section.id,
-            documentId: section.document_id,
+            documentId: section.documentId,
             title: section.title,
             order: section.order,
             status: section.status.toUpperCase(),
-            assignedTo: section.assigned_to,
+            assignedTo: section.assignedTo,
             assignedToUser,
             deadline: section.deadline,
             content: section.content,
-            lockedBy: section.locked_by,
-            lockedByUser,
-            lockedAt: section.locked_at,
-            lockExpiresAt: section.lock_expires_at,
-            createdAt: section.created_at,
-            updatedAt: section.updated_at,
+            lockedBy: null,
+            lockedByUser: null,
+            lockedAt: null,
+            lockExpiresAt: null,
+            createdAt: section.createdAt,
+            updatedAt: section.updatedAt,
           },
           error: null,
         };
@@ -7012,8 +7177,6 @@ export const resolvers = {
           section: null,
           error: error.message || 'Failed to assign section',
         };
-      } finally {
-        await progressTracker.cleanup();
       }
     },
 
@@ -8200,7 +8363,7 @@ export const resolvers = {
       // Get proposal and verify access
       const { data: proposal, error: proposalError } = await supabase
         .from('proposals')
-        .select('*, projects!inner(client_id)')
+        .select('*, projects!inner(client_id, title, id)')
         .eq('id', input.proposalId)
         .single();
 
@@ -8248,6 +8411,8 @@ export const resolvers = {
         .single();
 
       let score;
+      const isUpdate = !!existingScore;
+      
       if (existingScore) {
         // Update existing score
         const { data: updatedScore, error: updateError } = await supabase
@@ -8293,6 +8458,66 @@ export const resolvers = {
 
         score = newScore;
       }
+
+      // Calculate total score and rank for notification
+      const { data: allScores } = await supabase
+        .from('proposal_scores')
+        .select('weighted_score')
+        .eq('proposal_id', input.proposalId);
+
+      const totalScore = allScores?.reduce((sum, s) => sum + (s.weighted_score || 0), 0) || 0;
+
+      // Get all proposals for this project to calculate rank
+      const { data: allProposals } = await supabase
+        .from('proposals')
+        .select('id')
+        .eq('project_id', proposal.projects.id);
+
+      let rank = 1;
+      if (allProposals && allProposals.length > 1) {
+        const proposalScores = await Promise.all(
+          allProposals.map(async (p) => {
+            const { data: scores } = await supabase
+              .from('proposal_scores')
+              .select('weighted_score')
+              .eq('proposal_id', p.id);
+            const total = scores?.reduce((sum, s) => sum + (s.weighted_score || 0), 0) || 0;
+            return { proposalId: p.id, total };
+          })
+        );
+        proposalScores.sort((a, b) => b.total - a.total);
+        rank = proposalScores.findIndex(p => p.proposalId === input.proposalId) + 1;
+      }
+
+      // Send notification to bidding leader (non-blocking)
+      // Requirement 6.1: Notify bidding leader when proposal is scored
+      // Requirement 6.3: Notify bidding leader when score is updated
+      const { NotificationService } = await import('./notification-service');
+      const projectData = proposal.projects as any;
+      
+      NotificationService.createNotification({
+        userId: proposal.lead_id,
+        type: isUpdate ? 'proposal_score_updated' : 'proposal_scored',
+        title: isUpdate 
+          ? `Proposal Score Updated: ${projectData.title}`
+          : `Proposal Scored: ${projectData.title}`,
+        body: isUpdate
+          ? `Your proposal for "${projectData.title}" has been re-scored. Current total score: ${totalScore.toFixed(2)}, Rank: #${rank}`
+          : `Your proposal for "${projectData.title}" has been scored. Total score: ${totalScore.toFixed(2)}, Rank: #${rank}`,
+        data: {
+          proposalId: input.proposalId,
+          projectId: projectData.id,
+          projectTitle: projectData.title,
+          totalScore: totalScore.toFixed(2),
+          rank,
+          criterionName: criterion.name,
+          rawScore: input.rawScore,
+        },
+        sendEmail: true,
+        priority: NotificationService.NotificationPriority.MEDIUM,
+      }).catch(error => {
+        console.error('Failed to send scoring notification to lead:', error);
+      });
 
       // Get user details
       const adminClient = createAdminClient();

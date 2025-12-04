@@ -12,6 +12,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { z } from 'zod'
+import { NotificationService } from '@/lib/notification-service'
 
 /**
  * Validation Schemas
@@ -244,6 +245,67 @@ export class TeamManagementService {
         joinedAt: teamMember.created_at,
       }
 
+      // Get project details for notifications
+      const { data: project } = await supabase
+        .from('projects')
+        .select('title, client_id')
+        .eq('id', invitation.project_id)
+        .single()
+
+      // Get bidding lead(s) for this project
+      const { data: leads } = await supabase
+        .from('bid_team_members')
+        .select('user_id')
+        .eq('project_id', invitation.project_id)
+        .eq('role', 'lead')
+
+      // Get new member's user details
+      const { data: newMemberUser } = await supabase
+        .from('users')
+        .select('name, email')
+        .eq('id', validated.userId)
+        .single()
+
+      // Requirement 7.1: Notify bidding leader when team member joins
+      if (leads && leads.length > 0) {
+        for (const lead of leads) {
+          NotificationService.createNotification({
+            userId: lead.user_id,
+            type: 'team_member_joined',
+            title: 'New Team Member Joined',
+            body: `${newMemberUser?.name || newMemberUser?.email || 'A new member'} has joined your team for ${project?.title || 'the project'}`,
+            data: {
+              projectId: invitation.project_id,
+              teamMemberId: teamMember.id,
+              newMemberUserId: validated.userId,
+              newMemberName: newMemberUser?.name,
+              newMemberEmail: newMemberUser?.email,
+              projectTitle: project?.title,
+            },
+            sendEmail: true,
+          }).catch(error => {
+            console.error('Failed to send team member joined notification to lead:', error)
+          })
+        }
+      }
+
+      // Requirement 7.2: Send welcome notification to new team member
+      NotificationService.createNotification({
+        userId: validated.userId,
+        type: 'team_member_joined',
+        title: 'Welcome to the Team!',
+        body: `You have successfully joined the team for ${project?.title || 'the project'}`,
+        data: {
+          projectId: invitation.project_id,
+          teamMemberId: teamMember.id,
+          projectTitle: project?.title,
+          role: 'member',
+        },
+        sendEmail: true,
+      }).catch(error => {
+        console.error('Failed to send welcome notification to new member:', error)
+      })
+
       return {
         success: true,
         data: result,
@@ -391,6 +453,13 @@ export class TeamManagementService {
         }
       }
 
+      // Get project details for notifications
+      const { data: project } = await supabase
+        .from('projects')
+        .select('title')
+        .eq('id', validated.projectId)
+        .single()
+
       // Remove the team member
       const { error: deleteError } = await supabase
         .from('bid_team_members')
@@ -404,6 +473,22 @@ export class TeamManagementService {
           error: `Failed to remove team member: ${deleteError.message}`,
         }
       }
+
+      // Requirement 7.3, 7.4: Notify removed member with project title
+      NotificationService.createNotification({
+        userId: validated.userId,
+        type: 'team_member_removed',
+        title: 'Removed from Team',
+        body: `You have been removed from the team for ${project?.title || 'the project'}`,
+        data: {
+          projectId: validated.projectId,
+          projectTitle: project?.title,
+          removedBy: validated.removedBy,
+        },
+        sendEmail: true,
+      }).catch(error => {
+        console.error('Failed to send team member removed notification:', error)
+      })
 
       return {
         success: true,

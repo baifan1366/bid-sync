@@ -16,6 +16,7 @@ import {
 } from '@/lib/email/completion-notifications';
 import { ArchiveService } from '@/lib/archive-service';
 import { LoggingService } from '@/lib/logging-service';
+import { NotificationService } from '@/lib/notification-service';
 
 export type ReviewStatus = 'pending' | 'accepted' | 'revision_requested';
 
@@ -240,6 +241,16 @@ export class CompletionService {
         deliverables.length
       ).catch((error) => {
         console.error('Error sending completion notification:', error);
+      });
+
+      // Requirement 8.1: Create in-app notification for client (non-blocking)
+      // Property 21: Ready for delivery notifications
+      this.createReadyForDeliveryNotification(
+        project.client_id,
+        input.projectId,
+        deliverables.length
+      ).catch((error) => {
+        console.error('Error creating ready for delivery notification:', error);
       });
 
       // Log successful operation
@@ -503,6 +514,15 @@ export class CompletionService {
           console.error('Error sending team notifications:', error);
         });
 
+      // Requirement 8.2: Create in-app notifications for all team members (non-blocking)
+      // Property 22: Completion acceptance team notifications
+      this.createCompletionAcceptanceNotifications(
+        completion.project_id,
+        completion.proposal_id
+      ).catch((error) => {
+        console.error('Error creating completion acceptance notifications:', error);
+      });
+
       // Requirement 4.5: Initiate archival process (non-blocking)
       ArchiveService.createArchive(completion.project_id, userId)
         .catch((error) => {
@@ -720,6 +740,16 @@ export class CompletionService {
         input.revisionNotes.trim()
       ).catch((error) => {
         console.error('Error sending revision notification:', error);
+      });
+
+      // Requirement 8.3: Create in-app notification for bidding lead (non-blocking)
+      // Property 23: Revision request notifications
+      this.createRevisionRequestNotification(
+        completion.submitted_by,
+        completion.project_id,
+        input.revisionNotes.trim()
+      ).catch((error) => {
+        console.error('Error creating revision request notification:', error);
       });
 
       // Log successful operation
@@ -1015,6 +1045,183 @@ export class CompletionService {
       });
     } catch (error) {
       console.error('Error in sendLeadRevisionNotification:', error);
+    }
+  }
+
+  /**
+   * Creates in-app notification for client when project is ready for delivery
+   * 
+   * Requirement 8.1: Notify client when project status changes to "pending_completion"
+   * Property 21: Ready for delivery notifications
+   * 
+   * @private
+   * @param clientId - Client user ID
+   * @param projectId - Project ID
+   * @param deliverableCount - Number of deliverables
+   */
+  private static async createReadyForDeliveryNotification(
+    clientId: string,
+    projectId: string,
+    deliverableCount: number
+  ): Promise<void> {
+    try {
+      const supabase = await createClient();
+
+      // Get project details
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('title')
+        .eq('id', projectId)
+        .single();
+
+      if (projectError || !project) {
+        console.error('Error fetching project details:', projectError);
+        return;
+      }
+
+      // Create notification
+      await NotificationService.createNotification({
+        userId: clientId,
+        type: 'ready_for_delivery',
+        title: 'Project Ready for Review',
+        body: `The team has marked "${project.title}" as ready for delivery with ${deliverableCount} deliverable${deliverableCount !== 1 ? 's' : ''}.`,
+        data: {
+          projectId,
+          deliverableCount,
+        },
+        sendEmail: true,
+        priority: NotificationService.NotificationPriority.HIGH,
+      });
+    } catch (error) {
+      console.error('Error in createReadyForDeliveryNotification:', error);
+    }
+  }
+
+  /**
+   * Creates in-app notifications for all team members when completion is accepted
+   * 
+   * Requirement 8.2: Notify all bidding team members when project is marked completed
+   * Property 22: Completion acceptance team notifications
+   * 
+   * @private
+   * @param projectId - Project ID
+   * @param proposalId - Proposal ID
+   */
+  private static async createCompletionAcceptanceNotifications(
+    projectId: string,
+    proposalId: string
+  ): Promise<void> {
+    try {
+      const supabase = await createClient();
+
+      // Get project details
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('title')
+        .eq('id', projectId)
+        .single();
+
+      if (projectError || !project) {
+        console.error('Error fetching project details:', projectError);
+        return;
+      }
+
+      // Get all team members (lead + members)
+      const { data: proposal, error: proposalError } = await supabase
+        .from('proposals')
+        .select('lead_id')
+        .eq('id', proposalId)
+        .single();
+
+      if (proposalError || !proposal) {
+        console.error('Error fetching proposal details:', proposalError);
+        return;
+      }
+
+      const { data: teamMembers, error: teamError } = await supabase
+        .from('proposal_team_members')
+        .select('user_id')
+        .eq('proposal_id', proposalId);
+
+      if (teamError) {
+        console.error('Error fetching team members:', teamError);
+        return;
+      }
+
+      // Collect all team member IDs (lead + members)
+      const allTeamMemberIds = [
+        proposal.lead_id,
+        ...(teamMembers || []).map((m) => m.user_id),
+      ];
+
+      // Create notification for each team member
+      const notificationPromises = allTeamMemberIds.map((userId) =>
+        NotificationService.createNotification({
+          userId,
+          type: 'completion_accepted',
+          title: 'Project Completed!',
+          body: `Congratulations! The client has accepted the completion of "${project.title}".`,
+          data: {
+            projectId,
+            proposalId,
+          },
+          sendEmail: true,
+          priority: NotificationService.NotificationPriority.HIGH,
+        })
+      );
+
+      await Promise.all(notificationPromises);
+    } catch (error) {
+      console.error('Error in createCompletionAcceptanceNotifications:', error);
+    }
+  }
+
+  /**
+   * Creates in-app notification for bidding lead when revisions are requested
+   * 
+   * Requirement 8.3: Notify bidding lead with revision notes when revisions are requested
+   * Property 23: Revision request notifications
+   * 
+   * @private
+   * @param leadId - Lead user ID
+   * @param projectId - Project ID
+   * @param revisionNotes - Revision notes from client
+   */
+  private static async createRevisionRequestNotification(
+    leadId: string,
+    projectId: string,
+    revisionNotes: string
+  ): Promise<void> {
+    try {
+      const supabase = await createClient();
+
+      // Get project details
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('title')
+        .eq('id', projectId)
+        .single();
+
+      if (projectError || !project) {
+        console.error('Error fetching project details:', projectError);
+        return;
+      }
+
+      // Create notification
+      await NotificationService.createNotification({
+        userId: leadId,
+        type: 'revision_requested',
+        title: 'Revisions Requested',
+        body: `The client has requested revisions for "${project.title}": ${revisionNotes}`,
+        data: {
+          projectId,
+          revisionNotes,
+        },
+        sendEmail: true,
+        priority: NotificationService.NotificationPriority.HIGH,
+      });
+    } catch (error) {
+      console.error('Error in createRevisionRequestNotification:', error);
     }
   }
 }

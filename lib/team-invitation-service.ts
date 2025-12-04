@@ -12,6 +12,7 @@
 
 import { createClient } from '@/lib/supabase/server'
 import { z } from 'zod'
+import { NotificationService } from '@/lib/notification-service'
 
 /**
  * Validation Schemas
@@ -208,6 +209,34 @@ export class TeamInvitationService {
         isMultiUse: invitation.is_multi_use,
         createdAt: invitation.created_at,
       }
+
+      // Get proposal and project details for notification
+      const { data: proposal } = await supabase
+        .from('proposals')
+        .select('project_id, projects(title)')
+        .eq('id', validated.proposalId)
+        .single()
+
+      // Requirement 7.5: Notify creator that invitation was created
+      NotificationService.createNotification({
+        userId: validated.createdBy,
+        type: 'team_invitation_created',
+        title: 'Team Invitation Created',
+        body: `Team invitation created for ${proposal?.projects?.title || 'the project'}. Code: ${code}`,
+        data: {
+          invitationId: invitation.id,
+          proposalId: validated.proposalId,
+          projectId: proposal?.project_id,
+          projectTitle: proposal?.projects?.title,
+          code: code,
+          token: invitation.token,
+          expiresAt: invitation.expires_at,
+          isMultiUse: validated.isMultiUse,
+        },
+        sendEmail: true,
+      }).catch(error => {
+        console.error('Failed to send invitation created notification:', error)
+      })
 
       return {
         success: true,

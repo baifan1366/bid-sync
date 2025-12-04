@@ -552,7 +552,7 @@ export class ProposalService {
         }
       }
 
-      // Notify all admins
+      // Requirement 10.2, 10.3, 10.5: Notify all admins (in-app only)
       const { data: admins } = await supabase
         .from('users')
         .select('id')
@@ -570,8 +570,9 @@ export class ProposalService {
               projectId,
               projectTitle,
               leadId,
+              clientId, // Requirement 10.3: Include relevant entity IDs
             },
-            sendEmail: true,
+            sendEmail: false, // Requirement 10.5: In-app only for admin proposal notifications
           });
 
           results.push({

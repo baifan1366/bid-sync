@@ -1,7 +1,7 @@
 "use client"
 
 import { memo, useState, useEffect } from "react"
-import { Bell, LogOut, Moon, Settings, Sun, User } from "lucide-react"
+import { LogOut, Moon, Settings, Sun, User } from "lucide-react"
 import { useTheme } from "next-themes"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -17,6 +17,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { useUser } from "@/hooks/use-user"
 import { createClient } from "@/lib/supabase/client"
+import { NotificationCenter } from "@/components/notifications"
 import { cn } from "@/lib/utils"
 
 interface HeaderActionsProps {
@@ -52,9 +53,6 @@ export const HeaderActions = memo(function HeaderActions({ className }: HeaderAc
   const { theme, setTheme } = useTheme()
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
-
-  // Mock notification count - in real app, this would come from API
-  const notificationCount = 3
 
   useEffect(() => {
     setMounted(true)
@@ -109,26 +107,7 @@ export const HeaderActions = memo(function HeaderActions({ className }: HeaderAc
       ) : (
         <>
           {/* Notifications */}
-          <div className="relative">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 hover:bg-yellow-100 dark:hover:bg-yellow-900/50"
-              aria-label={`Notifications${notificationCount > 0 ? `, ${notificationCount} unread` : ""}`}
-              title="View notifications"
-            >
-              <Bell className="h-4 w-4" aria-hidden="true" />
-            </Button>
-            {notificationCount > 0 && (
-              <Badge
-                variant="destructive"
-                className="absolute -top-0.5 -right-0.5 h-4 w-4 flex items-center justify-center p-0 text-[10px] font-medium"
-                aria-label={`${notificationCount} unread notifications`}
-              >
-                {notificationCount}
-              </Badge>
-            )}
-          </div>
+          <NotificationCenter userId={user.id} />
 
           {/* Divider */}
           <div className="hidden lg:block h-6 w-px bg-border mx-2" aria-hidden="true" />

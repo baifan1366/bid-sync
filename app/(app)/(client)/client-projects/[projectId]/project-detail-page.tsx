@@ -282,10 +282,10 @@ export function ProjectDetailPage() {
                 <Button
                   onClick={() => router.push(`/lead-dashboard?createProposal=${projectId}`)}
                   className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold"
-                  disabled={project.status !== 'OPEN' && project.status !== 'open'}
+                  disabled={project.status !== 'OPEN'}
                 >
                   <FileText className="h-4 w-4 mr-2" />
-                  {(project.status === 'OPEN' || project.status === 'open') ? 'Create Proposal' : `Project ${project.status}`}
+                  {project.status === 'OPEN' ? 'Create Proposal' : `Project ${project.status}`}
                 </Button>
               )}
               

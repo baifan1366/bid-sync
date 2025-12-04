@@ -35,6 +35,7 @@ git push
 | 保留策略 | `/api/cron/retention-policy` | 每天 2:00 AM UTC | 检查并标记过期归档 |
 | 归档删除 | `/api/cron/archive-deletion` | 每天 3:00 AM UTC | 删除已过宽限期的归档 |
 | 导出清理 | `/api/cron/export-cleanup` | 每天 4:00 AM UTC | 删除过期的导出文件 |
+| 截止日期提醒 | `/api/cron/deadline-reminders` | 每天 9:00 AM UTC | 发送项目和章节截止日期提醒 |
 
 ## 监控
 

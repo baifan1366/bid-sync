@@ -9,9 +9,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { useToast } from '@/components/ui/use-toast'
-import { Loader2, Save, User, Mail, Shield, Bell, Lock } from 'lucide-react'
+import { Loader2, Save, User, Mail, Shield } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { Switch } from '@/components/ui/switch'
+import { NotificationPreferences } from '@/components/settings/notification-preferences'
 
 const ME_QUERY = `
   query Me {
@@ -187,64 +187,7 @@ export default function SettingsPage() {
         </Card>
 
         {/* Notification Settings */}
-        <Card className="border-yellow-400/20">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Bell className="h-5 w-5 text-yellow-400" />
-              <CardTitle>Notifications</CardTitle>
-            </div>
-            <CardDescription>
-              Manage how you receive notifications
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Email Notifications</Label>
-                <p className="text-sm text-muted-foreground">
-                  Receive email updates about your projects
-                </p>
-              </div>
-              <Switch defaultChecked />
-            </div>
-
-            <Separator className="bg-yellow-400/10" />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Project Updates</Label>
-                <p className="text-sm text-muted-foreground">
-                  Get notified when there are updates to your projects
-                </p>
-              </div>
-              <Switch defaultChecked />
-            </div>
-
-            <Separator className="bg-yellow-400/10" />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>New Messages</Label>
-                <p className="text-sm text-muted-foreground">
-                  Receive notifications for new messages
-                </p>
-              </div>
-              <Switch defaultChecked />
-            </div>
-
-            <Separator className="bg-yellow-400/10" />
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Proposal Updates</Label>
-                <p className="text-sm text-muted-foreground">
-                  Get notified about proposal status changes
-                </p>
-              </div>
-              <Switch defaultChecked />
-            </div>
-          </CardContent>
-        </Card>
+        {user?.id && <NotificationPreferences userId={user.id} />}
 
         {/* Account Information */}
         <Card className="border-yellow-400/20">

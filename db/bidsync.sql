@@ -627,6 +627,7 @@ CREATE INDEX IF NOT EXISTS idx_admin_actions_admin ON public.admin_actions(admin
 CREATE INDEX IF NOT EXISTS idx_admin_actions_target ON public.admin_actions(target_user_id);
 CREATE INDEX IF NOT EXISTS idx_admin_actions_created ON public.admin_actions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_admin_actions_type ON public.admin_actions(action_type);
+CREATE INDEX IF NOT EXISTS idx_user_notification_prefs_user_id ON public.user_notification_preferences(user_id);
 
 -- Enable RLS
 ALTER TABLE public.admin_invitations ENABLE ROW LEVEL SECURITY;
@@ -930,6 +931,9 @@ CREATE TABLE IF NOT EXISTS public.user_notification_preferences (
   proposal_updates BOOLEAN DEFAULT true,
   qa_notifications BOOLEAN DEFAULT true,
   deadline_reminders BOOLEAN DEFAULT true,
+  team_notifications BOOLEAN DEFAULT true,
+  completion_notifications BOOLEAN DEFAULT true,
+  scoring_notifications BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(user_id)
@@ -978,8 +982,34 @@ CREATE POLICY "Project participants can view contracts" ON public.contracts
 FOR SELECT USING (EXISTS (SELECT 1 FROM public.projects p WHERE p.id = contracts.project_id AND (p.client_id = auth.uid() OR EXISTS (SELECT 1 FROM public.proposals pr WHERE pr.project_id = p.id AND pr.lead_id = auth.uid()))));
 
 -- RLS Policies for Notification Preferences
-CREATE POLICY "Users can manage their notification preferences" ON public.user_notification_preferences
-USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+-- Drop existing policies to ensure clean state
+DROP POLICY IF EXISTS "Users can manage their notification preferences" ON public.user_notification_preferences;
+DROP POLICY IF EXISTS "user_notification_prefs_select" ON public.user_notification_preferences;
+DROP POLICY IF EXISTS "user_notification_prefs_insert" ON public.user_notification_preferences;
+DROP POLICY IF EXISTS "user_notification_prefs_update" ON public.user_notification_preferences;
+DROP POLICY IF EXISTS "user_notification_prefs_admin_select" ON public.user_notification_preferences;
+
+-- Users can view their own preferences
+CREATE POLICY "user_notification_prefs_select" ON public.user_notification_preferences
+FOR SELECT USING (user_id = auth.uid());
+
+-- Users can create their own preferences
+CREATE POLICY "user_notification_prefs_insert" ON public.user_notification_preferences
+FOR INSERT WITH CHECK (user_id = auth.uid());
+
+-- Users can update their own preferences
+CREATE POLICY "user_notification_prefs_update" ON public.user_notification_preferences
+FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+-- Admins can view all preferences
+CREATE POLICY "user_notification_prefs_admin_select" ON public.user_notification_preferences
+FOR SELECT USING (
+    EXISTS (
+        SELECT 1 FROM auth.users
+        WHERE id = auth.uid() 
+        AND raw_user_meta_data->>'role' = 'admin'
+    )
+);
 
 -- Helper Functions
 CREATE OR REPLACE FUNCTION get_pending_projects_count()
@@ -1065,9 +1095,11 @@ JOIN public.workspaces w ON wd.workspace_id = w.id
 JOIN public.projects proj ON w.project_id = proj.id
 WHERE ds.assigned_to IS NOT NULL;
 
--- Seed default notification preferences
+-- Seed default notification preferences for existing users
 INSERT INTO public.user_notification_preferences (user_id)
-SELECT id FROM auth.users ON CONFLICT (user_id) DO NOTHING;
+SELECT id FROM auth.users 
+WHERE id NOT IN (SELECT user_id FROM public.user_notification_preferences)
+ON CONFLICT (user_id) DO NOTHING;
 
 -- ============================================================
 -- MIGRATION 009: COLLABORATIVE PROPOSAL EDITOR
@@ -1587,11 +1619,13 @@ CREATE TABLE IF NOT EXISTS public.notification_queue (
     type VARCHAR(50) NOT NULL,
     title TEXT NOT NULL,
     body TEXT,
-    data JSONB,
+    data JSONB DEFAULT '{}'::jsonb,
     read BOOLEAN DEFAULT false,
     sent_via_email BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT now(),
     read_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ DEFAULT now(),
+    legal_hold BOOLEAN DEFAULT false,
     CONSTRAINT notification_queue_type_valid CHECK (
         type IN (
             'team_member_joined',
@@ -1618,11 +1652,14 @@ CREATE INDEX IF NOT EXISTS idx_proposal_performance_created ON public.proposal_p
 CREATE INDEX IF NOT EXISTS idx_proposal_performance_lead_created ON public.proposal_performance(lead_id, created_at DESC);
 
 -- Indexes for Notification Queue
-CREATE INDEX IF NOT EXISTS idx_notification_queue_user ON public.notification_queue(user_id);
-CREATE INDEX IF NOT EXISTS idx_notification_queue_user_unread ON public.notification_queue(user_id, read) WHERE read = false;
+CREATE INDEX IF NOT EXISTS idx_notification_queue_user_id ON public.notification_queue(user_id);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_read ON public.notification_queue(user_id, read);
 CREATE INDEX IF NOT EXISTS idx_notification_queue_type ON public.notification_queue(type);
-CREATE INDEX IF NOT EXISTS idx_notification_queue_created ON public.notification_queue(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_notification_queue_user_created ON public.notification_queue(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_created_at ON public.notification_queue(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_user_read_created ON public.notification_queue(user_id, read, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_unread ON public.notification_queue(user_id, created_at DESC) WHERE read = false;
+CREATE INDEX IF NOT EXISTS idx_notification_queue_legal_hold ON public.notification_queue(legal_hold, created_at) WHERE legal_hold = true;
+CREATE INDEX IF NOT EXISTS idx_notification_queue_old_notifications ON public.notification_queue(created_at) WHERE legal_hold = false;
 CREATE INDEX IF NOT EXISTS idx_notification_queue_email_pending ON public.notification_queue(sent_via_email, created_at) WHERE sent_via_email = false;
 
 -- Additional indexes for bidding leader features
@@ -1658,21 +1695,33 @@ FOR SELECT USING (
 );
 
 -- RLS Policies for Notification Queue
+-- Drop existing policies to ensure clean state
+DROP POLICY IF EXISTS "notif_read" ON public.notification_queue;
+DROP POLICY IF EXISTS "notif_write" ON public.notification_queue;
+DROP POLICY IF EXISTS "notification_queue_user_select" ON public.notification_queue;
+DROP POLICY IF EXISTS "notification_queue_system_insert" ON public.notification_queue;
+DROP POLICY IF EXISTS "notification_queue_user_update" ON public.notification_queue;
+DROP POLICY IF EXISTS "notification_queue_system_update" ON public.notification_queue;
+DROP POLICY IF EXISTS "notification_queue_user_delete" ON public.notification_queue;
+DROP POLICY IF EXISTS "notification_queue_admin_select" ON public.notification_queue;
+
+-- Users can only view their own notifications
 CREATE POLICY "notification_queue_user_select" ON public.notification_queue
 FOR SELECT USING (user_id = auth.uid());
 
+-- System can insert notifications (service role)
 CREATE POLICY "notification_queue_system_insert" ON public.notification_queue
 FOR INSERT WITH CHECK (true);
 
+-- Users can update their own notifications (mark as read, delete)
 CREATE POLICY "notification_queue_user_update" ON public.notification_queue
 FOR UPDATE USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
 
-CREATE POLICY "notification_queue_system_update" ON public.notification_queue
-FOR UPDATE USING (true) WITH CHECK (true);
-
+-- Users can delete their own notifications
 CREATE POLICY "notification_queue_user_delete" ON public.notification_queue
 FOR DELETE USING (user_id = auth.uid());
 
+-- Admins can view all notifications
 CREATE POLICY "notification_queue_admin_select" ON public.notification_queue
 FOR SELECT USING (
     EXISTS (
@@ -1790,34 +1839,65 @@ END;
 $ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION public.mark_all_notifications_read(p_user_id UUID)
-RETURNS void AS $
+RETURNS INTEGER AS $
+DECLARE
+    v_count INTEGER;
 BEGIN
-    UPDATE public.notification_queue
-    SET read = true, read_at = NOW()
-    WHERE user_id = p_user_id AND user_id = auth.uid() AND read = false;
+    UPDATE public.notification_queue 
+    SET read = true, 
+        read_at = now(), 
+        updated_at = now()
+    WHERE user_id = p_user_id 
+    AND read = false;
+    
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    RETURN v_count;
 END;
 $ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE OR REPLACE FUNCTION public.get_unread_notification_count(p_user_id UUID)
-RETURNS INT AS $
-DECLARE
-    v_count INT;
+RETURNS INTEGER AS $
 BEGIN
-    SELECT COUNT(*)
-    INTO v_count
-    FROM public.notification_queue
-    WHERE user_id = p_user_id AND read = false;
+    RETURN (
+        SELECT COUNT(*)::INTEGER 
+        FROM public.notification_queue 
+        WHERE user_id = p_user_id AND read = false
+    );
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION public.cleanup_old_notifications(p_days_old INTEGER DEFAULT 90)
+RETURNS INTEGER AS $
+DECLARE
+    v_count INTEGER;
+    v_cutoff_date TIMESTAMPTZ;
+BEGIN
+    v_cutoff_date := now() - (p_days_old || ' days')::INTERVAL;
+    
+    DELETE FROM public.notification_queue 
+    WHERE created_at < v_cutoff_date 
+    AND legal_hold = false;
+    
+    GET DIAGNOSTICS v_count = ROW_COUNT;
+    
+    -- Log the cleanup
+    INSERT INTO public.admin_actions (
+        admin_id, 
+        action_type, 
+        reason, 
+        new_value
+    ) VALUES (
+        '00000000-0000-0000-0000-000000000000'::UUID, -- System user
+        'NOTIFICATION_CLEANUP',
+        'Automated cleanup of old notifications',
+        jsonb_build_object(
+            'deleted_count', v_count,
+            'cutoff_date', v_cutoff_date,
+            'days_old', p_days_old
+        )
+    );
     
     RETURN v_count;
-END;
-$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
-CREATE OR REPLACE FUNCTION public.cleanup_old_notifications()
-RETURNS void AS $
-BEGIN
-    DELETE FROM public.notification_queue
-    WHERE read = true 
-    AND read_at < NOW() - INTERVAL '90 days';
 END;
 $ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -1863,6 +1943,10 @@ BEGIN
 END;
 $ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
+GRANT EXECUTE ON FUNCTION public.get_bid_performance(UUID) TO authenticated;
+
+COMMENT ON FUNCTION public.get_bid_performance IS 'Returns comprehensive bid performance metrics for a bidding lead';
+
 -- Triggers for Proposal Performance
 CREATE OR REPLACE FUNCTION public.update_proposal_performance_timestamp()
 RETURNS TRIGGER AS $
@@ -1877,6 +1961,47 @@ CREATE TRIGGER trigger_update_proposal_performance_timestamp
     BEFORE UPDATE ON public.proposal_performance
     FOR EACH ROW
     EXECUTE FUNCTION public.update_proposal_performance_timestamp();
+
+-- Function to create default notification preferences for new users
+CREATE OR REPLACE FUNCTION public.create_default_notification_preferences()
+RETURNS TRIGGER AS $
+BEGIN
+    INSERT INTO public.user_notification_preferences (user_id)
+    VALUES (NEW.id)
+    ON CONFLICT (user_id) DO NOTHING;
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Create trigger to auto-create notification preferences for new users
+DROP TRIGGER IF EXISTS trigger_create_notification_preferences ON auth.users;
+CREATE TRIGGER trigger_create_notification_preferences
+    AFTER INSERT ON auth.users
+    FOR EACH ROW
+    EXECUTE FUNCTION public.create_default_notification_preferences();
+
+-- Function to update updated_at timestamp for notifications
+CREATE OR REPLACE FUNCTION public.update_notification_updated_at()
+RETURNS TRIGGER AS $
+BEGIN
+    NEW.updated_at = now();
+    RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+-- Create trigger to auto-update updated_at on notification_queue
+DROP TRIGGER IF EXISTS trigger_notification_updated_at ON public.notification_queue;
+CREATE TRIGGER trigger_notification_updated_at
+    BEFORE UPDATE ON public.notification_queue
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_notification_updated_at();
+
+-- Create trigger for user_notification_preferences updated_at
+DROP TRIGGER IF EXISTS trigger_user_prefs_updated_at ON public.user_notification_preferences;
+CREATE TRIGGER trigger_user_prefs_updated_at
+    BEFORE UPDATE ON public.user_notification_preferences
+    FOR EACH ROW
+    EXECUTE FUNCTION public.update_notification_updated_at();
 
 CREATE OR REPLACE FUNCTION public.auto_update_proposal_performance()
 RETURNS TRIGGER AS $
@@ -1896,7 +2021,19 @@ CREATE TRIGGER trigger_auto_update_proposal_performance
     EXECUTE FUNCTION public.auto_update_proposal_performance();
 
 COMMENT ON TABLE public.proposal_performance IS 'Tracks performance metrics for proposals including team size, sections, and time to submit';
-COMMENT ON TABLE public.notification_queue IS 'Queue for managing user notifications with email and in-app delivery tracking';
+COMMENT ON TABLE public.notification_queue IS 'Stores all notifications for users across the platform. Supports in-app, email, and real-time notifications.';
+COMMENT ON COLUMN public.notification_queue.type IS 'Type of notification (e.g., proposal_submitted, team_member_joined). Used for routing and preference checking.';
+COMMENT ON COLUMN public.notification_queue.data IS 'Additional data for the notification (e.g., projectId, proposalId). Used for navigation and context.';
+COMMENT ON COLUMN public.notification_queue.read IS 'Whether the user has read this notification.';
+COMMENT ON COLUMN public.notification_queue.read_at IS 'Timestamp when the notification was marked as read.';
+COMMENT ON COLUMN public.notification_queue.sent_via_email IS 'Whether this notification was sent via email.';
+COMMENT ON COLUMN public.notification_queue.legal_hold IS 'Whether this notification is under legal hold and should not be deleted by cleanup jobs.';
+COMMENT ON COLUMN public.notification_queue.updated_at IS 'Timestamp when the notification was last updated.';
+COMMENT ON TABLE public.user_notification_preferences IS 'Stores user preferences for notification delivery. Users can control which types of notifications they receive.';
+COMMENT ON COLUMN public.user_notification_preferences.email_notifications IS 'Global toggle for all email notifications. When false, no emails are sent regardless of other settings.';
+COMMENT ON COLUMN public.user_notification_preferences.team_notifications IS 'Toggle for team-related notifications (member joined, removed, etc.).';
+COMMENT ON COLUMN public.user_notification_preferences.completion_notifications IS 'Toggle for project completion and delivery notifications.';
+COMMENT ON COLUMN public.user_notification_preferences.scoring_notifications IS 'Toggle for proposal scoring and ranking notifications.';
 
 -- ============================================================
 -- MIGRATION 019: PROPOSAL VERSIONS (ENHANCED)
