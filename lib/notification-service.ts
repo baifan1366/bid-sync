@@ -9,92 +9,31 @@
  * - 4.3: User preference checking
  * - 13.1, 13.2: Read state management
  * - 20.1, 20.3: Notification deletion with ownership verification
+ * 
+ * NOTE: This is a SERVER-ONLY module. Do not import in client components.
+ * For types, import from '@/lib/notification-types' instead.
  */
 
 import { createClient } from '@/lib/supabase/server';
-import { sendEmail } from '@/lib/email/service';
 
-// Comprehensive notification types from notification-system spec
-export type NotificationType =
-  // Project related
-  | 'project_created'
-  | 'project_approved'
-  | 'project_rejected'
-  | 'project_status_changed'
-  | 'project_deadline_approaching'
-  | 'project_awarded'
-  | 'project_completed'
-  // Proposal related
-  | 'proposal_submitted'
-  | 'proposal_status_changed'
-  | 'proposal_scored'
-  | 'proposal_score_updated'
-  | 'all_proposals_scored'
-  | 'proposal_accepted'
-  | 'proposal_rejected'
-  | 'proposal_archived'
-  // Team related
-  | 'team_member_joined'
-  | 'team_member_removed'
-  | 'team_invitation_created'
-  | 'team_invitation_accepted'
-  // Delivery related
-  | 'deliverable_uploaded'
-  | 'ready_for_delivery'
-  | 'completion_accepted'
-  | 'revision_requested'
-  | 'revision_completed'
-  // Document collaboration
-  | 'document_shared'
-  | 'document_comment_added'
-  | 'document_version_created'
-  | 'document_rollback'
-  | 'section_assigned'
-  | 'section_reassigned'
-  | 'section_completed'
-  | 'section_deadline_approaching'
-  // Messages and Q&A
-  | 'message_received'
-  | 'qa_question_posted'
-  | 'qa_answer_posted'
-  // Admin
-  | 'admin_invitation'
-  | 'verification_approved'
-  | 'verification_rejected'
-  | 'account_suspended';
+// Re-export types for convenience
+export type {
+  NotificationType,
+  Notification,
+  CreateNotificationInput,
+} from './notification-types';
 
-export enum NotificationPriority {
-  LOW = 'low',
-  MEDIUM = 'medium',
-  HIGH = 'high',
-  CRITICAL = 'critical'
-}
+export { NotificationPriority } from './notification-types';
 
-export interface Notification {
-  id: string;
-  userId: string;
-  type: NotificationType;
-  title: string;
-  body?: string;
-  data: Record<string, any>;
-  read: boolean;
-  readAt?: Date;
-  sentViaEmail: boolean;
-  legalHold: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
+import type {
+  NotificationType,
+  Notification,
+  CreateNotificationInput,
+} from './notification-types';
 
-export interface CreateNotificationInput {
-  userId: string;
-  type: NotificationType;
-  title: string;
-  body?: string;
-  data?: Record<string, any>;
-  sendEmail?: boolean;
-  priority?: NotificationPriority;
-}
+import { NotificationPriority } from './notification-types';
 
+// Extended result type with error codes
 export interface NotificationResult {
   success: boolean;
   notificationId?: string;
@@ -696,6 +635,9 @@ export class NotificationService {
         actionText,
       });
 
+      // Dynamic import to avoid bundling nodemailer in client
+      const { sendEmail } = await import('@/lib/email/service');
+      
       return await sendEmail({
         to: email,
         subject,

@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useRealtimeNotifications } from '../use-realtime-notifications'
-import type { Notification } from '@/lib/notification-service'
+import type { Notification } from '@/lib/notification-types'
 
 // Mock the realtime notification service
 vi.mock('@/lib/realtime-notification-service', () => {

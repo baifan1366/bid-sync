@@ -13,7 +13,7 @@ import {
   BrowserNotificationPermission,
   BrowserNotificationOptions,
 } from '@/lib/browser-notification-service'
-import { Notification, NotificationPriority } from '@/lib/notification-service'
+import { Notification, NotificationPriority } from '@/lib/notification-types'
 
 export interface UseBrowserNotificationsOptions {
   /**

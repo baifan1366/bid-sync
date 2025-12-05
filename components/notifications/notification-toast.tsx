@@ -10,7 +10,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { Notification } from '@/lib/notification-service'
+import { Notification } from '@/lib/notification-types'
 import { useToast } from '@/components/ui/use-toast'
 
 interface NotificationToastProps {

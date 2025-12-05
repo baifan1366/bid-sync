@@ -15,7 +15,7 @@
 
 import { useState } from 'react'
 import { NotificationCenter } from './notification-center'
-import { NotificationService, NotificationType } from '@/lib/notification-service'
+import { NotificationType } from '@/lib/notification-types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -23,6 +23,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/components/ui/use-toast'
+import { NotificationService } from '@/lib/notification-service'
 
 interface NotificationCenterDemoProps {
   userId: string

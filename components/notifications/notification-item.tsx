@@ -14,7 +14,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Notification } from '@/lib/notification-service'
+import { Notification } from '@/lib/notification-types'
 import { X, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

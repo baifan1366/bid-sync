@@ -13,8 +13,8 @@
  * - 16.5: Gracefully degrade for unsupported browsers
  */
 
-import type { Notification as BidSyncNotification } from './notification-service'
-import { NotificationPriority } from './notification-service'
+import type { Notification as BidSyncNotification } from './notification-types'
+import { NotificationPriority } from './notification-types'
 
 export type BrowserNotificationPermission = 'granted' | 'denied' | 'default'
 

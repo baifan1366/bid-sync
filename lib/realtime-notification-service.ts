@@ -326,7 +326,12 @@ export class RealtimeNotificationService {
         .order('created_at', { ascending: true })
 
       if (error) {
-        console.error('Error syncing missed notifications:', error)
+        console.error('Error syncing missed notifications:', {
+          message: error.message,
+          details: error.details,
+          hint: error.hint,
+          code: error.code
+        })
         return []
       }
 
@@ -336,7 +341,7 @@ export class RealtimeNotificationService {
       // Map database records to Notification objects
       return notifications ? notifications.map(this.mapNotification) : []
     } catch (error) {
-      console.error('Unexpected error syncing missed notifications:', error)
+      console.error('Unexpected error syncing missed notifications:', error instanceof Error ? error.message : String(error))
       return []
     }
   }

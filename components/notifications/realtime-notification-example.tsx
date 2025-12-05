@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRealtimeNotifications } from '@/hooks/use-realtime-notifications'
-import { Notification } from '@/lib/notification-service'
+import { Notification } from '@/lib/notification-types'
 import { Bell, Wifi, WifiOff, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'

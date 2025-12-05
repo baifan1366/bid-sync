@@ -11,7 +11,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Notification, NotificationService } from '@/lib/notification-service'
+import { Notification } from '@/lib/notification-types'
 import { NotificationItem } from './notification-item'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -44,8 +44,14 @@ export function NotificationDropdown({
 
     setIsMarkingAllRead(true)
     try {
-      const success = await NotificationService.markAllAsRead(userId)
-      if (success) {
+      const response = await fetch('/api/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `mutation { markAllNotificationsAsRead }`,
+        }),
+      })
+      if (response.ok) {
         onNotificationsChange()
       }
     } catch (error) {
@@ -57,7 +63,14 @@ export function NotificationDropdown({
 
   const handleMarkAsRead = async (notificationId: string) => {
     try {
-      await NotificationService.markAsRead(notificationId)
+      await fetch('/api/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `mutation MarkAsRead($id: ID!) { markNotificationAsRead(notificationId: $id) }`,
+          variables: { id: notificationId },
+        }),
+      })
       onNotificationsChange()
     } catch (error) {
       console.error('Error marking notification as read:', error)
@@ -66,7 +79,14 @@ export function NotificationDropdown({
 
   const handleDelete = async (notificationId: string) => {
     try {
-      await NotificationService.deleteNotification(notificationId, userId)
+      await fetch('/api/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `mutation DeleteNotification($id: ID!) { deleteNotification(notificationId: $id) }`,
+          variables: { id: notificationId },
+        }),
+      })
       onNotificationsChange()
     } catch (error) {
       console.error('Error deleting notification:', error)

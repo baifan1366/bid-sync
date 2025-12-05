@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useBrowserNotifications } from '@/hooks/use-browser-notifications'
-import { NotificationPriority } from '@/lib/notification-service'
+import { NotificationPriority } from '@/lib/notification-types'
 
 export function BrowserNotificationExample() {
   const [lastResult, setLastResult] = useState<string>('')

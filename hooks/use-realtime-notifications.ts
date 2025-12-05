@@ -14,7 +14,7 @@ import {
   NotificationReadPayload,
   NotificationDeletedPayload,
 } from '@/lib/realtime-notification-service'
-import { Notification } from '@/lib/notification-service'
+import { Notification } from '@/lib/notification-types'
 
 export interface UseRealtimeNotificationsOptions {
   userId: string

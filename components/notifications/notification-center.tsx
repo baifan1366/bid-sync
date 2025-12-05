@@ -28,7 +28,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Notification, NotificationService, NotificationPriority } from '@/lib/notification-service'
+import { Notification, NotificationPriority } from '@/lib/notification-types'
 import { useRealtimeNotifications } from '@/hooks/use-realtime-notifications'
 import { useBrowserNotifications } from '@/hooks/use-browser-notifications'
 import { NotificationBell } from './notification-bell'
@@ -75,19 +75,40 @@ export function NotificationCenter({
   // Load initial notifications
   const loadNotifications = useCallback(async () => {
     try {
-      const [notifs, count] = await Promise.all([
-        NotificationService.getNotifications(userId, { limit: 50 }),
-        NotificationService.getUnreadCount(userId),
-      ])
+      const response = await fetch('/api/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `
+            query GetNotifications {
+              notifications(limit: 50) {
+                notifications {
+                  id
+                  userId
+                  type
+                  title
+                  body
+                  data
+                  read
+                  readAt
+                  createdAt
+                }
+                unreadCount
+              }
+            }
+          `,
+        }),
+      })
       
-      setNotifications(notifs)
-      setUnreadCount(count)
+      const { data } = await response.json()
+      setNotifications(data?.notifications?.notifications || [])
+      setUnreadCount(data?.notifications?.unreadCount || 0)
     } catch (error) {
       console.error('Error loading notifications:', error)
     } finally {
       setIsLoading(false)
     }
-  }, [userId])
+  }, [])
 
   // Initial load
   useEffect(() => {

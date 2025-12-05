@@ -625,6 +625,10 @@ export const typeDefs = /* GraphQL */ `
     projectExport(exportId: ID!): ProjectExport
     projectExports(projectId: ID!): [ProjectExport!]!
     completionStatistics(dateFrom: String, dateTo: String): CompletionStatistics!
+    
+    # Notification queries
+    notifications(limit: Int, unreadOnly: Boolean): NotificationList!
+    unreadNotificationCount: Int!
   }
   
   type AdminProposal {
@@ -1278,6 +1282,27 @@ export const typeDefs = /* GraphQL */ `
     status: ProjectStatus
   }
 
+  # Notification types
+  type Notification {
+    id: ID!
+    userId: ID!
+    type: String!
+    title: String!
+    body: String
+    data: JSON
+    read: Boolean!
+    readAt: String
+    sentViaEmail: Boolean!
+    legalHold: Boolean!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type NotificationList {
+    notifications: [Notification!]!
+    unreadCount: Int!
+  }
+
   type Mutation {
     verifyClient(userId: ID!, approved: Boolean!, reason: String): User!
     createProject(input: CreateProjectInput!): Project!
@@ -1408,6 +1433,11 @@ export const typeDefs = /* GraphQL */ `
     requestExport(input: RequestExportInput!): ProjectExport!
     applyLegalHold(archiveId: ID!, reason: String!): ProjectArchive!
     removeLegalHold(archiveId: ID!): ProjectArchive!
+    
+    # Notification mutations
+    markNotificationAsRead(notificationId: ID!): Boolean!
+    markAllNotificationsAsRead: Boolean!
+    deleteNotification(notificationId: ID!): Boolean!
   }
 
   # Project Delivery and Archival Types

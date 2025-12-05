@@ -4469,6 +4469,61 @@ export const resolvers = {
         })),
       };
     },
+
+    // Notification queries
+    notifications: async (_: any, { limit = 50, unreadOnly = false }: { limit?: number; unreadOnly?: boolean }) => {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error('Unauthorized');
+      }
+
+      let query = supabase
+        .from('notification_queue')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (unreadOnly) {
+        query = query.eq('read', false);
+      }
+
+      const { data: notifications, error } = await query;
+
+      if (error) {
+        throw new Error(`Failed to fetch notifications: ${error.message}`);
+      }
+
+      const { count: unreadCount } = await supabase
+        .from('notification_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('read', false);
+
+      return {
+        notifications: notifications || [],
+        unreadCount: unreadCount || 0,
+      };
+    },
+
+    unreadNotificationCount: async () => {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error('Unauthorized');
+      }
+
+      const { count } = await supabase
+        .from('notification_queue')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', user.id)
+        .eq('read', false);
+
+      return count || 0;
+    },
   },
 
   Mutation: {
@@ -4665,7 +4720,7 @@ export const resolvers = {
 
       // Send notifications (non-blocking)
       // Requirement 6.2: Notify bidding leader and all team members
-      const { NotificationService } = await import('./notification-service');
+      const { NotificationService } = await import('@/lib/notification-service');
       
       // Notify the bidding leader
       NotificationService.createNotification({
@@ -4813,7 +4868,7 @@ export const resolvers = {
 
       // Send notification to bidding leader (non-blocking)
       // Requirement 6.4: Notify bidding leader when proposal is rejected
-      const { NotificationService } = await import('./notification-service');
+      const { NotificationService } = await import('@/lib/notification-service');
       
       NotificationService.createNotification({
         userId: proposal.lead_id,
@@ -8492,7 +8547,7 @@ export const resolvers = {
       // Send notification to bidding leader (non-blocking)
       // Requirement 6.1: Notify bidding leader when proposal is scored
       // Requirement 6.3: Notify bidding leader when score is updated
-      const { NotificationService } = await import('./notification-service');
+      const { NotificationService } = await import('@/lib/notification-service');
       const projectData = proposal.projects as any;
       
       NotificationService.createNotification({
@@ -10018,6 +10073,90 @@ export const resolvers = {
           comments: [],
         },
       };
+    },
+
+    // Notification mutations
+    markNotificationAsRead: async (_: any, { notificationId }: { notificationId: string }) => {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { error } = await supabase
+        .from('notification_queue')
+        .update({ 
+          read: true, 
+          read_at: new Date().toISOString(), 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', notificationId)
+        .eq('user_id', user.id);
+
+      if (error) {
+        throw new GraphQLError(`Failed to mark notification as read: ${error.message}`, {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      return true;
+    },
+
+    markAllNotificationsAsRead: async () => {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { error } = await supabase
+        .from('notification_queue')
+        .update({ 
+          read: true, 
+          read_at: new Date().toISOString(), 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('user_id', user.id)
+        .eq('read', false);
+
+      if (error) {
+        throw new GraphQLError(`Failed to mark all notifications as read: ${error.message}`, {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      return true;
+    },
+
+    deleteNotification: async (_: any, { notificationId }: { notificationId: string }) => {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const { error } = await supabase
+        .from('notification_queue')
+        .delete()
+        .eq('id', notificationId)
+        .eq('user_id', user.id);
+
+      if (error) {
+        throw new GraphQLError(`Failed to delete notification: ${error.message}`, {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      return true;
     },
   },
 

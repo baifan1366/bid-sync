@@ -12,7 +12,7 @@
  * - 18.5: Mobile-responsive design
  */
 
-import { NotificationType } from '@/lib/notification-service';
+import { NotificationType } from '@/lib/notification-types';
 
 interface NotificationEmailParams {
   userName: string;
