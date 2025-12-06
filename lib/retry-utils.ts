@@ -125,7 +125,7 @@ export async function retryOperation<T>(
       // Log retry attempt
       errorLogger.warn(
         `Operation failed, retrying in ${delay}ms (attempt ${attempt}/${config.maxAttempts})`,
-        { attempt, delay, error: error?.message }
+        { attempt, delay, error: error instanceof Error ? error.message : String(error) }
       );
 
       // Call onRetry callback if provided
@@ -224,16 +224,24 @@ export class CircuitBreaker {
   private state: 'closed' | 'open' | 'half-open' = 'closed';
 
   constructor(
-    private options: {
-      failureThreshold: number;
-      resetTimeout: number;
-      monitoringPeriod: number;
-    } = {
-      failureThreshold: 5,
-      resetTimeout: 60000, // 1 minute
-      monitoringPeriod: 10000, // 10 seconds
-    }
-  ) {}
+    options: {
+      failureThreshold?: number;
+      resetTimeout?: number;
+      monitoringPeriod?: number;
+    } = {}
+  ) {
+    this.options = {
+      failureThreshold: options.failureThreshold ?? 5,
+      resetTimeout: options.resetTimeout ?? 60000, // 1 minute
+      monitoringPeriod: options.monitoringPeriod ?? 10000, // 10 seconds
+    };
+  }
+
+  private options: {
+    failureThreshold: number;
+    resetTimeout: number;
+    monitoringPeriod: number;
+  };
 
   /**
    * Execute operation with circuit breaker protection
