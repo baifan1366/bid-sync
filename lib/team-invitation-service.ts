@@ -213,21 +213,34 @@ export class TeamInvitationService {
       // Get proposal and project details for notification
       const { data: proposal } = await supabase
         .from('proposals')
-        .select('project_id, projects(title)')
+        .select('project_id')
         .eq('id', validated.proposalId)
         .single()
+
+      let projectTitle = 'the project'
+      if (proposal?.project_id) {
+        const { data: project } = await supabase
+          .from('projects')
+          .select('title')
+          .eq('id', proposal.project_id)
+          .single()
+        
+        if (project?.title) {
+          projectTitle = project.title
+        }
+      }
 
       // Requirement 7.5: Notify creator that invitation was created
       NotificationService.createNotification({
         userId: validated.createdBy,
         type: 'team_invitation_created',
         title: 'Team Invitation Created',
-        body: `Team invitation created for ${proposal?.projects?.title || 'the project'}. Code: ${code}`,
+        body: `Team invitation created for ${projectTitle}. Code: ${code}`,
         data: {
           invitationId: invitation.id,
           proposalId: validated.proposalId,
           projectId: proposal?.project_id,
-          projectTitle: proposal?.projects?.title,
+          projectTitle: projectTitle,
           code: code,
           token: invitation.token,
           expiresAt: invitation.expires_at,
