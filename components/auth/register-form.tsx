@@ -218,13 +218,17 @@ export function RegisterForm({ className, invitationCode, ...props }: RegisterFo
                     business_name: values.business_name,
                     company_registration: values.company_registration,
                 }
-            } else {
+            } else if (selectedRole === 'bidding_lead' || selectedRole === 'bidding_member') {
                 registrationData = {
                     role: selectedRole,
                     full_name: values.full_name,
                     professional_title: values.professional_title,
                     company_name: values.company_name,
                 }
+            } else {
+                setError("Invalid role selected")
+                setIsLoading(false)
+                return
             }
 
             const response = await fetch('/api/auth/complete-registration', {

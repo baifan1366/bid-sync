@@ -237,9 +237,8 @@ export function ProposalDetailsStep({
                           : JSON.stringify(content)
                         
                         // Get text length for validation
-                        const textLength = typeof content === 'string'
-                          ? content.length
-                          : JSON.stringify(content).length
+                        const contentStr = typeof content === 'string' ? content : JSON.stringify(content)
+                        const textLength = contentStr.length
                         
                         setEditorContent(content)
                         setEditorTextLength(textLength)

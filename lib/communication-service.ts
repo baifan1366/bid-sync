@@ -208,15 +208,8 @@ export class CommunicationService {
             .eq('project_id', input.projectId);
           
           if (proposals && proposals.length > 0) {
-            // Notify all leads
-            for (const proposal of proposals) {
-              await NotificationService.notifyMessageReceived(
-                proposal.lead_id,
-                input.senderId,
-                input.content,
-                input.projectId
-              );
-            }
+            // TODO: Notify all leads about new message
+            // This would require implementing a message notification method
           }
           recipientId = proposals?.[0]?.lead_id || project.client_id;
         }
@@ -227,12 +220,8 @@ export class CommunicationService {
 
       // Send notification to recipient
       if (recipientId && recipientId !== input.senderId) {
-        await NotificationService.notifyMessageReceived(
-          recipientId,
-          input.senderId,
-          input.content,
-          input.projectId
-        );
+        // TODO: Notify recipient about new message
+        // This would require implementing a message notification method
       }
 
       // Map to Message interface

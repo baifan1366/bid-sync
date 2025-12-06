@@ -3938,9 +3938,10 @@ export const resolvers = {
       // Get user details
       const adminClient = createAdminClient();
       const { data: submittedByData } = await adminClient.auth.admin.getUserById(completion.submittedBy);
-      const reviewedByData = completion.reviewedBy 
+      const reviewedByResponse = completion.reviewedBy 
         ? await adminClient.auth.admin.getUserById(completion.reviewedBy)
         : null;
+      const reviewedByData = reviewedByResponse?.data;
 
       // Get deliverables with details
       const deliverablesWithDetails = await Promise.all(
@@ -3974,9 +3975,10 @@ export const resolvers = {
       const revisionsWithDetails = await Promise.all(
         revisions.map(async (revision) => {
           const { data: requestedByData } = await adminClient.auth.admin.getUserById(revision.requestedBy);
-          const resolvedByData = revision.resolvedBy 
+          const resolvedByResponse = revision.resolvedBy 
             ? await adminClient.auth.admin.getUserById(revision.resolvedBy)
             : null;
+          const resolvedByData = resolvedByResponse?.data;
 
           return {
             id: revision.id,
@@ -4348,11 +4350,13 @@ export const resolvers = {
       }
 
       const { ExportService } = await import('@/lib/export-service');
-      const exportRecord = await ExportService.getExport(exportId);
+      const result = await ExportService.getExport(exportId, user.id);
 
-      if (!exportRecord) {
+      if (!result.success || !result.export) {
         return null;
       }
+
+      const exportRecord = result.export;
 
       // Verify user is the requester
       if (exportRecord.requestedBy !== user.id) {
@@ -4367,7 +4371,7 @@ export const resolvers = {
       // Generate download URL if export is completed
       let downloadUrl = null;
       if (exportRecord.status === 'completed' && exportRecord.exportPath) {
-        const urlResult = await ExportService.generateDownloadUrl(exportId);
+        const urlResult = await ExportService.generateDownloadUrl(exportId, user.id);
         downloadUrl = urlResult.url || null;
       }
 
@@ -4400,10 +4404,14 @@ export const resolvers = {
       }
 
       const { ExportService } = await import('@/lib/export-service');
-      const exports = await ExportService.getExportsByProject(projectId);
+      const result = await ExportService.getExportsByProject(projectId, user.id);
+
+      if (!result.success || !result.exports) {
+        return [];
+      }
 
       // Filter to only show user's own exports
-      const userExports = exports.filter((exp) => exp.requestedBy === user.id);
+      const userExports = result.exports.filter((exp) => exp.requestedBy === user.id);
 
       const adminClient = createAdminClient();
       const exportsWithDetails = await Promise.all(
@@ -4413,7 +4421,7 @@ export const resolvers = {
           // Generate download URL if export is completed
           let downloadUrl = null;
           if (exportRecord.status === 'completed' && exportRecord.exportPath) {
-            const urlResult = await ExportService.generateDownloadUrl(exportRecord.id);
+            const urlResult = await ExportService.generateDownloadUrl(exportRecord.id, user.id);
             downloadUrl = urlResult.url || null;
           }
 
@@ -4456,7 +4464,15 @@ export const resolvers = {
       const fromDate = dateFrom ? new Date(dateFrom) : undefined;
       const toDate = dateTo ? new Date(dateTo) : undefined;
 
-      const statistics = await StatisticsService.getCompletionStatistics(fromDate, toDate);
+      const result = await StatisticsService.getCompletionStatistics(fromDate, toDate);
+
+      if (!result.success || !result.statistics) {
+        throw new GraphQLError(result.error || 'Failed to fetch statistics', {
+          extensions: { code: result.errorCode || 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      const statistics = result.statistics;
 
       return {
         totalCompleted: statistics.totalCompleted,
@@ -4740,12 +4756,15 @@ export const resolvers = {
       });
 
       // Notify all team members
-      supabase
-        .from('bid_team_members')
-        .select('user_id')
-        .eq('project_id', projectId)
-        .neq('user_id', proposal.lead_id)
-        .then(({ data: teamMembers }) => {
+      // Send notifications to team members (fire and forget)
+      (async () => {
+        try {
+          const { data: teamMembers } = await supabase
+            .from('bid_team_members')
+            .select('user_id')
+            .eq('project_id', projectId)
+            .neq('user_id', proposal.lead_id);
+
           if (teamMembers && teamMembers.length > 0) {
             teamMembers.forEach(member => {
               NotificationService.createNotification({
@@ -4761,15 +4780,15 @@ export const resolvers = {
                 },
                 sendEmail: true,
                 priority: NotificationService.NotificationPriority.HIGH,
-              }).catch(error => {
+              }).catch((error: any) => {
                 console.error(`Failed to send notification to team member ${member.user_id}:`, error);
               });
             });
           }
-        })
-        .catch(error => {
+        } catch (error) {
           console.error('Failed to fetch team members for notifications:', error);
-        });
+        }
+      })();
 
       return {
         id: decision.id,
@@ -9655,9 +9674,10 @@ export const resolvers = {
 
       const adminClient = createAdminClient();
       const { data: submittedByData } = await adminClient.auth.admin.getUserById(result.completion.submittedBy);
-      const reviewedByData = result.completion.reviewedBy 
+      const reviewedByResponse = result.completion.reviewedBy
         ? await adminClient.auth.admin.getUserById(result.completion.reviewedBy)
         : null;
+      const reviewedByData = reviewedByResponse?.data;
 
       // Get deliverables
       const { DeliverableService } = await import('@/lib/deliverable-service');
@@ -9712,8 +9732,8 @@ export const resolvers = {
             revisionNotes: revision.revisionNotes,
             resolvedBy: revision.resolvedBy ? {
               id: revision.resolvedBy,
-              email: resolvedByData?.user?.email || '',
-              fullName: resolvedByData?.user?.user_metadata?.full_name || resolvedByData?.user?.user_metadata?.name || 'Unknown',
+              email: resolvedByData?.data?.user?.email || '',
+              fullName: resolvedByData?.data?.user?.user_metadata?.full_name || resolvedByData?.data?.user?.user_metadata?.name || 'Unknown',
             } : null,
             resolvedAt: revision.resolvedAt?.toISOString(),
           };
@@ -9766,9 +9786,10 @@ export const resolvers = {
 
       const adminClient = createAdminClient();
       const { data: submittedByData } = await adminClient.auth.admin.getUserById(result.completion.submittedBy);
-      const reviewedByData = result.completion.reviewedBy 
+      const reviewedByResponse = result.completion.reviewedBy
         ? await adminClient.auth.admin.getUserById(result.completion.reviewedBy)
         : null;
+      const reviewedByData = reviewedByResponse?.data;
 
       // Get deliverables
       const { DeliverableService } = await import('@/lib/deliverable-service');
@@ -9823,8 +9844,8 @@ export const resolvers = {
             revisionNotes: revision.revisionNotes,
             resolvedBy: revision.resolvedBy ? {
               id: revision.resolvedBy,
-              email: resolvedByData?.user?.email || '',
-              fullName: resolvedByData?.user?.user_metadata?.full_name || resolvedByData?.user?.user_metadata?.name || 'Unknown',
+              email: resolvedByData?.data?.user?.email || '',
+              fullName: resolvedByData?.data?.user?.user_metadata?.full_name || resolvedByData?.data?.user?.user_metadata?.name || 'Unknown',
             } : null,
             resolvedAt: revision.resolvedAt?.toISOString(),
           };
@@ -9896,8 +9917,8 @@ export const resolvers = {
         revisionNotes: result.revision.revisionNotes,
         resolvedBy: result.revision.resolvedBy ? {
           id: result.revision.resolvedBy,
-          email: resolvedByData?.user?.email || '',
-          fullName: resolvedByData?.user?.user_metadata?.full_name || resolvedByData?.user?.user_metadata?.name || 'Unknown',
+          email: resolvedByData?.data?.user?.email || '',
+          fullName: resolvedByData?.data?.user?.user_metadata?.full_name || resolvedByData?.data?.user?.user_metadata?.name || 'Unknown',
         } : null,
         resolvedAt: result.revision.resolvedAt?.toISOString(),
       };
@@ -9917,7 +9938,7 @@ export const resolvers = {
       }
 
       const { ExportService } = await import('@/lib/export-service');
-      const result = await ExportService.requestExport(input.projectId, user.id);
+      const result = await ExportService.requestExport({ projectId: input.projectId, userId: user.id });
 
       if (!result.success || !result.export) {
         throw new GraphQLError(result.error || 'Failed to request export', {
@@ -9975,39 +9996,57 @@ export const resolvers = {
         });
       }
 
+      // Fetch full archive data
+      const { data: fullArchive, error: archiveError } = await supabase
+        .from('project_archives')
+        .select('*')
+        .eq('id', result.archive.id)
+        .single();
+
+      if (archiveError || !fullArchive) {
+        throw new GraphQLError('Failed to fetch archive details', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
       const adminClient = createAdminClient();
-      const { data: archivedByData } = await adminClient.auth.admin.getUserById(result.archive.archivedBy);
+      const { data: archivedByData } = await adminClient.auth.admin.getUserById(fullArchive.archived_by);
+
+      // Parse archive data
+      const archiveData = typeof fullArchive.archive_data === 'string' 
+        ? JSON.parse(fullArchive.archive_data) 
+        : fullArchive.archive_data;
 
       return {
-        id: result.archive.id,
-        projectId: result.archive.projectId,
-        archiveIdentifier: result.archive.archiveIdentifier,
-        compressedSize: result.archive.compressedSize,
-        originalSize: result.archive.originalSize,
-        compressionRatio: result.archive.compressionRatio,
+        id: fullArchive.id,
+        projectId: fullArchive.project_id,
+        archiveIdentifier: fullArchive.archive_identifier,
+        compressedSize: fullArchive.compressed_size || 0,
+        originalSize: fullArchive.original_size || 0,
+        compressionRatio: fullArchive.compression_ratio || 0,
         archivedBy: {
-          id: result.archive.archivedBy,
+          id: fullArchive.archived_by,
           email: archivedByData?.user?.email || '',
           fullName: archivedByData?.user?.user_metadata?.full_name || archivedByData?.user?.user_metadata?.name || 'Unknown',
         },
-        archivedAt: result.archive.archivedAt.toISOString(),
-        retentionUntil: result.archive.retentionUntil?.toISOString(),
-        legalHold: result.archive.legalHold,
-        legalHoldReason: result.archive.legalHoldReason,
-        accessCount: result.archive.accessCount,
-        lastAccessedAt: result.archive.lastAccessedAt?.toISOString(),
+        archivedAt: fullArchive.archived_at,
+        retentionUntil: fullArchive.retention_until,
+        legalHold: fullArchive.legal_hold,
+        legalHoldReason: fullArchive.legal_hold_reason,
+        accessCount: fullArchive.access_count || 0,
+        lastAccessedAt: fullArchive.last_accessed_at,
         project: {
-          id: result.archive.archiveData.project.id,
-          title: result.archive.archiveData.project.title,
-          description: result.archive.archiveData.project.description,
-          budget: result.archive.archiveData.project.budget,
-          deadline: result.archive.archiveData.project.deadline?.toISOString(),
-          clientId: result.archive.archiveData.project.clientId,
-          status: result.archive.archiveData.project.status,
-          proposals: [],
-          deliverables: [],
-          documents: [],
-          comments: [],
+          id: archiveData.project.id,
+          title: archiveData.project.title,
+          description: archiveData.project.description,
+          budget: archiveData.project.budget,
+          deadline: archiveData.project.deadline,
+          clientId: archiveData.project.clientId,
+          status: archiveData.project.status,
+          proposals: archiveData.proposals || [],
+          deliverables: archiveData.deliverables || [],
+          documents: archiveData.documents || [],
+          comments: archiveData.comments || [],
         },
       };
     },
@@ -10038,39 +10077,57 @@ export const resolvers = {
         });
       }
 
+      // Fetch full archive data
+      const { data: fullArchive, error: archiveError } = await supabase
+        .from('project_archives')
+        .select('*')
+        .eq('id', result.archive.id)
+        .single();
+
+      if (archiveError || !fullArchive) {
+        throw new GraphQLError('Failed to fetch archive details', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
       const adminClient = createAdminClient();
-      const { data: archivedByData } = await adminClient.auth.admin.getUserById(result.archive.archivedBy);
+      const { data: archivedByData } = await adminClient.auth.admin.getUserById(fullArchive.archived_by);
+
+      // Parse archive data
+      const archiveData = typeof fullArchive.archive_data === 'string' 
+        ? JSON.parse(fullArchive.archive_data) 
+        : fullArchive.archive_data;
 
       return {
-        id: result.archive.id,
-        projectId: result.archive.projectId,
-        archiveIdentifier: result.archive.archiveIdentifier,
-        compressedSize: result.archive.compressedSize,
-        originalSize: result.archive.originalSize,
-        compressionRatio: result.archive.compressionRatio,
+        id: fullArchive.id,
+        projectId: fullArchive.project_id,
+        archiveIdentifier: fullArchive.archive_identifier,
+        compressedSize: fullArchive.compressed_size || 0,
+        originalSize: fullArchive.original_size || 0,
+        compressionRatio: fullArchive.compression_ratio || 0,
         archivedBy: {
-          id: result.archive.archivedBy,
+          id: fullArchive.archived_by,
           email: archivedByData?.user?.email || '',
           fullName: archivedByData?.user?.user_metadata?.full_name || archivedByData?.user?.user_metadata?.name || 'Unknown',
         },
-        archivedAt: result.archive.archivedAt.toISOString(),
-        retentionUntil: result.archive.retentionUntil?.toISOString(),
-        legalHold: result.archive.legalHold,
-        legalHoldReason: result.archive.legalHoldReason,
-        accessCount: result.archive.accessCount,
-        lastAccessedAt: result.archive.lastAccessedAt?.toISOString(),
+        archivedAt: fullArchive.archived_at,
+        retentionUntil: fullArchive.retention_until,
+        legalHold: fullArchive.legal_hold,
+        legalHoldReason: fullArchive.legal_hold_reason,
+        accessCount: fullArchive.access_count || 0,
+        lastAccessedAt: fullArchive.last_accessed_at,
         project: {
-          id: result.archive.archiveData.project.id,
-          title: result.archive.archiveData.project.title,
-          description: result.archive.archiveData.project.description,
-          budget: result.archive.archiveData.project.budget,
-          deadline: result.archive.archiveData.project.deadline?.toISOString(),
-          clientId: result.archive.archiveData.project.clientId,
-          status: result.archive.archiveData.project.status,
-          proposals: [],
-          deliverables: [],
-          documents: [],
-          comments: [],
+          id: archiveData.project.id,
+          title: archiveData.project.title,
+          description: archiveData.project.description,
+          budget: archiveData.project.budget,
+          deadline: archiveData.project.deadline,
+          clientId: archiveData.project.clientId,
+          status: archiveData.project.status,
+          proposals: archiveData.proposals || [],
+          deliverables: archiveData.deliverables || [],
+          documents: archiveData.documents || [],
+          comments: archiveData.comments || [],
         },
       };
     },

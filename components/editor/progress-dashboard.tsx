@@ -172,7 +172,15 @@ export function ProgressDashboard({ documentId, className }: ProgressDashboardPr
               sections.map((section) => (
                 <SectionProgressItem
                   key={section.sectionId}
-                  section={section}
+                  section={{
+                    ...section,
+                    lastUpdated: section.lastUpdated instanceof Date 
+                      ? section.lastUpdated.toISOString() 
+                      : section.lastUpdated,
+                    deadline: section.deadline instanceof Date 
+                      ? section.deadline.toISOString() 
+                      : section.deadline
+                  }}
                 />
               ))
             )}

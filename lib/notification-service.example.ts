@@ -83,57 +83,63 @@ export async function exampleAutoCompletionNotification() {
  * Example 4: Manual Notification for Team Member Joining
  * 
  * When a team member joins, manually notify the lead.
+ * Note: This method is not yet implemented in NotificationService
  */
 export async function exampleTeamMemberJoinedNotification() {
-  const result = await NotificationService.notifyTeamMemberJoined(
-    'lead-123',      // Lead user ID
-    'member-456',    // New member user ID
-    'project-789'    // Project ID
-  );
+  // const result = await NotificationService.notifyTeamMemberJoined(
+  //   'lead-123',      // Lead user ID
+  //   'member-456',    // New member user ID
+  //   'project-789'    // Project ID
+  // );
 
-  if (result.success) {
-    console.log('Lead notified of new team member');
-    console.log(`Notification ID: ${result.notificationId}`);
-  }
+  // if (result.success) {
+  //   console.log('Lead notified of new team member');
+  //   console.log(`Notification ID: ${result.notificationId}`);
+  // }
+  console.log('Team member joined notification - method not yet implemented');
 }
 
 /**
  * Example 5: Manual Notification for Message Received
  * 
  * When a client sends a message, notify the lead.
+ * Note: This method is not yet implemented in NotificationService
  */
 export async function exampleMessageReceivedNotification() {
-  const result = await NotificationService.notifyMessageReceived(
-    'lead-123',                           // Recipient (lead)
-    'client-456',                         // Sender (client)
-    'Hello, I have a question about...', // Message preview
-    'project-789'                         // Project ID
-  );
+  // const result = await NotificationService.notifyMessageReceived(
+  //   'lead-123',                           // Recipient (lead)
+  //   'client-456',                         // Sender (client)
+  //   'Hello, I have a question about...', // Message preview
+  //   'project-789'                         // Project ID
+  // );
 
-  if (result.success) {
-    console.log('Lead notified of new message');
-    console.log('Notification includes message preview');
-  }
+  // if (result.success) {
+  //   console.log('Lead notified of new message');
+  //   console.log('Notification includes message preview');
+  // }
+  console.log('Message received notification - method not yet implemented');
 }
 
 /**
  * Example 6: Manual Notification for Proposal Status Change
  * 
  * When a proposal status changes, notify the lead.
+ * Note: This method is not yet implemented in NotificationService
  */
 export async function exampleProposalStatusChangeNotification() {
-  const result = await NotificationService.notifyProposalStatusChanged(
-    'lead-123',                    // Lead user ID
-    'proposal-456',                // Proposal ID
-    'Website Redesign Proposal',   // Proposal title
-    'approved',                    // New status
-    'Great work! We love your approach.' // Optional feedback
-  );
+  // const result = await NotificationService.notifyProposalStatusChanged(
+  //   'lead-123',                    // Lead user ID
+  //   'proposal-456',                // Proposal ID
+  //   'Website Redesign Proposal',   // Proposal title
+  //   'approved',                    // New status
+  //   'Great work! We love your approach.' // Optional feedback
+  // );
 
-  if (result.success) {
-    console.log('Lead notified of proposal status change');
-    console.log('Notification includes status and feedback');
-  }
+  // if (result.success) {
+  //   console.log('Lead notified of proposal status change');
+  //   console.log('Notification includes status and feedback');
+  // }
+  console.log('Proposal status change notification - method not yet implemented');
 }
 
 /**
@@ -149,8 +155,7 @@ export async function exampleGetNotifications() {
   // Get only unread notifications
   const unreadNotifications = await NotificationService.getNotifications(
     'user-123',
-    true,  // unread only
-    20     // limit to 20
+    { unreadOnly: true, limit: 20 }
   );
   console.log(`Unread notifications: ${unreadNotifications.length}`);
 
@@ -182,8 +187,8 @@ export async function exampleMarkNotificationsRead() {
 export async function exampleCustomNotification() {
   const result = await NotificationService.createNotification({
     userId: 'user-123',
-    type: 'document_uploaded',
-    title: 'New Document Uploaded',
+    type: 'deliverable_uploaded',
+    title: 'New Deliverable Uploaded',
     body: 'A team member uploaded "Budget Breakdown.xlsx"',
     data: {
       documentId: 'doc-456',
@@ -221,7 +226,7 @@ export async function exampleErrorHandling() {
       case 'INVALID_USER':
         console.log('User not found - skip notification');
         break;
-      case 'EMAIL_FAILED':
+      case 'EMAIL_ERROR':
         console.log('Email failed but in-app notification created');
         break;
       default:
@@ -236,7 +241,7 @@ export async function exampleErrorHandling() {
  * Understanding the notification object structure.
  */
 export async function exampleNotificationStructure() {
-  const notifications = await NotificationService.getNotifications('user-123', false, 1);
+  const notifications = await NotificationService.getNotifications('user-123', { limit: 1 });
   
   if (notifications.length > 0) {
     const notification = notifications[0];
@@ -275,13 +280,13 @@ export function NotificationBell() {
     NotificationService.getUnreadCount(userId).then(setUnreadCount);
     
     // Fetch recent notifications
-    NotificationService.getNotifications(userId, false, 10).then(setNotifications);
+    NotificationService.getNotifications(userId, { limit: 10 }).then(setNotifications);
   }, [userId]);
 
   const handleMarkAsRead = async (notificationId: string) => {
     await NotificationService.markAsRead(notificationId);
     // Refresh notifications
-    const updated = await NotificationService.getNotifications(userId, false, 10);
+    const updated = await NotificationService.getNotifications(userId, { limit: 10 });
     setNotifications(updated);
     const count = await NotificationService.getUnreadCount(userId);
     setUnreadCount(count);

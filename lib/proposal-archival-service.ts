@@ -387,20 +387,23 @@ export class ProposalArchivalService {
       }
 
       // Transform to ProposalSummary
-      const summaries: ProposalSummary[] = proposals.map((proposal) => ({
-        id: proposal.id,
-        title: proposal.title || 'Untitled Proposal',
-        projectId: proposal.project_id,
-        projectTitle: proposal.projects?.title || 'Unknown Project',
-        status: proposal.status,
-        leadId: proposal.lead_id,
-        leadName: leadNames[proposal.lead_id] || 'Unknown',
-        submittedAt: proposal.submitted_at || undefined,
-        archivedAt: proposal.archived_at || undefined,
-        archivedBy: proposal.archived_by || undefined,
-        createdAt: proposal.created_at,
-        updatedAt: proposal.updated_at,
-      }));
+      const summaries: ProposalSummary[] = proposals.map((proposal) => {
+        const project = Array.isArray(proposal.projects) ? proposal.projects[0] : proposal.projects;
+        return {
+          id: proposal.id,
+          title: proposal.title || 'Untitled Proposal',
+          projectId: proposal.project_id,
+          projectTitle: project?.title || 'Unknown Project',
+          status: proposal.status,
+          leadId: proposal.lead_id,
+          leadName: leadNames[proposal.lead_id] || 'Unknown',
+          submittedAt: proposal.submitted_at || undefined,
+          archivedAt: proposal.archived_at || undefined,
+          archivedBy: proposal.archived_by || undefined,
+          createdAt: proposal.created_at,
+          updatedAt: proposal.updated_at,
+        };
+      });
 
       return {
         success: true,

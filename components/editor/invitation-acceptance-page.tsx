@@ -94,7 +94,7 @@ interface InvitationAcceptancePageProps {
 
 export function InvitationAcceptancePage({ token }: InvitationAcceptancePageProps) {
   const router = useRouter()
-  const { user, isLoading: userLoading } = useUser()
+  const { user, loading: userLoading } = useUser()
   const { toast } = useToast()
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [isExpired, setIsExpired] = useState(false)
@@ -148,7 +148,12 @@ export function InvitationAcceptancePage({ token }: InvitationAcceptancePageProp
 
     setIsAccepting(true)
     try {
-      const result = await acceptInvitationMutation.mutateAsync({ token })
+      const result = await acceptInvitationMutation.mutateAsync({ token }) as {
+        acceptInvitation: {
+          success: boolean
+          error?: string
+        }
+      }
 
       if (result.acceptInvitation.success) {
         toast({
@@ -466,7 +471,7 @@ export function InvitationAcceptancePage({ token }: InvitationAcceptancePageProp
             <Button
               onClick={handleAccept}
               className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black"
-              disabled={isAccepting || isDeclining || (user && user.email !== invitation.email)}
+              disabled={isAccepting || isDeclining || (!!user && user.email !== invitation.email)}
             >
               {isAccepting ? (
                 <>

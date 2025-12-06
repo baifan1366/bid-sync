@@ -162,7 +162,7 @@ export function ExportRequest({
 
   // Get the most recent export
   const latestExport = exports.length > 0 ? exports[0] : null;
-  const hasActiveExport = latestExport && ['pending', 'processing'].includes(latestExport.status);
+  const hasActiveExport = !!(latestExport && ['pending', 'processing'].includes(latestExport.status));
 
   return (
     <Card className={cn('border-yellow-400/20', className)}>

@@ -240,7 +240,12 @@ export function TeamManagementPanel({ documentId, isOpen, onClose }: TeamManagem
           email: inviteEmail.trim(),
           role: inviteRole,
         },
-      })
+      }) as {
+        inviteMember: {
+          success: boolean
+          error?: string
+        }
+      }
 
       if (result.inviteMember.success) {
         toast({
@@ -279,7 +284,12 @@ export function TeamManagementPanel({ documentId, isOpen, onClose }: TeamManagem
           userId: collaborator.userId,
           role: newRole.toUpperCase(),
         },
-      })
+      }) as {
+        updateMemberRole: {
+          success: boolean
+          error?: string
+        }
+      }
 
       if (result.updateMemberRole.success) {
         toast({

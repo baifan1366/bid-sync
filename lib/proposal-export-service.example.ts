@@ -185,7 +185,7 @@ export async function exampleUIDownload() {
 
     if (result.success && result.pdfBuffer && result.fileName) {
       // Create blob and trigger download
-      const blob = new Blob([result.pdfBuffer], { type: 'application/pdf' });
+      const blob = new Blob([new Uint8Array(result.pdfBuffer)], { type: 'application/pdf' });
       const url = URL.createObjectURL(blob);
       
       const link = document.createElement('a');

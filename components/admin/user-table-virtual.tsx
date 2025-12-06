@@ -1,7 +1,6 @@
 "use client"
 
-import { useRef } from "react"
-import { FixedSizeList as List } from "react-window"
+import { List } from "react-window"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -34,8 +33,6 @@ export function UserTableVirtual({
   onSort,
   height = 600
 }: UserTableVirtualProps) {
-  const listRef = useRef<List>(null)
-
   const formatDate = (dateString: string | null) => {
     if (!dateString) return "Never"
     const date = new Date(dateString)
@@ -122,109 +119,6 @@ export function UserTableVirtual({
     </button>
   )
 
-  // Row renderer for virtual list
-  const Row = ({ index, style }: { index: number; style: React.CSSProperties }) => {
-    const user = users[index]
-    
-    return (
-      <div 
-        style={style}
-        className="border-b border-yellow-400/10 hover:bg-yellow-400/5 transition-colors flex items-center"
-      >
-        <div className="grid grid-cols-7 gap-4 w-full px-4">
-          <div className="font-medium">
-            <SearchHighlight text={user.email} searchQuery={searchQuery} />
-          </div>
-          <div>
-            {user.fullName ? (
-              <SearchHighlight text={user.fullName} searchQuery={searchQuery} />
-            ) : '-'}
-          </div>
-          <div>
-            <Badge className={getRoleBadgeColor(user.role)}>
-              {formatRoleLabel(user.role)}
-            </Badge>
-          </div>
-          <div className="flex flex-col gap-1">
-            {getVerificationBadge(user.verificationStatus)}
-            {!user.emailVerified && (
-              <Badge variant="outline" className="w-fit border-yellow-400 text-yellow-400">
-                <Clock className="h-3 w-3 mr-1" />
-                Email Unverified
-              </Badge>
-            )}
-            {user.isSuspended && (
-              <Badge variant="destructive" className="w-fit">
-                <Ban className="h-3 w-3 mr-1" />
-                Suspended
-              </Badge>
-            )}
-          </div>
-          <div className="text-sm text-muted-foreground">
-            {formatDate(user.createdAt)}
-          </div>
-          <div className="text-sm text-muted-foreground">
-            {formatRelativeTime(user.lastActivityAt)}
-          </div>
-          <div className="text-right">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {user.verificationStatus === 'pending_verification' && (
-                  <>
-                    <DropdownMenuItem
-                      onClick={() => onUserAction(user.id, { type: 'verify', approved: true })}
-                    >
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Approve Verification
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={() => onUserAction(user.id, { type: 'verify', approved: false })}
-                    >
-                      <XCircle className="h-4 w-4 mr-2" />
-                      Reject Verification
-                    </DropdownMenuItem>
-                  </>
-                )}
-                <DropdownMenuItem
-                  onClick={() => onUserAction(user.id, { type: 'changeRole', newRole: user.role })}
-                >
-                  <UserCog className="h-4 w-4 mr-2" />
-                  Change Role
-                </DropdownMenuItem>
-                {!user.isSuspended ? (
-                  <DropdownMenuItem
-                    onClick={() => onUserAction(user.id, { type: 'suspend', reason: '' })}
-                  >
-                    <Ban className="h-4 w-4 mr-2" />
-                    Suspend User
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem
-                    onClick={() => onUserAction(user.id, { type: 'reactivate' })}
-                  >
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Reactivate User
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                  onClick={() => onUserAction(user.id, { type: 'viewActivity' })}
-                >
-                  <Activity className="h-4 w-4 mr-2" />
-                  View Activity Log
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   if (users.length === 0) {
     return (
       <div className="text-center py-12">
@@ -261,14 +155,111 @@ export function UserTableVirtual({
 
         {/* Virtual List */}
         <List
-          ref={listRef}
-          height={height}
-          itemCount={users.length}
-          itemSize={80}
-          width="100%"
-        >
-          {Row}
-        </List>
+          rowComponent={({ index, style }) => {
+            const user = users[index]
+            return (
+              <div 
+                style={style}
+                className="border-b border-yellow-400/10 hover:bg-yellow-400/5 transition-colors flex items-center"
+              >
+                <div className="grid grid-cols-7 gap-4 w-full px-4">
+                  <div className="font-medium">
+                    <SearchHighlight text={user.email} searchQuery={searchQuery} />
+                  </div>
+                  <div>
+                    {user.fullName ? (
+                      <SearchHighlight text={user.fullName} searchQuery={searchQuery} />
+                    ) : '-'}
+                  </div>
+                  <div>
+                    <Badge className={getRoleBadgeColor(user.role)}>
+                      {formatRoleLabel(user.role)}
+                    </Badge>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    {getVerificationBadge(user.verificationStatus)}
+                    {!user.emailVerified && (
+                      <Badge variant="outline" className="w-fit border-yellow-400 text-yellow-400">
+                        <Clock className="h-3 w-3 mr-1" />
+                        Email Unverified
+                      </Badge>
+                    )}
+                    {user.isSuspended && (
+                      <Badge variant="destructive" className="w-fit">
+                        <Ban className="h-3 w-3 mr-1" />
+                        Suspended
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {formatDate(user.createdAt)}
+                  </div>
+                  <div className="text-sm text-muted-foreground">
+                    {formatRelativeTime(user.lastActivityAt)}
+                  </div>
+                  <div className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="sm">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        {user.verificationStatus === 'pending_verification' && (
+                          <>
+                            <DropdownMenuItem
+                              onClick={() => onUserAction(user.id, { type: 'verify', approved: true })}
+                            >
+                              <CheckCircle className="h-4 w-4 mr-2" />
+                              Approve Verification
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => onUserAction(user.id, { type: 'verify', approved: false })}
+                            >
+                              <XCircle className="h-4 w-4 mr-2" />
+                              Reject Verification
+                            </DropdownMenuItem>
+                          </>
+                        )}
+                        <DropdownMenuItem
+                          onClick={() => onUserAction(user.id, { type: 'changeRole', newRole: user.role })}
+                        >
+                          <UserCog className="h-4 w-4 mr-2" />
+                          Change Role
+                        </DropdownMenuItem>
+                        {!user.isSuspended ? (
+                          <DropdownMenuItem
+                            onClick={() => onUserAction(user.id, { type: 'suspend', reason: '' })}
+                          >
+                            <Ban className="h-4 w-4 mr-2" />
+                            Suspend User
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            onClick={() => onUserAction(user.id, { type: 'reactivate' })}
+                          >
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Reactivate User
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          onClick={() => onUserAction(user.id, { type: 'viewActivity' })}
+                        >
+                          <Activity className="h-4 w-4 mr-2" />
+                          View Activity Log
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+              </div>
+            )
+          }}
+          rowCount={users.length}
+          rowHeight={80}
+          rowProps={{}}
+          style={{ height }}
+        />
       </div>
 
       {/* Info */}

@@ -188,10 +188,12 @@ export class ProposalExportService {
         .eq('id', proposal.lead_id)
         .single();
 
+      const project = Array.isArray(proposal.projects) ? proposal.projects[0] : proposal.projects;
+      
       const proposalData: ProposalData = {
         id: proposal.id,
         title: proposal.title || 'Untitled Proposal',
-        projectTitle: proposal.projects?.title || 'Unknown Project',
+        projectTitle: project?.title || 'Unknown Project',
         status: proposal.status,
         budgetEstimate: proposal.budget_estimate,
         timelineEstimate: proposal.timeline_estimate,
@@ -290,10 +292,10 @@ export class ProposalExportService {
       const emailResult = await sendEmail({
         to: validated.recipientEmail,
         subject: 'Proposal Export',
-        text: `Please find attached the exported proposal PDF.`,
+        text: `Your proposal export is ready. The PDF has been generated successfully.`,
         html: `
-          <h2>Proposal Export</h2>
-          <p>Please find attached the exported proposal PDF.</p>
+          <h2>Proposal Export Complete</h2>
+          <p>Your proposal export has been generated successfully.</p>
           <p>This export includes:</p>
           <ul>
             <li>All proposal sections</li>
@@ -301,14 +303,8 @@ export class ProposalExportService {
             ${validated.includeTeamStats ? '<li>Team information and statistics</li>' : ''}
             ${validated.includeVersionHistory ? '<li>Version history</li>' : ''}
           </ul>
+          <p><em>Note: Email attachments are not currently supported. Please download the PDF from the application.</em></p>
         `,
-        attachments: [
-          {
-            filename: exportResult.fileName,
-            content: exportResult.pdfBuffer,
-            contentType: 'application/pdf',
-          },
-        ],
       });
 
       if (!emailResult.success) {

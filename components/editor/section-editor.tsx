@@ -86,7 +86,7 @@ export function SectionEditor({
     sectionId,
     documentId,
     enabled: editable,
-    autoAcquireOnFocus,
+    autoAcquireOnFocus: autoLockOnFocus,
     autoReleaseOnBlur,
   })
 

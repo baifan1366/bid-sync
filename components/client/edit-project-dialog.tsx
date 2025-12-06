@@ -42,7 +42,7 @@ export function EditProjectDialog({ project, open, onOpenChange }: EditProjectDi
         deadline: project.deadline ? new Date(project.deadline).toISOString().split('T')[0] : "",
       })
       
-      const requirements = project.additional_info_requirements || project.additionalInfoRequirements || []
+      const requirements = project.additionalInfoRequirements || []
       setAdditionalInfoRequirements(requirements.map(req => ({
         ...req,
         optionsString: Array.isArray(req.options) ? req.options.join(', ') : req.options || '',

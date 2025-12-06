@@ -78,8 +78,9 @@ export function ProposalComparisonView({ proposalIds, onClose }: ProposalCompari
       biddingTeamName: p.biddingTeam.lead.name,
       biddingLead: p.biddingTeam.lead,
       teamSize: p.biddingTeam.members.length + 1,
-      budgetEstimate: null, // Will be populated from actual data
+      budgetEstimate: null,
       timelineEstimate: null,
+      executiveSummary: null,
       submissionDate: p.submissionDate,
       status: p.status,
       complianceScore: p.complianceChecklist.length > 0
@@ -90,6 +91,7 @@ export function ProposalComparisonView({ proposalIds, onClose }: ProposalCompari
           )
         : 0,
       unreadMessages: 0,
+      additionalInfo: [],
     }))
   )
 

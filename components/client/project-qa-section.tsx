@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tantml:query/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createGraphQLClient } from '@/lib/graphql/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'

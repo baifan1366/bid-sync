@@ -48,17 +48,17 @@ interface ProjectDialogProps {
 
 // Status badge color mapping
 const statusColors: Record<ProjectStatus, string> = {
-  pending_review: "bg-yellow-400 text-black hover:bg-yellow-500",
-  open: "bg-green-500 text-white hover:bg-green-600",
-  closed: "bg-gray-500 text-white hover:bg-gray-600",
-  awarded: "bg-yellow-400 text-black hover:bg-yellow-500",
+  PENDING_REVIEW: "bg-yellow-400 text-black hover:bg-yellow-500",
+  OPEN: "bg-green-500 text-white hover:bg-green-600",
+  CLOSED: "bg-gray-500 text-white hover:bg-gray-600",
+  AWARDED: "bg-yellow-400 text-black hover:bg-yellow-500",
 }
 
 const statusLabels: Record<ProjectStatus, string> = {
-  pending_review: "Pending Review",
-  open: "Open",
-  closed: "Closed",
-  awarded: "Awarded",
+  PENDING_REVIEW: "Pending Review",
+  OPEN: "Open",
+  CLOSED: "Closed",
+  AWARDED: "Awarded",
 }
 
 export function ProjectDialog({ project, open, onOpenChange }: ProjectDialogProps) {
@@ -83,7 +83,7 @@ export function ProjectDialog({ project, open, onOpenChange }: ProjectDialogProp
   }
   
   // Check if project can show bids (OPEN or AWARDED status)
-  const canViewBids = project.status === 'open' || project.status === 'awarded'
+  const canViewBids = project.status === 'OPEN' || project.status === 'AWARDED'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -184,8 +184,7 @@ export function ProjectDialog({ project, open, onOpenChange }: ProjectDialogProp
             </div>
 
             {/* Additional Information Requirements */}
-            {((project.additional_info_requirements && project.additional_info_requirements.length > 0) ||
-              (project.additionalInfoRequirements && project.additionalInfoRequirements.length > 0)) && (
+            {(project.additionalInfoRequirements && project.additionalInfoRequirements.length > 0) && (
               <>
                 <Separator className="bg-yellow-400/20" />
                 <div className="space-y-3">
@@ -199,7 +198,7 @@ export function ProjectDialog({ project, open, onOpenChange }: ProjectDialogProp
                     Bidders must provide the following information when submitting proposals
                   </p>
                   <div className="space-y-2.5">
-                    {(project.additional_info_requirements || project.additionalInfoRequirements || [])
+                    {(project.additionalInfoRequirements || [])
                       .sort((a, b) => a.order - b.order)
                       .map((req, index) => {
                         // Parse options if it's a string
@@ -289,10 +288,10 @@ export function ProjectDialog({ project, open, onOpenChange }: ProjectDialogProp
                   <div className="mt-3 p-2.5 rounded-lg bg-yellow-400/10 border border-yellow-400/30">
                     <p className="text-xs text-muted-foreground">
                       <span className="font-semibold text-black dark:text-white">
-                        {(project.additional_info_requirements || project.additionalInfoRequirements || []).filter(r => r.required).length}
+                        {(project.additionalInfoRequirements || []).filter(r => r.required).length}
                       </span> required field(s) • 
                       <span className="font-semibold text-black dark:text-white ml-1">
-                        {(project.additional_info_requirements || project.additionalInfoRequirements || []).length}
+                        {(project.additionalInfoRequirements || []).length}
                       </span> total field(s)
                     </p>
                   </div>
@@ -307,9 +306,9 @@ export function ProjectDialog({ project, open, onOpenChange }: ProjectDialogProp
                 <h3 className="font-semibold text-black dark:text-white">Timeline</h3>
               </div>
               <div className="text-sm text-muted-foreground space-y-1">
-                <p>Created: {formatDate((project as any).createdAt || project.created_at)}</p>
-                {project.updated_at && (
-                  <p>Last updated: {formatDate(project.updated_at)}</p>
+                <p>Created: {formatDate(project.createdAt)}</p>
+                {project.updatedAt && (
+                  <p>Last updated: {formatDate(project.updatedAt)}</p>
                 )}
               </div>
             </div>

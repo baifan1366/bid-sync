@@ -11,7 +11,7 @@ import {
     CardTitle,
 } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { useToast } from "@/hooks/use-toast"
+import { useToast } from "@/components/ui/use-toast"
 import { formatInvitationCode } from "@/lib/auth/registration"
 import type { TeamInvitation, CreateInvitationResponse } from "@/types/registration"
 

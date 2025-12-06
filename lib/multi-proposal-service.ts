@@ -499,18 +499,20 @@ export class MultiProposalService {
       const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
       const upcomingDeadlines =
         proposals?.filter((p) => {
-          if (!p.projects?.deadline) return false;
-          const deadline = new Date(p.projects.deadline);
+          const project = Array.isArray(p.projects) ? p.projects[0] : p.projects;
+          if (!project?.deadline) return false;
+          const deadline = new Date(project.deadline);
           return deadline >= now && deadline <= sevenDaysFromNow;
         }).length || 0;
 
       // Calculate overdue proposals
       const overdueProposals =
         proposals?.filter((p) => {
-          if (!p.projects?.deadline || p.status === 'submitted' || p.status === 'approved' || p.status === 'rejected' || p.status === 'archived') {
+          const project = Array.isArray(p.projects) ? p.projects[0] : p.projects;
+          if (!project?.deadline || p.status === 'submitted' || p.status === 'approved' || p.status === 'rejected' || p.status === 'archived') {
             return false;
           }
-          const deadline = new Date(p.projects.deadline);
+          const deadline = new Date(project.deadline);
           return deadline < now;
         }).length || 0;
 
