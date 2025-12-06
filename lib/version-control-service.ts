@@ -153,6 +153,10 @@ export class VersionControlService {
         }
       }
 
+      // Get user details for createdByName
+      const { data: { user } } = await supabase.auth.admin.getUserById(validated.userId)
+      const createdByName = user?.user_metadata?.full_name || user?.email || 'Unknown User'
+
       // Transform database response to DocumentVersion type
       const result: DocumentVersion = {
         id: version.id,
@@ -160,6 +164,7 @@ export class VersionControlService {
         versionNumber: version.version_number,
         content: version.content as JSONContent,
         createdBy: version.created_by,
+        createdByName: createdByName,
         changesSummary: version.changes_summary,
         isRollback: version.is_rollback,
         rolledBackFrom: version.rolled_back_from,
@@ -235,6 +240,16 @@ export class VersionControlService {
         }
       }
 
+      // Get user details for all versions
+      const userIds = [...new Set((versions || []).map(v => v.created_by))]
+      const userMap = new Map<string, string>()
+      
+      for (const userId of userIds) {
+        const { data: { user } } = await supabase.auth.admin.getUserById(userId)
+        const userName = user?.user_metadata?.full_name || user?.email || 'Unknown User'
+        userMap.set(userId, userName)
+      }
+
       // Transform database response to DocumentVersion array
       const results: DocumentVersion[] = (versions || []).map(v => ({
         id: v.id,
@@ -242,6 +257,7 @@ export class VersionControlService {
         versionNumber: v.version_number,
         content: v.content as JSONContent,
         createdBy: v.created_by,
+        createdByName: userMap.get(v.created_by) || 'Unknown User',
         changesSummary: v.changes_summary,
         isRollback: v.is_rollback,
         rolledBackFrom: v.rolled_back_from,
@@ -315,6 +331,10 @@ export class VersionControlService {
         }
       }
 
+      // Get user details for createdByName
+      const { data: { user: versionUser } } = await supabase.auth.admin.getUserById(version.created_by)
+      const createdByName = versionUser?.user_metadata?.full_name || versionUser?.email || 'Unknown User'
+
       // Transform database response to DocumentVersion type
       const result: DocumentVersion = {
         id: version.id,
@@ -322,6 +342,7 @@ export class VersionControlService {
         versionNumber: version.version_number,
         content: version.content as JSONContent,
         createdBy: version.created_by,
+        createdByName: createdByName,
         changesSummary: version.changes_summary,
         isRollback: version.is_rollback,
         rolledBackFrom: version.rolled_back_from,
