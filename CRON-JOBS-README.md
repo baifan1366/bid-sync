@@ -32,9 +32,6 @@ git push
 
 | 任务 | 路径 | 时间 | 功能 |
 |------|------|------|------|
-| 保留策略 | `/api/cron/retention-policy` | 每天 2:00 AM UTC | 检查并标记过期归档 |
-| 归档删除 | `/api/cron/archive-deletion` | 每天 3:00 AM UTC | 删除已过宽限期的归档 |
-| 导出清理 | `/api/cron/export-cleanup` | 每天 4:00 AM UTC | 删除过期的导出文件 |
 | 截止日期提醒 | `/api/cron/deadline-reminders` | 每天 9:00 AM UTC | 发送项目和章节截止日期提醒 |
 
 ## 监控
@@ -47,7 +44,7 @@ git push
 ### 数据库日志
 ```sql
 SELECT * FROM operation_logs 
-WHERE operation IN ('RETENTION_CHECK', 'RETENTION_EXECUTE_DELETION', 'EXPORT_CLEANUP')
+WHERE operation = 'DEADLINE_REMINDER'
 ORDER BY timestamp DESC;
 ```
 
@@ -71,7 +68,7 @@ ORDER BY timestamp DESC;
 ## 手动测试
 
 ```bash
-curl -X GET https://your-domain.vercel.app/api/cron/retention-policy \
+curl -X GET https://your-domain.vercel.app/api/cron/deadline-reminders \
   -H "Authorization: Bearer YOUR_CRON_SECRET"
 ```
 
