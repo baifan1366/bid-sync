@@ -10,7 +10,7 @@
  * Requirements: 4.3, 5.1, 5.2, 5.3, 5.4, 5.5
  */
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { z } from 'zod'
 import { NotificationService } from '@/lib/notification-service'
 
@@ -207,7 +207,9 @@ export class TeamManagementService {
       }
 
       // Add user to team with 'member' role
-      const { data: teamMember, error: createError } = await supabase
+      // Use admin client to bypass RLS for team member insertion
+      const adminClient = createAdminClient()
+      const { data: teamMember, error: createError } = await adminClient
         .from('bid_team_members')
         .insert({
           project_id: invitation.project_id,
@@ -227,7 +229,7 @@ export class TeamManagementService {
 
       // Mark invitation as used (for single-use invitations)
       if (!invitation.is_multi_use) {
-        await supabase
+        await adminClient
           .from('team_invitations')
           .update({
             used_by: validated.userId,

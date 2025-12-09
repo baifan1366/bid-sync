@@ -6142,7 +6142,9 @@ export const resolvers = {
       if (timelineEstimate !== undefined) updateData.timeline_estimate = timelineEstimate;
       if (additionalInfo !== undefined) updateData.additional_info = additionalInfo;
 
-      const { data: updatedProposal, error: updateError } = await supabase
+      // Use admin client to bypass RLS for proposal updates
+      const adminClient = createAdminClient();
+      const { data: updatedProposal, error: updateError } = await adminClient
         .from('proposals')
         .update(updateData)
         .eq('id', proposalId)
@@ -6150,7 +6152,8 @@ export const resolvers = {
         .single();
 
       if (updateError || !updatedProposal) {
-        throw new GraphQLError('Failed to update proposal', {
+        console.error('Failed to update proposal:', updateError);
+        throw new GraphQLError(`Failed to update proposal: ${updateError?.message || 'Unknown error'}`, {
           extensions: { code: 'INTERNAL_SERVER_ERROR' },
         });
       }

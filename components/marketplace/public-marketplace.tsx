@@ -18,15 +18,15 @@ import { PublicProjectCard } from "@/components/marketplace/public-project-card"
 import { PublicProjectCardSkeleton } from "@/components/marketplace/public-project-card-skeleton"
 import { useGraphQLQuery } from "@/hooks/use-graphql"
 import { useUser } from "@/hooks/use-user"
-import { LIST_PROJECTS } from "@/lib/graphql/queries"
+import { LIST_OPEN_PROJECTS } from "@/lib/graphql/queries"
 import { Project } from "@/types/project"
 
 export function PublicMarketplace() {
   const router = useRouter()
   const { user } = useUser()
-  const { data, isLoading, error } = useGraphQLQuery<{ projects: Project[] }>(
-    ["projects"],
-    LIST_PROJECTS
+  const { data, isLoading, error } = useGraphQLQuery<{ openProjects: Project[] }>(
+    ["openProjects"],
+    LIST_OPEN_PROJECTS
   )
   const [searchQuery, setSearchQuery] = useState("")
   const [budgetFilter, setBudgetFilter] = useState("all")
@@ -36,28 +36,26 @@ export function PublicMarketplace() {
   const [recommendedProjects, setRecommendedProjects] = useState<Project[]>([])
 
   useEffect(() => {
-    if (data?.projects) {
+    if (data?.openProjects) {
       const now = new Date()
       
-      // Filter open projects and exclude overdue ones
-      const openProjects = data.projects.filter((p: Project) => {
-        const isOpen = p.status?.toLowerCase() === "open" || p.status === "OPEN"
-        
+      // Filter out overdue projects
+      const availableProjects = data.openProjects.filter((p: Project) => {
         // Check if project is overdue
         if (p.deadline) {
           const deadlineDate = new Date(p.deadline)
           const isOverdue = deadlineDate < now
-          return isOpen && !isOverdue
+          return !isOverdue
         }
         
-        return isOpen
+        return true
       })
       
       // Set recommended projects (first 3)
-      setRecommendedProjects(openProjects.slice(0, 3))
+      setRecommendedProjects(availableProjects.slice(0, 3))
       
       // Apply filters using applied values (only updated on button click)
-      let filtered = openProjects
+      let filtered = availableProjects
       
       if (appliedSearchQuery.trim()) {
         const query = appliedSearchQuery.toLowerCase()

@@ -39,25 +39,39 @@ export async function POST(request: Request) {
     const body = await request.json()
     const { name, description, type, content } = body
 
+    // Parse content if it's a string, otherwise use as-is
+    let parsedContent = content
+    if (typeof content === 'string') {
+      try {
+        parsedContent = JSON.parse(content)
+      } catch {
+        // If parsing fails, use the string as-is wrapped in an object
+        parsedContent = { raw: content }
+      }
+    }
+
     const { data, error } = await supabase
       .from('templates')
       .insert({
         name,
         description,
-        type,
-        content: JSON.parse(content),
+        type: type || 'proposal', // Default type if not provided
+        content: parsedContent,
         created_by: user.id,
       })
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('Database error creating template:', error)
+      throw error
+    }
 
     return NextResponse.json(data)
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating template:', error)
     return NextResponse.json(
-      { error: 'Failed to create template' },
+      { error: error?.message || 'Failed to create template' },
       { status: 500 }
     )
   }

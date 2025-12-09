@@ -120,7 +120,7 @@ export function LoginForm({ className, ...props }: LoginFormProps) {
             const checkData = await checkResponse.json()
 
             if (!checkData.exists) {
-                setError('This email is not registered. Please sign up first.')
+                setEmailError('This email is not registered. Please sign up first.')
                 setIsLoading(false)
                 return
             }

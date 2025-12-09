@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
 import { Plus, X, GripVertical } from "lucide-react"
+import { useToast } from "@/components/ui/use-toast"
 import type { Project } from "@/types/project"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 
@@ -22,6 +23,7 @@ interface EditProjectDialogProps {
 
 export function EditProjectDialog({ project, open, onOpenChange }: EditProjectDialogProps) {
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     title: "",
@@ -45,6 +47,7 @@ export function EditProjectDialog({ project, open, onOpenChange }: EditProjectDi
       const requirements = project.additionalInfoRequirements || []
       setAdditionalInfoRequirements(requirements.map(req => ({
         ...req,
+        fieldType: req.fieldType?.toLowerCase() as AdditionalInfoRequirement['fieldType'] || 'text',
         optionsString: Array.isArray(req.options) ? req.options.join(', ') : req.options || '',
       })))
     }
@@ -170,11 +173,18 @@ export function EditProjectDialog({ project, open, onOpenChange }: EditProjectDi
       queryClient.invalidateQueries({ queryKey: ['project', project.id] })
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       
-      alert('Project updated successfully')
+      toast({
+        title: "Success",
+        description: "Project updated successfully",
+      })
     } catch (error) {
       console.error("Error updating project:", error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to update project'
-      alert(`Failed to update project: ${errorMessage}`)
+      toast({
+        title: "Error",
+        description: `Failed to update project: ${errorMessage}`,
+        variant: "destructive",
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -329,10 +339,10 @@ export function EditProjectDialog({ project, open, onOpenChange }: EditProjectDi
                             />
                           </div>
 
-                          {requirement.fieldType === 'select' && (
+                          {requirement.fieldType?.toLowerCase() === 'select' && (
                             <div className="space-y-1.5">
                               <Label htmlFor={`options-${requirement.id}`} className="text-sm">
-                                Options (comma-separated)
+                                Options (comma-separated) *
                               </Label>
                               <Input
                                 id={`options-${requirement.id}`}
@@ -342,7 +352,11 @@ export function EditProjectDialog({ project, open, onOpenChange }: EditProjectDi
                                   optionsString: e.target.value,
                                   options: e.target.value.split(',').map(opt => opt.trim()).filter(Boolean)
                                 })}
+                                required
                               />
+                              <p className="text-xs text-muted-foreground">
+                                Enter options separated by commas. These will appear in the dropdown.
+                              </p>
                             </div>
                           )}
 

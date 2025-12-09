@@ -394,17 +394,19 @@ export function WorkspaceContent() {
                 return (
                   <Card
                     key={proposal.id}
-                    className={`p-4 cursor-pointer transition-all border-yellow-400/20 hover:border-yellow-400/40 ${
+                    className={`p-4 cursor-pointer transition-all border-yellow-400/20 hover:border-yellow-400/40 overflow-hidden ${
                       isSelected ? "ring-2 ring-yellow-400 border-yellow-400" : ""
                     }`}
                     onClick={() => handleProposalClick(proposal.id)}
                   >
-                    <div className="space-y-3">
-                      <div>
-                        <h3 className="font-semibold text-black dark:text-white mb-1">
-                          {proposal.title || "Untitled Proposal"}
+                    <div className="space-y-3 overflow-hidden">
+                      <div className="overflow-hidden">
+                        <h3 className="font-semibold text-black dark:text-white mb-1 truncate">
+                          {typeof proposal.title === 'string' && !proposal.title.startsWith('[') && !proposal.title.startsWith('{') 
+                            ? proposal.title 
+                            : "Untitled Proposal"}
                         </h3>
-                        <p className="text-sm text-muted-foreground line-clamp-1">
+                        <p className="text-sm text-muted-foreground truncate">
                           {proposal.project.title}
                         </p>
                       </div>

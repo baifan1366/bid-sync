@@ -75,6 +75,18 @@ export function ProposalEditor({
     additionalInfo: initialData?.additionalInfo || {},
   })
 
+  // Reset form when proposal changes
+  React.useEffect(() => {
+    setEditorContent(initialData?.content || "")
+    setFormData({
+      title: initialData?.title || "",
+      content: initialData?.content || "",
+      budgetEstimate: initialData?.budgetEstimate || null,
+      timelineEstimate: initialData?.timelineEstimate || "",
+      additionalInfo: initialData?.additionalInfo || {},
+    })
+  }, [proposalId, initialData?.title, initialData?.content, initialData?.budgetEstimate, initialData?.timelineEstimate, initialData?.additionalInfo])
+
   const handleEditorUpdate = (content: JSONContent) => {
     // Convert JSONContent to HTML string for storage
     const htmlContent = JSON.stringify(content)
@@ -130,8 +142,9 @@ export function ProposalEditor({
 
   const renderRequirementField = (requirement: AdditionalInfoRequirement) => {
     const value = formData.additionalInfo[requirement.id]
+    const fieldType = requirement.fieldType?.toLowerCase()
 
-    switch (requirement.fieldType) {
+    switch (fieldType) {
       case "text":
         return (
           <Input
@@ -175,6 +188,17 @@ export function ProposalEditor({
         )
 
       case "select":
+        // If no options available, fall back to text input
+        if (!requirement.options || requirement.options.length === 0) {
+          return (
+            <Input
+              value={value || ""}
+              onChange={(e) => updateAdditionalInfo(requirement.id, e.target.value)}
+              placeholder={requirement.helpText || `Enter ${requirement.fieldName}`}
+              className="border-yellow-400/20 focus:border-yellow-400"
+            />
+          )
+        }
         return (
           <Select
             value={value || ""}
@@ -184,7 +208,7 @@ export function ProposalEditor({
               <SelectValue placeholder={`Select ${requirement.fieldName}`} />
             </SelectTrigger>
             <SelectContent>
-              {requirement.options?.map((option) => (
+              {requirement.options.map((option) => (
                 <SelectItem key={option} value={option}>
                   {option}
                 </SelectItem>
