@@ -35,7 +35,7 @@ const adminPages = [
     title: "Proposals",
     description: "View all proposals with full history",
     icon: FileText,
-    href: "/proposals",
+    href: "/admin-proposals",
     color: "bg-purple-500",
   },
   {

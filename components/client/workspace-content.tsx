@@ -29,6 +29,8 @@ import {
   Eye,
   Users2
 } from "lucide-react"
+import { TipTapEditor } from "@/components/editor/tiptap-editor"
+import { JSONContent } from "@tiptap/core"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 
 interface ProposalWithProject {
@@ -508,15 +510,44 @@ export function WorkspaceContent() {
                 {(viewMode === "view" || selectedProposal.status?.toLowerCase() !== "draft") && (
                   <div className="space-y-6">
                     {/* Proposal Content */}
-                    <Card className="p-6 border-yellow-400/20">
-                      <div className="space-y-4">
-                        <div>
-                          <h3 className="text-lg font-semibold text-black dark:text-white mb-2">
-                            {selectedProposal.title || "Untitled Proposal"}
+                    <Card className="p-6 border-yellow-400/20 overflow-hidden">
+                      <div className="space-y-4 overflow-hidden">
+                        <div className="overflow-hidden">
+                          <h3 className="text-lg font-semibold text-black dark:text-white mb-2 wrap-break-word">
+                            {(() => {
+                              const title = selectedProposal.title
+                              if (!title) return "Untitled Proposal"
+                              if (typeof title === 'string' && (title.startsWith('{') || title.startsWith('['))) {
+                                return "Untitled Proposal"
+                              }
+                              return title
+                            })()}
                           </h3>
-                          <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
-                            {selectedProposal.content || "No content provided yet."}
-                          </p>
+                          {selectedProposal.content ? (
+                            <div className="overflow-hidden">
+                              <TipTapEditor
+                                content={(() => {
+                                  const content = selectedProposal.content
+                                  if (!content) return ""
+                                  if (typeof content === 'string') {
+                                    try {
+                                      return JSON.parse(content) as JSONContent
+                                    } catch {
+                                      return content
+                                    }
+                                  }
+                                  return content as JSONContent
+                                })()}
+                                editable={false}
+                                minHeight="100px"
+                                className="border-0"
+                              />
+                            </div>
+                          ) : (
+                            <p className="text-sm text-muted-foreground">
+                              No content provided yet.
+                            </p>
+                          )}
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-yellow-400/20">

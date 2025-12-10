@@ -100,8 +100,8 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
     },
     { 
       label: "Proposals", 
-      href: "/proposals",
-      matchPaths: ["/proposals"]
+      href: "/admin-proposals",
+      matchPaths: ["/admin-proposals"]
     },
     { 
       label: "Verifications", 

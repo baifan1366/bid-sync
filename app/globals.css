@@ -205,7 +205,16 @@ pTap Editor Styles */
 
   /* Editor prose styles */
   .tiptap-editor-content .ProseMirror {
-    @apply outline-none min-h-[300px];
+    @apply outline-none min-h-[300px] overflow-hidden;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+
+  /* Prevent content overflow */
+  .tiptap-editor-content .ProseMirror * {
+    max-width: 100%;
+    overflow-wrap: break-word;
+    word-break: break-word;
   }
 
   /* Placeholder styles */
