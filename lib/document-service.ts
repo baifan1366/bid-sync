@@ -130,7 +130,7 @@ export class DocumentService {
       // Verify workspace exists and user has access
       const { data: workspace, error: workspaceError } = await supabase
         .from('workspaces')
-        .select('id, lead_id')
+        .select('id, lead_id, project_id')
         .eq('id', input.workspaceId)
         .single();
 
@@ -141,9 +141,25 @@ export class DocumentService {
         };
       }
 
-      // Create document
+      // Check if user is workspace lead or team member
+      const isLead = workspace.lead_id === input.createdBy;
+      const { data: teamMember } = await supabase
+        .from('bid_team_members')
+        .select('id')
+        .eq('project_id', workspace.project_id)
+        .eq('user_id', input.createdBy)
+        .maybeSingle();
+
+      if (!isLead && !teamMember) {
+        return {
+          success: false,
+          error: 'You do not have permission to create documents in this workspace',
+        };
+      }
+
+      // Create document in workspace_documents table
       const { data: document, error: createError } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .insert({
           workspace_id: input.workspaceId,
           title: input.title,
@@ -156,11 +172,22 @@ export class DocumentService {
         .single();
 
       if (createError || !document) {
+        console.error('Error creating document:', createError);
         return {
           success: false,
           error: 'Failed to create document',
         };
       }
+
+      // Add creator as owner collaborator
+      await supabase
+        .from('document_collaborators')
+        .insert({
+          document_id: document.id,
+          user_id: input.createdBy,
+          role: 'owner',
+          added_by: input.createdBy,
+        });
 
       return {
         success: true,
@@ -188,13 +215,14 @@ export class DocumentService {
   /**
    * Gets a document by ID
    */
-  async getDocument(documentId: string, _userId: string): Promise<DocumentResult> {
+  async getDocument(documentId: string, userId: string): Promise<DocumentResult> {
     try {
       const supabase = await createClient();
 
+      // Query workspace_documents table (for collaborative editing)
       const { data: document, error } = await supabase
-        .from('documents')
-        .select('*')
+        .from('workspace_documents')
+        .select('*, workspaces!inner(lead_id, project_id)')
         .eq('id', documentId)
         .single();
 
@@ -202,6 +230,34 @@ export class DocumentService {
         return {
           success: false,
           error: 'Document not found',
+        };
+      }
+
+      // Check if user has access: workspace lead, document creator, or team member
+      const workspace = document.workspaces as any;
+      const isWorkspaceLead = workspace.lead_id === userId;
+      const isCreator = document.created_by === userId;
+
+      // Check if user is a collaborator
+      const { data: collaborator } = await supabase
+        .from('document_collaborators')
+        .select('id')
+        .eq('document_id', documentId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      // Check if user is a team member for the project
+      const { data: teamMember } = await supabase
+        .from('bid_team_members')
+        .select('id')
+        .eq('project_id', workspace.project_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (!isWorkspaceLead && !isCreator && !collaborator && !teamMember) {
+        return {
+          success: false,
+          error: 'You do not have access to this document',
         };
       }
 
@@ -231,12 +287,42 @@ export class DocumentService {
   /**
    * Lists all documents in a workspace
    */
-  async listDocuments(workspaceId: string, _userId: string): Promise<DocumentsResult> {
+  async listDocuments(workspaceId: string, userId: string): Promise<DocumentsResult> {
     try {
       const supabase = await createClient();
 
+      // Verify user has access to workspace
+      const { data: workspace, error: workspaceError } = await supabase
+        .from('workspaces')
+        .select('id, lead_id, project_id')
+        .eq('id', workspaceId)
+        .single();
+
+      if (workspaceError || !workspace) {
+        return {
+          success: false,
+          error: 'Workspace not found',
+        };
+      }
+
+      // Check if user is workspace lead or team member
+      const isLead = workspace.lead_id === userId;
+      const { data: teamMember } = await supabase
+        .from('bid_team_members')
+        .select('id')
+        .eq('project_id', workspace.project_id)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (!isLead && !teamMember) {
+        return {
+          success: false,
+          error: 'You do not have access to this workspace',
+        };
+      }
+
       const { data: documents, error } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .select('*')
         .eq('workspace_id', workspaceId)
         .order('updated_at', { ascending: false });
@@ -279,7 +365,7 @@ export class DocumentService {
       const supabase = await createClient();
 
       let query = supabase
-        .from('documents')
+        .from('workspace_documents')
         .select('*');
 
       if (input.workspaceId) {
@@ -329,7 +415,7 @@ export class DocumentService {
       const supabase = await createClient();
 
       const { data: document, error } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .update({
           content: input.content,
           last_edited_by: input.userId,
@@ -385,7 +471,7 @@ export class DocumentService {
       if (input.description !== undefined) updateData.description = input.description;
 
       const { data: document, error } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .update(updateData)
         .eq('id', input.documentId)
         .select()
@@ -430,7 +516,7 @@ export class DocumentService {
 
       // Verify document exists and user has permission
       const { data: document, error: fetchError } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .select('*, workspaces!inner(lead_id)')
         .eq('id', documentId)
         .single();
@@ -442,9 +528,21 @@ export class DocumentService {
         };
       }
 
-      // Check if user is workspace lead
+      // Check if user is workspace lead or document owner
       const workspace = document.workspaces as any;
-      if (workspace.lead_id !== userId) {
+      const isWorkspaceLead = workspace.lead_id === userId;
+
+      // Check if user is document owner
+      const { data: collaborator } = await supabase
+        .from('document_collaborators')
+        .select('role')
+        .eq('document_id', documentId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      const isOwner = collaborator?.role === 'owner';
+
+      if (!isWorkspaceLead && !isOwner) {
         return {
           success: false,
           error: 'Unauthorized to delete this document',
@@ -452,7 +550,7 @@ export class DocumentService {
       }
 
       const { error: deleteError } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .delete()
         .eq('id', documentId);
 

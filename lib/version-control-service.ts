@@ -418,7 +418,7 @@ export class VersionControlService {
 
       // Update the document with the content from the target version
       const { data: updatedDocument, error: updateError } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .update({
           content: targetVersion.content,
           last_edited_by: validated.userId,
@@ -483,7 +483,7 @@ export class VersionControlService {
 
       // Get document details for email
       const { data: document } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .select('title')
         .eq('id', validated.documentId)
         .single()

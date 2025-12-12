@@ -164,7 +164,7 @@ export class SupabaseCollaborationProvider {
     this.presenceChannel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         await this.presenceChannel?.track({
-          oderId: this.userId,
+          userId: this.userId,
           userName: this.userName,
           userColor: this.userColor,
           online_at: new Date().toISOString(),

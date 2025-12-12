@@ -3965,3 +3965,84 @@ GRANT EXECUTE ON FUNCTION public.get_completion_statistics(UUID, TIMESTAMPTZ, TI
 -- ============================================================
 -- END OF PROJECT DELIVERY AND ARCHIVAL MIGRATION
 -- ============================================================
+
+
+-- ============================================================
+-- FIX: Updated has_document_permission function
+-- Now also checks workspace leads and team members
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.has_document_permission(p_document_id UUID, p_user_id UUID, p_required_role TEXT DEFAULT 'viewer')
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_user_role TEXT;
+    v_role_hierarchy INT;
+    v_required_hierarchy INT;
+    v_workspace_id UUID;
+    v_project_id UUID;
+    v_is_workspace_lead BOOLEAN;
+    v_is_team_member BOOLEAN;
+BEGIN
+    -- First check document_collaborators table
+    SELECT role INTO v_user_role 
+    FROM public.document_collaborators 
+    WHERE document_id = p_document_id AND user_id = p_user_id;
+    
+    IF v_user_role IS NOT NULL THEN
+        v_user_role := LOWER(v_user_role);
+        p_required_role := LOWER(p_required_role);
+        v_role_hierarchy := CASE v_user_role WHEN 'owner' THEN 4 WHEN 'editor' THEN 3 WHEN 'commenter' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END;
+        v_required_hierarchy := CASE p_required_role WHEN 'owner' THEN 4 WHEN 'editor' THEN 3 WHEN 'commenter' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END;
+        RETURN v_role_hierarchy >= v_required_hierarchy;
+    END IF;
+    
+    -- If not a collaborator, check if user is workspace lead or team member
+    -- Get workspace_id from document
+    SELECT workspace_id INTO v_workspace_id 
+    FROM public.workspace_documents 
+    WHERE id = p_document_id;
+    
+    IF v_workspace_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    
+    -- Get project_id from workspace
+    SELECT project_id INTO v_project_id 
+    FROM public.workspaces 
+    WHERE id = v_workspace_id;
+    
+    IF v_project_id IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    
+    -- Check if user is workspace lead
+    SELECT EXISTS(
+        SELECT 1 FROM public.workspaces 
+        WHERE id = v_workspace_id AND lead_id = p_user_id
+    ) INTO v_is_workspace_lead;
+    
+    IF v_is_workspace_lead THEN
+        -- Workspace leads have editor access
+        p_required_role := LOWER(p_required_role);
+        v_required_hierarchy := CASE p_required_role WHEN 'owner' THEN 4 WHEN 'editor' THEN 3 WHEN 'commenter' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END;
+        RETURN 3 >= v_required_hierarchy; -- Editor level (3)
+    END IF;
+    
+    -- Check if user is a team member for the project
+    SELECT EXISTS(
+        SELECT 1 FROM public.bid_team_members 
+        WHERE project_id = v_project_id AND user_id = p_user_id
+    ) INTO v_is_team_member;
+    
+    IF v_is_team_member THEN
+        -- Team members have viewer access by default
+        p_required_role := LOWER(p_required_role);
+        v_required_hierarchy := CASE p_required_role WHEN 'owner' THEN 4 WHEN 'editor' THEN 3 WHEN 'commenter' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END;
+        RETURN 1 >= v_required_hierarchy; -- Viewer level (1)
+    END IF;
+    
+    RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+COMMENT ON FUNCTION public.has_document_permission IS 'Checks if a user has the required permission level for a document. Checks collaborators, workspace leads, and team members.';

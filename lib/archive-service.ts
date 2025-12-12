@@ -796,7 +796,7 @@ export class ArchiveService {
 
         if (workspace) {
           const { data: documents } = await supabase
-            .from('documents')
+            .from('workspace_documents')
             .select('*')
             .eq('workspace_id', workspace.id)
             .order('created_at', { ascending: true });

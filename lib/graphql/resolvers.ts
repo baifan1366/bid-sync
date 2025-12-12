@@ -6654,7 +6654,7 @@ export const resolvers = {
 
       // Get document title and inviter name
       const { data: document } = await supabase
-        .from('documents')
+        .from('workspace_documents')
         .select('title')
         .eq('id', input.documentId)
         .single();
