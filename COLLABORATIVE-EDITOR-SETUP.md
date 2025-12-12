@@ -1,15 +1,18 @@
 # Collaborative Editor Setup Guide
 
+## Overview
+
+The collaborative editor now uses **Supabase Realtime** for all real-time collaboration features. No separate WebSocket server is required.
+
 ## Issues Fixed
 
-1. **Yjs WebSocket Connection Error** - WebSocket server configuration added
-2. **GraphQL "Document not found" Error** - RLS policy fix available
+1. **GraphQL "Document not found" Error** - RLS policy fix available
 
 ## Setup Steps
 
 ### 1. Apply Database RLS Fix
 
-The document query is failing due to RLS (Row Level Security) policies. You need to apply the fix:
+The document query may fail due to RLS (Row Level Security) policies. Apply the fix:
 
 **Option A: Using Supabase Dashboard (Recommended)**
 1. Go to your Supabase project: https://supabase.com/dashboard
@@ -24,24 +27,14 @@ The document query is failing due to RLS (Row Level Security) policies. You need
 supabase db push
 ```
 
-### 2. Start the WebSocket Server
+### 2. Enable Supabase Realtime
 
-The collaborative editor requires a WebSocket server for real-time synchronization.
+Ensure Realtime is enabled for your Supabase project:
+1. Go to your Supabase Dashboard
+2. Navigate to **Database** > **Replication**
+3. Enable Realtime for the relevant tables
 
-**For Development:**
-
-Open a new terminal and run:
-```bash
-npm run yjs:server
-```
-
-This will start the y-websocket server on `ws://localhost:1234`
-
-**Keep this terminal running** while you're working with the collaborative editor.
-
-### 3. Restart Your Development Server
-
-After applying the database fix and starting the WebSocket server:
+### 3. Start Your Development Server
 
 ```bash
 npm run dev
@@ -51,23 +44,13 @@ npm run dev
 
 1. Navigate to a document in the editor: `/editor/[documentId]`
 2. Check the browser console - you should see:
-   - ✅ No WebSocket connection errors
    - ✅ No "Document not found" errors
    - ✅ Connection status showing "connected"
+3. Open the same document in multiple browser windows to test collaboration
 
 ## Production Setup
 
-For production, you'll need to:
-
-1. **Deploy a WebSocket server** - Options include:
-   - Self-hosted y-websocket server
-   - Supabase Realtime (requires custom integration)
-   - Third-party services like Liveblocks or PartyKit
-
-2. **Update environment variable**:
-   ```bash
-   NEXT_PUBLIC_YJS_WEBSOCKET_URL=wss://your-production-websocket-server.com
-   ```
+No additional setup required! Supabase Realtime works automatically in production with your existing Supabase configuration.
 
 ## Troubleshooting
 
@@ -88,15 +71,21 @@ For production, you'll need to:
    SELECT * FROM document_collaborators WHERE document_id = 'your-document-id';
    ```
 
-### WebSocket still not connecting?
+### Connection issues?
 
-1. Ensure the WebSocket server is running: `npm run yjs:server`
-2. Check if port 1234 is available
-3. Verify the environment variable is set correctly
-4. Restart your Next.js dev server
+1. Verify your Supabase URL and anon key are correct in `.env`
+2. Check if Supabase Realtime is enabled in your project
+3. Restart your Next.js dev server
+
+## Architecture
+
+The collaborative editor uses:
+- **Supabase Realtime Broadcast** - For document updates between collaborators
+- **Supabase Realtime Presence** - For tracking active users
+- **TipTap Editor** - For rich text editing
 
 ## Notes
 
-- The WebSocket server must be running for collaborative features to work
-- Each user needs their own connection to the WebSocket server
-- The server handles conflict resolution and synchronization automatically
+- No separate WebSocket server is needed
+- Collaboration works automatically with Supabase Realtime
+- All users connect through Supabase's managed infrastructure

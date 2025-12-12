@@ -2,7 +2,7 @@
  * Collaborative Editor Demo
  * 
  * Example component demonstrating how to use the CollaborativeEditor
- * with Yjs CRDT integration for real-time collaboration.
+ * with Supabase Realtime for real-time collaboration.
  * 
  * This is a reference implementation showing:
  * - How to enable collaboration mode
@@ -31,7 +31,7 @@ export function CollaborativeEditorDemo() {
         content: [
           {
             type: 'text',
-            text: 'This is a demo of the collaborative editor with Yjs CRDT integration. Multiple users can edit this document simultaneously and see each other\'s changes in real-time.',
+            text: 'This is a demo of the collaborative editor with Supabase Realtime integration. Multiple users can edit this document simultaneously and see each other\'s changes in real-time.',
           },
         ],
       },
@@ -54,7 +54,7 @@ export function CollaborativeEditorDemo() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold mb-2">Collaborative Editor Demo</h1>
         <p className="text-muted-foreground">
-          This demo shows the editor with Yjs collaboration enabled.
+          This demo shows the editor with Supabase Realtime collaboration enabled.
         </p>
       </div>
 
@@ -72,14 +72,13 @@ export function CollaborativeEditorDemo() {
 
       {/* Collaborative mode */}
       <div className="mb-8">
-        <h2 className="text-xl font-semibold mb-4">Collaborative Mode (With Yjs)</h2>
+        <h2 className="text-xl font-semibold mb-4">Collaborative Mode (With Supabase Realtime)</h2>
         <div className="mb-4 p-4 bg-yellow-400/10 border border-yellow-400/20 rounded-md">
           <p className="text-sm">
-            <strong>Note:</strong> To test collaboration, you need to:
+            <strong>Note:</strong> To test collaboration:
           </p>
           <ol className="list-decimal list-inside text-sm mt-2 space-y-1">
-            <li>Set up a Yjs WebSocket server (e.g., y-websocket server)</li>
-            <li>Configure the WebSocket URL in your environment variables</li>
+            <li>Ensure Supabase Realtime is enabled in your project</li>
             <li>Open this page in multiple browser windows</li>
             <li>Edit the document and see changes sync in real-time</li>
           </ol>

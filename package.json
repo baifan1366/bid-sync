@@ -12,8 +12,7 @@
     "job:retention": "tsx scripts/retention-policy-job.ts",
     "job:export-cleanup": "tsx scripts/export-cleanup-job.ts",
     "job:export-worker": "tsx scripts/export-worker.ts",
-    "job:export-worker-once": "tsx scripts/export-worker.ts --once",
-    "yjs:server": "HOST=localhost PORT=1234 npx y-websocket"
+    "job:export-worker-once": "tsx scripts/export-worker.ts --once"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

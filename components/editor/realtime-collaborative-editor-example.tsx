@@ -3,8 +3,7 @@
  * 
  * Example implementation showing how to integrate:
  * - TipTap editor
- * - Yjs CRDT synchronization
- * - Supabase Realtime for presence and cursors
+ * - Supabase Realtime for document sync, presence and cursors
  * - Connection status monitoring
  * 
  * This is a reference implementation demonstrating the complete integration.
@@ -17,10 +16,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
-import Collaboration from '@tiptap/extension-collaboration'
-import * as Y from 'yjs'
-import { WebsocketProvider } from 'y-websocket'
 import { useRealtimeDocument } from '@/hooks/use-realtime-document'
+import { useSupabaseCollaboration } from '@/hooks/use-supabase-collaboration'
 import { ConnectionStatusIndicator } from './connection-status-indicator'
 import { Card } from '@/components/ui/card'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -40,7 +37,7 @@ export interface RealtimeCollaborativeEditorExampleProps {
  * 
  * This component demonstrates the complete integration of:
  * 1. TipTap editor for rich text editing
- * 2. Yjs for CRDT-based document synchronization
+ * 2. Supabase Realtime for document synchronization
  * 3. Supabase Realtime for presence and cursor tracking
  * 4. Connection status monitoring
  */
@@ -52,8 +49,20 @@ export function RealtimeCollaborativeEditorExample({
   initialContent,
   onSave,
 }: RealtimeCollaborativeEditorExampleProps) {
-  const [ydoc] = useState(() => new Y.Doc())
-  const [provider, setProvider] = useState<WebsocketProvider | null>(null)
+  // Set up Supabase Realtime collaboration for document sync
+  const collaboration = useSupabaseCollaboration({
+    documentId,
+    userId,
+    userName,
+    userColor,
+    enabled: true,
+    onDocumentUpdate: (update) => {
+      // Apply remote updates to editor
+      if (editor && update.userId !== userId) {
+        editor.commands.setContent(update.content)
+      }
+    },
+  })
 
   // Set up Realtime integration for presence and notifications
   const {
@@ -80,32 +89,10 @@ export function RealtimeCollaborativeEditorExample({
     },
   })
 
-  // Set up Yjs WebSocket provider
-  useEffect(() => {
-    const wsProvider = new WebsocketProvider(
-      process.env.NEXT_PUBLIC_YJS_WEBSOCKET_URL || 'ws://localhost:1234',
-      documentId,
-      ydoc,
-      {
-        connect: true,
-      }
-    )
-
-    setProvider(wsProvider)
-
-    return () => {
-      wsProvider.disconnect()
-      wsProvider.destroy()
-    }
-  }, [documentId, ydoc])
-
-  // Set up TipTap editor with Yjs collaboration
+  // Set up TipTap editor with Supabase Realtime collaboration
   const editor = useEditor({
     extensions: [
       StarterKit,
-      Collaboration.configure({
-        document: ydoc,
-      }),
     ],
     content: initialContent,
     editorProps: {
@@ -114,6 +101,10 @@ export function RealtimeCollaborativeEditorExample({
       },
     },
     onUpdate: ({ editor }) => {
+      // Broadcast document update via Supabase Realtime
+      const content = editor.getJSON()
+      collaboration.broadcastUpdate(content).catch(console.error)
+
       // Broadcast cursor position via Realtime
       const { from, to } = editor.state.selection
       broadcastCursor({ from, to }).catch(console.error)

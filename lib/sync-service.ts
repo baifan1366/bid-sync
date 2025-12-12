@@ -9,7 +9,6 @@
 
 import { openDB, DBSchema, IDBPDatabase } from 'idb'
 import { JSONContent } from '@/types/document'
-import * as Y from 'yjs'
 
 /**
  * IndexedDB Schema
@@ -38,6 +37,7 @@ interface SyncDB extends DBSchema {
 export interface CachedDocument {
   documentId: string
   content: JSONContent
+  /** @deprecated No longer using Yjs - kept for backward compatibility */
   yjsState?: Uint8Array
   lastModified: string
   syncedAt?: string

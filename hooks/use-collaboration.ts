@@ -2,6 +2,7 @@
  * Custom hooks for collaboration features
  * 
  * Provides hooks for real-time collaboration, presence tracking, and cursor positions.
+ * Now uses Supabase Realtime exclusively (no more Yjs WebSocket dependency).
  * 
  * Requirements: 3.1, 3.4, 9.1, 9.3, 9.4
  */
@@ -11,7 +12,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useGraphQLQuery, useGraphQLMutation } from './use-graphql'
 import { useRealtimeDocument } from './use-realtime-document'
-import { useYjsCollaboration, useYjsCursors, useYjsBroadcastCursor } from './use-yjs-collaboration'
+import { useSupabaseCollaboration, useProviderCursors, useBroadcastCursor } from './use-supabase-collaboration'
 import {
   GET_ACTIVE_SESSIONS,
 } from '@/lib/graphql/queries'
@@ -38,12 +39,12 @@ export interface UseCollaborationOptions {
   userName: string
   userColor: string
   enabled?: boolean
-  websocketUrl?: string
+  websocketUrl?: string // Kept for backward compatibility, but ignored
 }
 
 /**
  * Hook for managing real-time collaboration
- * Combines Yjs CRDT sync with Supabase Realtime for comprehensive collaboration
+ * Uses Supabase Realtime for all collaboration features
  * 
  * Requirements:
  * - 3.1: Real-time synchronization
@@ -57,17 +58,16 @@ export function useCollaboration(options: UseCollaborationOptions) {
     userName,
     userColor,
     enabled = true,
-    websocketUrl,
+    // websocketUrl is ignored - using Supabase Realtime
   } = options
 
-  // Yjs CRDT for document synchronization
-  const yjsState = useYjsCollaboration({
+  // Supabase Realtime for document synchronization
+  const collaborationState = useSupabaseCollaboration({
     documentId,
     userId,
     userName,
     userColor,
     enabled,
-    websocketUrl,
   })
 
   // Supabase Realtime for presence and cursor tracking
@@ -79,24 +79,44 @@ export function useCollaboration(options: UseCollaborationOptions) {
     enabled,
   })
 
-  // Combine active users from both sources
-  const activeUsers = Array.from(realtimeState.activeUsers.values())
+  // Combine active users from both sources (deduplicated)
+  const activeUsersMap = new Map<string, any>()
+  
+  // Add users from collaboration state
+  collaborationState.activeUsers.forEach((user) => {
+    activeUsersMap.set(user.id, {
+      userId: user.id,
+      userName: user.name,
+      userColor: user.color,
+      status: 'active',
+      cursorPosition: user.cursor,
+    })
+  })
+  
+  // Add/update users from realtime state
+  realtimeState.activeUsers.forEach((value, key) => {
+    if (!activeUsersMap.has(key)) {
+      activeUsersMap.set(key, value)
+    }
+  })
+
+  const activeUsers = Array.from(activeUsersMap.values())
 
   return {
-    // Yjs state
-    ydoc: yjsState.ydoc,
-    provider: yjsState.provider,
-    synced: yjsState.synced,
+    // No longer using Yjs
+    ydoc: null,
+    provider: collaborationState.provider,
+    synced: collaborationState.synced,
     
-    // Connection status (prefer Yjs status as it's more reliable for document sync)
-    connectionStatus: yjsState.connectionStatus,
+    // Connection status
+    connectionStatus: collaborationState.connectionStatus,
     
     // Active users and presence
     activeUsers,
     
     // Broadcast methods
-    broadcastUpdate: realtimeState.broadcastUpdate,
-    broadcastCursor: realtimeState.broadcastCursor,
+    broadcastUpdate: collaborationState.broadcastUpdate,
+    broadcastCursor: collaborationState.broadcastCursor,
     broadcastPresence: realtimeState.broadcastPresence,
     
     // Reconnect
@@ -157,9 +177,9 @@ export function useCursors(
 ) {
   const { enabled = true, throttleMs = 100 } = options || {}
   
-  // Get cursors from Yjs awareness
-  const yjsCursors = useYjsCursors(provider)
-  const broadcastCursor = useYjsBroadcastCursor(provider)
+  // Get cursors from Supabase provider
+  const providerCursors = useProviderCursors(provider)
+  const broadcastCursor = useBroadcastCursor(provider)
 
   // Throttle cursor updates
   const [lastUpdate, setLastUpdate] = useState(0)
@@ -180,8 +200,8 @@ export function useCursors(
   )
 
   // Convert Map to array for easier consumption
-  const cursors = Array.from(yjsCursors.entries()).map(([userId, position]) => ({
-    userId,
+  const cursors = Array.from(providerCursors.entries()).map(([oderId, position]) => ({
+    userId: oderId,
     position,
   }))
 

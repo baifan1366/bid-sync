@@ -20,7 +20,7 @@ import { useRouter } from 'next/navigation'
 import { useUser } from '@/hooks/use-user'
 import { useGraphQLQuery, useGraphQLMutation } from '@/hooks/use-graphql'
 import { useTipTapEditor } from '@/hooks/use-tiptap-editor'
-import { useYjsCollaboration } from '@/hooks/use-yjs-collaboration'
+import { useSupabaseCollaboration } from '@/hooks/use-supabase-collaboration'
 import { useSyncService } from '@/hooks/use-sync-service'
 import { gql } from 'graphql-request'
 import { JSONContent } from '@tiptap/core'
@@ -150,14 +150,13 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
   const userRole = document?.collaborators.find((c) => c.userId === user?.id)?.role
   const canEdit = userRole === 'owner' || userRole === 'editor'
 
-  // Set up Yjs collaboration
-  const collaboration = useYjsCollaboration({
+  // Set up Supabase Realtime collaboration
+  const collaboration = useSupabaseCollaboration({
     documentId,
     userId: user?.id || 'anonymous',
     userName: user?.email || 'Anonymous',
     userColor: getUserColor(user?.id || 'anonymous'),
     enabled: true,
-    websocketUrl: process.env.NEXT_PUBLIC_WEBSOCKET_URL,
   })
 
   // Set up sync service for offline support
@@ -167,18 +166,20 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
     autoSync: true,
   })
 
-  // Initialize TipTap editor with Yjs
+  // Initialize TipTap editor with Supabase Realtime collaboration
   const editor = useTipTapEditor({
     content: document?.content,
     placeholder: 'Start writing your proposal...',
     editable: canEdit,
-    ydoc: collaboration.ydoc || undefined,
+    // No longer using Yjs - collaboration handled via Supabase Realtime
     collaborationEnabled: true,
     userName: user?.email || 'Anonymous',
     userColor: getUserColor(user?.id || 'anonymous'),
     onUpdate: (content) => {
       // Auto-save on content change
       handleAutoSave({ content })
+      // Broadcast update to collaborators
+      collaboration.broadcastUpdate(content)
     },
   })
 

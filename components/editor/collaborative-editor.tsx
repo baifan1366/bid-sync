@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { TipTapEditor } from './tiptap-editor'
 import { EditorToolbar } from './editor-toolbar'
 import { useTipTapEditor } from '@/hooks/use-tiptap-editor'
-import { useYjsCollaboration } from '@/hooks/use-yjs-collaboration'
+import { useSupabaseCollaboration } from '@/hooks/use-supabase-collaboration'
 import { useAutoSave } from '@/hooks/use-auto-save'
 import { JSONContent } from '@tiptap/core'
 import { cn } from '@/lib/utils'
@@ -34,7 +34,7 @@ export interface CollaborativeEditorProps {
   userId?: string
   userName?: string
   userColor?: string
-  websocketUrl?: string
+  websocketUrl?: string // Kept for backward compatibility, but ignored
 }
 
 /**
@@ -75,14 +75,13 @@ export function CollaborativeEditor({
 }: CollaborativeEditorProps) {
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
 
-  // Set up Yjs collaboration if enabled
-  const collaboration = useYjsCollaboration({
+  // Set up Supabase Realtime collaboration if enabled
+  const collaboration = useSupabaseCollaboration({
     documentId: documentId || 'default',
     userId,
     userName,
     userColor,
     enabled: collaborationEnabled && !!documentId,
-    websocketUrl,
   })
 
   const editor = useTipTapEditor({
@@ -91,7 +90,7 @@ export function CollaborativeEditor({
     editable,
     onUpdate: undefined, // Will be handled by auto-save
     autofocus: false,
-    ydoc: collaboration.ydoc || undefined,
+    // No longer using Yjs - collaboration handled via Supabase Realtime
     collaborationEnabled,
     userName,
     userColor,

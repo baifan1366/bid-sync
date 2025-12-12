@@ -330,6 +330,7 @@ export interface QueuedChange {
 export interface CachedDocument {
   documentId: string
   content: JSONContent
+  /** @deprecated No longer using Yjs - kept for backward compatibility */
   yjsState?: Uint8Array
   lastModified: string
   syncedAt?: string
@@ -337,6 +338,9 @@ export interface CachedDocument {
 
 export type ConnectionStatus = 'connected' | 'disconnected' | 'reconnecting' | 'syncing'
 
+/**
+ * @deprecated No longer using Yjs - kept for backward compatibility
+ */
 export interface YjsUpdate {
   update: Uint8Array
   origin?: any

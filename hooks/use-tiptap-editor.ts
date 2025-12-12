@@ -9,10 +9,7 @@ import { TableHeader } from '@tiptap/extension-table-header'
 import { Placeholder } from '@tiptap/extension-placeholder'
 import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
-import { Collaboration } from '@tiptap/extension-collaboration'
-import { CollaborationCaret } from '@tiptap/extension-collaboration-caret'
 import { JSONContent } from '@tiptap/core'
-import * as Y from 'yjs'
 
 export interface UseTipTapEditorOptions {
   content?: JSONContent | string
@@ -21,8 +18,8 @@ export interface UseTipTapEditorOptions {
   onUpdate?: (content: JSONContent) => void
   onBlur?: () => void
   autofocus?: boolean
-  // Yjs collaboration options
-  ydoc?: Y.Doc
+  /** @deprecated No longer using Yjs - collaboration handled via Supabase Realtime */
+  ydoc?: any
   collaborationEnabled?: boolean
   userName?: string
   userColor?: string
@@ -36,8 +33,9 @@ export interface UseTipTapEditorOptions {
  * - Table: Structured data tables with rows, cells, and headers
  * - Placeholder: Empty state placeholder text
  * - TaskList: Interactive checklists with checkboxes
- * - Collaboration: Yjs CRDT integration for real-time collaborative editing (optional)
- * - CollaborationCaret: Show cursor positions of other collaborators (optional)
+ * 
+ * Note: Real-time collaboration is now handled via Supabase Realtime instead of Yjs.
+ * The editor broadcasts updates through the collaboration provider.
  * 
  * @param options Configuration options for the editor
  * @returns TipTap Editor instance
@@ -50,7 +48,7 @@ export function useTipTapEditor(options: UseTipTapEditorOptions = {}): Editor | 
     onUpdate,
     onBlur,
     autofocus = false,
-    ydoc,
+    // ydoc is deprecated - collaboration handled via Supabase Realtime
     collaborationEnabled = false,
     userName = 'Anonymous',
     userColor = '#000000',
@@ -71,7 +69,6 @@ export function useTipTapEditor(options: UseTipTapEditorOptions = {}): Editor | 
       // - Dropcursor
       // - Gapcursor
       // - History (undo/redo)
-      // Note: When collaboration is enabled, Yjs provides its own undo/redo
       StarterKit.configure({
         heading: {
           levels: [1, 2, 3, 4, 5, 6], // Enable all heading levels
@@ -122,33 +119,16 @@ export function useTipTapEditor(options: UseTipTapEditorOptions = {}): Editor | 
         },
       }),
 
-      // Collaboration extensions (only when enabled)
-      ...(collaborationEnabled && ydoc
-        ? [
-            // Collaboration extension for Yjs CRDT integration
-            // This enables real-time collaborative editing
-            Collaboration.configure({
-              document: ydoc,
-              // Use a specific fragment name for the document content
-              field: 'default',
-            }),
-            // CollaborationCaret shows cursor positions of other users
-            CollaborationCaret.configure({
-              provider: null, // Provider is managed separately
-              user: {
-                name: userName,
-                color: userColor,
-              },
-            }),
-          ]
-        : []),
+      // Note: Collaboration is now handled via Supabase Realtime
+      // The onUpdate callback broadcasts changes to other collaborators
     ],
 
-    content: collaborationEnabled ? undefined : content,
+    content,
     editable,
     autofocus,
 
     // Handle content updates
+    // When collaborationEnabled, the parent component should broadcast updates
     onUpdate: ({ editor }) => {
       if (onUpdate) {
         const json = editor.getJSON()
