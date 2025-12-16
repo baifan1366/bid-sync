@@ -83,6 +83,18 @@ const GET_LEAD_PROPOSALS = gql`
   }
 `
 
+const GET_WORKSPACE_DOCUMENT = gql`
+  query GetWorkspaceByProject($projectId: ID!) {
+    workspaceByProject(projectId: $projectId) {
+      id
+      documents {
+        id
+        title
+      }
+    }
+  }
+`
+
 import { UPDATE_PROPOSAL, SUBMIT_PROPOSAL } from "@/lib/graphql/mutations"
 
 const statusColors: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
@@ -143,6 +155,25 @@ export function WorkspaceContent() {
     if (!selectedProposalId) return null
     return proposals.find((p) => p.id === selectedProposalId) || null
   }, [selectedProposalId, proposals])
+
+  // Fetch workspace document for the selected proposal's project
+  const { data: workspaceData } = useGraphQLQuery<{ 
+    workspaceByProject: { 
+      id: string
+      documents: Array<{ id: string; title: string }> 
+    } 
+  }>(
+    ['workspace-document', selectedProposal?.project.id || 'none'],
+    GET_WORKSPACE_DOCUMENT,
+    { projectId: selectedProposal?.project.id || '' },
+    {
+      enabled: !!selectedProposal?.project.id,
+      staleTime: 5 * 60 * 1000,
+    }
+  )
+
+  // Get the first document ID from the workspace (main proposal document)
+  const documentId = workspaceData?.workspaceByProject?.documents?.[0]?.id
 
   // Debug logging
   React.useEffect(() => {
@@ -464,8 +495,15 @@ export function WorkspaceContent() {
                         <>
                           <Button
                             size="sm"
-                            onClick={() => router.push(`/editor/${selectedProposal.id}`)}
-                            className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold"
+                            onClick={() => {
+                              if (documentId) {
+                                router.push(`/editor/${documentId}`)
+                              } else {
+                                alert('Document not found. Please try again.')
+                              }
+                            }}
+                            disabled={!documentId}
+                            className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold disabled:opacity-50"
                           >
                             <Users2 className="h-4 w-4 mr-2" />
                             Collaborative Editor

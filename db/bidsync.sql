@@ -242,6 +242,12 @@ CREATE INDEX idx_comments_proposal ON public.comments(proposal_id);
 -- ============================================================
 -- 8. DOCUMENTS
 -- ============================================================
+-- NOTE: This table stores FILE ATTACHMENTS/UPLOADS for proposals.
+-- NOT to be confused with workspace_documents which stores collaborative editor content.
+-- 
+-- documents = file attachments (PDFs, images, etc.) uploaded to proposals
+-- workspace_documents = collaborative document content for the TipTap editor
+-- ============================================================
 CREATE TABLE public.documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     proposal_id UUID NOT NULL REFERENCES public.proposals(id) ON DELETE CASCADE,
@@ -250,6 +256,8 @@ CREATE TABLE public.documents (
     created_by UUID NOT NULL REFERENCES auth.users(id),
     created_at TIMESTAMPTZ DEFAULT now()
 );
+
+COMMENT ON TABLE public.documents IS 'Stores file attachments/uploads for proposals (PDFs, images, etc.). NOT for collaborative editor content - use workspace_documents for that.';
 
 CREATE INDEX idx_docs_proposal ON public.documents(proposal_id);
 
@@ -1116,7 +1124,15 @@ CREATE TABLE IF NOT EXISTS public.workspaces (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Workspace Documents Table
+-- ============================================================
+-- Workspace Documents Table (Collaborative Editor Content)
+-- ============================================================
+-- NOTE: This table stores COLLABORATIVE DOCUMENT CONTENT for the TipTap editor.
+-- NOT to be confused with 'documents' table which stores file attachments.
+-- 
+-- workspace_documents = collaborative document content (TipTap editor, sections, etc.)
+-- documents = file attachments (PDFs, images, etc.) uploaded to proposals
+-- ============================================================
 CREATE TABLE IF NOT EXISTS public.workspace_documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
@@ -1128,6 +1144,8 @@ CREATE TABLE IF NOT EXISTS public.workspace_documents (
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+COMMENT ON TABLE public.workspace_documents IS 'Stores collaborative document content for the TipTap editor. NOT for file attachments - use documents table for that.';
 
 -- Document Versions Table
 CREATE TABLE IF NOT EXISTS public.document_versions (
@@ -1724,11 +1742,7 @@ FOR DELETE USING (user_id = auth.uid());
 -- Admins can view all notifications
 CREATE POLICY "notification_queue_admin_select" ON public.notification_queue
 FOR SELECT USING (
-    EXISTS (
-        SELECT 1 FROM auth.users
-        WHERE id = auth.uid() 
-        AND raw_user_meta_data->>'role' = 'admin'
-    )
+    (auth.jwt() -> 'user_metadata' ->> 'role') = 'admin'
 );
 
 -- Functions for Proposal Performance

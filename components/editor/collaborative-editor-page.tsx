@@ -77,13 +77,16 @@ const GET_DOCUMENT = gql`
 `
 
 const UPDATE_DOCUMENT = gql`
-  mutation UpdateDocument($id: ID!, $title: String, $description: String, $content: JSON) {
-    updateDocument(id: $id, title: $title, description: $description, content: $content) {
-      id
-      title
-      description
-      content
-      updatedAt
+  mutation UpdateDocument($documentId: ID!, $input: UpdateDocumentInput!) {
+    updateDocument(documentId: $documentId, input: $input) {
+      success
+      document {
+        id
+        title
+        description
+        content
+        updatedAt
+      }
     }
   }
 `
@@ -146,9 +149,10 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
     }
   }, [document])
 
-  // Get user's role
+  // Get user's role (case-insensitive comparison)
   const userRole = document?.collaborators.find((c) => c.userId === user?.id)?.role
-  const canEdit = userRole === 'owner' || userRole === 'editor'
+  const canEdit =
+    userRole?.toLowerCase() === 'owner' || userRole?.toLowerCase() === 'editor'
 
   // Set up Supabase Realtime collaboration
   const collaboration = useSupabaseCollaboration({
@@ -167,10 +171,12 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
   })
 
   // Initialize TipTap editor with Supabase Realtime collaboration
+  // Default to true if canEdit is undefined (will be updated when document loads)
   const editor = useTipTapEditor({
     content: document?.content,
     placeholder: 'Start writing your proposal...',
-    editable: canEdit,
+    editable: canEdit ?? true,
+    autofocus: true,
     // No longer using Yjs - collaboration handled via Supabase Realtime
     collaborationEnabled: true,
     userName: user?.email || 'Anonymous',
@@ -181,6 +187,18 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
       // Broadcast update to collaborators
       collaboration.broadcastUpdate(content)
     },
+  })
+
+  // Debug: Log editor state
+  console.log('[Editor Debug]', {
+    editor: editor ? 'created' : 'null',
+    editorEditable: editor?.isEditable,
+    canEdit,
+    userRole,
+    userId: user?.id,
+    collaborators: document?.collaborators?.map((c) => ({ id: c.userId, role: c.role })),
+    documentContent: document?.content ? 'has content' : 'empty',
+    editorHTML: editor?.getHTML()?.substring(0, 200),
   })
 
   // Auto-save function
@@ -198,8 +216,8 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
         setIsSaving(true)
         try {
           await updateDocumentMutation.mutateAsync({
-            id: documentId,
-            ...updates,
+            documentId,
+            input: updates,
           })
           setLastSaved(new Date())
         } catch (error) {
@@ -223,8 +241,8 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
 
     try {
       await updateDocumentMutation.mutateAsync({
-        id: documentId,
-        title: title.trim(),
+        documentId,
+        input: { title: title.trim() },
       })
       setIsEditingTitle(false)
       refetch()
@@ -242,8 +260,8 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
 
     try {
       await updateDocumentMutation.mutateAsync({
-        id: documentId,
-        description: description.trim(),
+        documentId,
+        input: { description: description.trim() },
       })
       setIsEditingDescription(false)
       refetch()
@@ -259,8 +277,8 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
     setIsSaving(true)
     try {
       await updateDocumentMutation.mutateAsync({
-        id: documentId,
-        content: editor.getJSON(),
+        documentId,
+        input: { content: editor.getJSON() },
       })
       setLastSaved(new Date())
     } catch (error) {
@@ -607,8 +625,8 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
         </div>
       </div>
 
-      {/* Editor Toolbar */}
-      {canEdit && (
+      {/* Editor Toolbar - show if user can edit or if role is not yet determined */}
+      {(canEdit || canEdit === undefined) && (
         <div className="border-b border-yellow-400/20 bg-white dark:bg-black">
           <div className="max-w-[1800px] mx-auto px-4 sm:px-6">
             <EditorToolbar editor={editor} />
@@ -620,7 +638,14 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
       <div className="flex-1 overflow-auto">
         <div className="max-w-[1800px] mx-auto px-4 sm:px-6 py-6">
           <Card className="border-yellow-400/20 min-h-[600px]">
-            <div className="p-6">
+            <div 
+              className="p-6"
+              onClick={() => {
+                if (editor && !editor.isFocused) {
+                  editor.commands.focus()
+                }
+              }}
+            >
               {editor ? (
                 <EditorContent
                   editor={editor}

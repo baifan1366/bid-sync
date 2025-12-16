@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useEditor, Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { Table } from '@tiptap/extension-table'
@@ -151,6 +152,24 @@ export function useTipTapEditor(options: UseTipTapEditorOptions = {}): Editor | 
       },
     },
   })
+
+  // Sync editable state when it changes
+  useEffect(() => {
+    if (editor && editor.isEditable !== editable) {
+      editor.setEditable(editable)
+    }
+  }, [editor, editable])
+
+  // Sync content when it changes (only if editor is empty or content is different)
+  useEffect(() => {
+    if (editor && content && !editor.isDestroyed) {
+      const currentContent = JSON.stringify(editor.getJSON())
+      const newContent = JSON.stringify(content)
+      if (currentContent !== newContent && editor.isEmpty) {
+        editor.commands.setContent(content)
+      }
+    }
+  }, [editor, content])
 
   return editor
 }

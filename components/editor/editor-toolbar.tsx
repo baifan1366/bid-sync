@@ -209,16 +209,22 @@ export function EditorToolbar({ editor, className }: EditorToolbarProps) {
       {/* History */}
       <div className="flex items-center gap-1">
         <ToolbarButton
-          onClick={() => editor.chain().focus().undo().run()}
-          disabled={!editor.can().chain().focus().undo().run()}
+          onClick={() => {
+            console.log('[Toolbar] Undo clicked, can undo:', editor.can().undo())
+            editor.chain().focus().undo().run()
+          }}
+          disabled={!editor.can().undo()}
           title="Undo (Ctrl+Z)"
         >
           <Undo className="h-4 w-4" />
         </ToolbarButton>
 
         <ToolbarButton
-          onClick={() => editor.chain().focus().redo().run()}
-          disabled={!editor.can().chain().focus().redo().run()}
+          onClick={() => {
+            console.log('[Toolbar] Redo clicked, can redo:', editor.can().redo())
+            editor.chain().focus().redo().run()
+          }}
+          disabled={!editor.can().redo()}
           title="Redo (Ctrl+Y)"
         >
           <Redo className="h-4 w-4" />

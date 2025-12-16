@@ -68,19 +68,46 @@ export function useSupabaseCollaboration(
   
   const providerRef = useRef<SupabaseCollaborationProvider | null>(null)
   const onDocumentUpdateRef = useRef(onDocumentUpdate)
+  const isConnectingRef = useRef(false)
+  const currentDocumentIdRef = useRef<string | null>(null)
+  const currentUserIdRef = useRef<string | null>(null)
 
   // Keep callback ref updated
   useEffect(() => {
     onDocumentUpdateRef.current = onDocumentUpdate
   }, [onDocumentUpdate])
 
-  // Initialize provider
+  // Initialize provider - only reconnect when documentId or userId actually changes
   useEffect(() => {
-    if (!enabled || !documentId || !userId) {
+    // Skip if anonymous user - wait for real user ID
+    if (!enabled || !documentId || !userId || userId === 'anonymous') {
+      return
+    }
+
+    // Skip if already connected with same documentId and userId
+    if (
+      providerRef.current &&
+      currentDocumentIdRef.current === documentId &&
+      currentUserIdRef.current === userId
+    ) {
+      return
+    }
+
+    // Prevent concurrent connection attempts
+    if (isConnectingRef.current) {
       return
     }
 
     const initProvider = async () => {
+      isConnectingRef.current = true
+
+      // Disconnect existing provider if any
+      if (providerRef.current) {
+        console.log('[Collaboration] Disconnecting old provider before reconnect')
+        await providerRef.current.disconnect()
+        providerRef.current = null
+      }
+
       // Create provider
       const newProvider = createCollaborationProvider({
         documentId,
@@ -116,19 +143,24 @@ export function useSupabaseCollaboration(
       })
 
       providerRef.current = newProvider
+      currentDocumentIdRef.current = documentId
+      currentUserIdRef.current = userId
       setProvider(newProvider)
 
       // Connect
       await newProvider.connect()
+      isConnectingRef.current = false
     }
 
     initProvider()
 
-    // Cleanup on unmount
+    // Cleanup on unmount only
     return () => {
       if (providerRef.current) {
         providerRef.current.disconnect()
         providerRef.current = null
+        currentDocumentIdRef.current = null
+        currentUserIdRef.current = null
       }
     }
   }, [enabled, documentId, userId, userName, userColor])

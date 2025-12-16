@@ -87,9 +87,16 @@ export class SupabaseCollaborationProvider {
    */
   async connect(): Promise<void> {
     const supabase = createClient()
+    
+    console.log('[Collaboration] Connecting...', {
+      documentId: this.documentId,
+      userId: this.userId,
+      supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL ? 'configured' : 'MISSING',
+    })
 
     // Create main document channel
     const channelName = `collab:${this.documentId}`
+    console.log('[Collaboration] Creating channel:', channelName)
     this.channel = supabase.channel(channelName)
 
     // Listen for document updates
@@ -116,7 +123,8 @@ export class SupabaseCollaborationProvider {
     })
 
     // Subscribe to channel
-    this.channel.subscribe((status) => {
+    this.channel.subscribe((status, err) => {
+      console.log('[Collaboration] Channel status:', status, err ? `Error: ${err.message}` : '')
       this.handleSubscriptionStatus(status)
     })
 
@@ -161,7 +169,8 @@ export class SupabaseCollaborationProvider {
     })
 
     // Subscribe to presence channel and track our presence
-    this.presenceChannel.subscribe(async (status) => {
+    this.presenceChannel.subscribe(async (status, err) => {
+      console.log('[Collaboration] Presence channel status:', status, err ? `Error: ${err.message}` : '')
       if (status === 'SUBSCRIBED') {
         await this.presenceChannel?.track({
           userId: this.userId,

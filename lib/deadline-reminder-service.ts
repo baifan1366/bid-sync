@@ -197,68 +197,66 @@ export class DeadlineReminderService {
       today.setHours(0, 0, 0, 0); // Start of day
 
       // Requirement 9.3: Get sections with deadlines within 3 days that are assigned
-      // Note: Sections are stored in the documents table as JSONB
-      const { data: documents, error: documentsError } = await supabase
-        .from('documents')
+      // NOTE: Sections are stored in document_sections table, linked to workspace_documents
+      const { data: sections, error: sectionsError } = await supabase
+        .from('document_sections')
         .select(`
           id,
           title,
-          sections,
-          workspace_id
+          deadline,
+          assigned_to,
+          status,
+          document_id,
+          workspace_documents!inner (
+            id,
+            title,
+            workspace_id
+          )
         `)
-        .not('sections', 'is', null);
+        .not('deadline', 'is', null)
+        .not('assigned_to', 'is', null)
+        .gte('deadline', today.toISOString())
+        .lte('deadline', threeDaysFromNow.toISOString())
+        .neq('status', 'completed');
 
-      if (documentsError) {
-        console.error('Error fetching documents for section deadline reminders:', documentsError);
-        errors.push(`Failed to fetch documents: ${documentsError.message}`);
+      if (sectionsError) {
+        console.error('Error fetching sections for deadline reminders:', sectionsError);
+        errors.push(`Failed to fetch sections: ${sectionsError.message}`);
         return { remindersSent, errors };
       }
 
-      if (!documents || documents.length === 0) {
+      if (!sections || sections.length === 0) {
         return { remindersSent, errors };
       }
 
-      // Process each document's sections
-      for (const document of documents) {
+      // Process each section
+      for (const section of sections) {
         try {
-          const sections = document.sections as any[] || [];
+          const document = (section as any).workspace_documents;
+          const daysRemaining = this.calculateDaysRemaining(section.deadline!);
 
-          for (const section of sections) {
-            // Check if section has a deadline and is assigned
-            if (!section.deadline || !section.assignedTo) {
-              continue;
-            }
-
-            const sectionDeadline = new Date(section.deadline);
-            
-            // Check if deadline is within 3 days
-            if (sectionDeadline >= today && sectionDeadline <= threeDaysFromNow) {
-              const daysRemaining = this.calculateDaysRemaining(section.deadline);
-
-              // Requirement 9.3, 9.4, 9.5: Notify assigned team member
-              await NotificationService.createNotification({
-                userId: section.assignedTo,
-                type: 'section_deadline_approaching',
-                title: 'Section Deadline Approaching',
-                body: `Your assigned section "${section.title}" in document "${document.title}" is due in ${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'}.`,
-                data: {
-                  documentId: document.id,
-                  documentTitle: document.title,
-                  sectionId: section.id,
-                  sectionTitle: section.title,
-                  deadline: section.deadline,
-                  daysRemaining,
-                  workspaceId: document.workspace_id,
-                },
-                sendEmail: true, // Requirement 9.5: Send email
-                priority: daysRemaining <= 1 ? NotificationPriority.HIGH : NotificationPriority.MEDIUM,
-              });
-              remindersSent++;
-            }
-          }
+          // Requirement 9.3, 9.4, 9.5: Notify assigned team member
+          await NotificationService.createNotification({
+            userId: section.assigned_to!,
+            type: 'section_deadline_approaching',
+            title: 'Section Deadline Approaching',
+            body: `Your assigned section "${section.title}" in document "${document.title}" is due in ${daysRemaining} ${daysRemaining === 1 ? 'day' : 'days'}.`,
+            data: {
+              documentId: document.id,
+              documentTitle: document.title,
+              sectionId: section.id,
+              sectionTitle: section.title,
+              deadline: section.deadline,
+              daysRemaining,
+              workspaceId: document.workspace_id,
+            },
+            sendEmail: true, // Requirement 9.5: Send email
+            priority: daysRemaining <= 1 ? NotificationPriority.HIGH : NotificationPriority.MEDIUM,
+          });
+          remindersSent++;
         } catch (error) {
-          console.error(`Error processing sections for document ${document.id}:`, error);
-          errors.push(`Document ${document.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          console.error(`Error processing section ${section.id}:`, error);
+          errors.push(`Section ${section.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
       }
 

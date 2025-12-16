@@ -1226,11 +1226,26 @@ export const resolvers = {
         });
       }
 
-      const { data: workspace, error } = await supabase
+      // First try to find workspace for this user (lead)
+      let { data: workspace, error } = await supabase
         .from('workspaces')
         .select('*')
         .eq('project_id', projectId)
+        .eq('lead_id', user.id)
         .single();
+
+      // If not found as lead, try to find any workspace for this project
+      if (error || !workspace) {
+        const result = await supabase
+          .from('workspaces')
+          .select('*')
+          .eq('project_id', projectId)
+          .limit(1)
+          .single();
+        
+        workspace = result.data;
+        error = result.error;
+      }
 
       if (error || !workspace) {
         throw new GraphQLError('Workspace not found for this project', {
@@ -4539,6 +4554,189 @@ export const resolvers = {
         .eq('read', false);
 
       return count || 0;
+    },
+  },
+
+  // Field resolver for Workspace type
+  Workspace: {
+    documents: async (parent: { id: string }) => {
+      // Use admin client to bypass RLS for fetching workspace documents
+      const adminClient = createAdminClient();
+      
+      const { data: documents, error } = await adminClient
+        .from('workspace_documents')
+        .select('*')
+        .eq('workspace_id', parent.id)
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching workspace documents:', error);
+        return [];
+      }
+
+      return (documents || []).map((doc: any) => ({
+        id: doc.id,
+        workspaceId: doc.workspace_id,
+        title: doc.title,
+        description: doc.description,
+        content: doc.content || {},
+        createdBy: doc.created_by,
+        lastEditedBy: doc.last_edited_by,
+        createdAt: doc.created_at,
+        updatedAt: doc.updated_at,
+      }));
+    },
+  },
+
+  // Field resolver for Document type
+  Document: {
+    collaborators: async (parent: { id: string }) => {
+      const adminClient = createAdminClient();
+      
+      const { data: collaborators, error } = await adminClient
+        .from('document_collaborators')
+        .select('*')
+        .eq('document_id', parent.id);
+
+      if (error) {
+        console.error('Error fetching document collaborators:', error);
+        return [];
+      }
+
+      // Get user details for each collaborator
+      const collaboratorsWithDetails = await Promise.all(
+        (collaborators || []).map(async (collab: any) => {
+          const { data: userData } = await adminClient.auth.admin.getUserById(collab.user_id);
+          const { data: addedByData } = await adminClient.auth.admin.getUserById(collab.added_by);
+          
+          return {
+            id: collab.id,
+            documentId: collab.document_id,
+            userId: collab.user_id,
+            userName: userData?.user?.user_metadata?.full_name || userData?.user?.email || 'Unknown',
+            email: userData?.user?.email || '',
+            role: collab.role.toUpperCase(),
+            addedBy: collab.added_by,
+            addedByName: addedByData?.user?.user_metadata?.full_name || addedByData?.user?.email || 'Unknown',
+            addedAt: collab.added_at,
+          };
+        })
+      );
+
+      return collaboratorsWithDetails;
+    },
+
+    versions: async (parent: { id: string }) => {
+      const adminClient = createAdminClient();
+      
+      const { data: versions, error } = await adminClient
+        .from('document_versions')
+        .select('*')
+        .eq('document_id', parent.id)
+        .order('version_number', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching document versions:', error);
+        return [];
+      }
+
+      return (versions || []).map((v: any) => ({
+        id: v.id,
+        documentId: v.document_id,
+        versionNumber: v.version_number,
+        content: v.content,
+        createdBy: v.created_by,
+        changesSummary: v.changes_summary,
+        isRollback: v.is_rollback,
+        rolledBackFrom: v.rolled_back_from,
+        createdAt: v.created_at,
+      }));
+    },
+
+    activeSessions: async (parent: { id: string }) => {
+      const adminClient = createAdminClient();
+      
+      // Get sessions active in the last 5 minutes
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      
+      const { data: sessions, error } = await adminClient
+        .from('collaboration_sessions')
+        .select('*')
+        .eq('document_id', parent.id)
+        .gte('last_activity', fiveMinutesAgo);
+
+      if (error) {
+        console.error('Error fetching active sessions:', error);
+        return [];
+      }
+
+      // Get user details for each session
+      const sessionsWithDetails = await Promise.all(
+        (sessions || []).map(async (session: any) => {
+          const { data: userData } = await adminClient.auth.admin.getUserById(session.user_id);
+          
+          return {
+            userId: session.user_id,
+            userName: userData?.user?.user_metadata?.full_name || userData?.user?.email || 'Unknown',
+            userColor: session.user_color,
+            cursorPosition: session.cursor_position,
+            lastActivity: session.last_activity,
+          };
+        })
+      );
+
+      return sessionsWithDetails;
+    },
+
+    sections: async (parent: { id: string }) => {
+      const adminClient = createAdminClient();
+      
+      const { data: sections, error } = await adminClient
+        .from('document_sections')
+        .select('*')
+        .eq('document_id', parent.id)
+        .order('order', { ascending: true });
+
+      if (error) {
+        console.error('Error fetching document sections:', error);
+        return [];
+      }
+
+      // Get user details for assigned users
+      const sectionsWithDetails = await Promise.all(
+        (sections || []).map(async (section: any) => {
+          let assignedToUser = null;
+          if (section.assigned_to) {
+            const { data: userData } = await adminClient.auth.admin.getUserById(section.assigned_to);
+            if (userData?.user) {
+              assignedToUser = {
+                id: userData.user.id,
+                email: userData.user.email,
+                fullName: userData.user.user_metadata?.full_name || userData.user.user_metadata?.name || null,
+              };
+            }
+          }
+
+          return {
+            id: section.id,
+            documentId: section.document_id,
+            title: section.title,
+            order: section.order,
+            status: section.status.toUpperCase(),
+            assignedTo: section.assigned_to,
+            assignedToUser,
+            deadline: section.deadline,
+            content: section.content || {},
+            lockedBy: section.locked_by,
+            lockedAt: section.locked_at,
+            lockExpiresAt: section.lock_expires_at,
+            createdAt: section.created_at,
+            updatedAt: section.updated_at,
+          };
+        })
+      );
+
+      return sectionsWithDetails;
     },
   },
 

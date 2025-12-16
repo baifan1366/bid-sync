@@ -4,6 +4,18 @@
  * Handles document creation, retrieval, update, and deletion for collaborative editing.
  * Also handles proposal document upload, storage, retrieval, and deletion.
  * Implements requirements 9.1, 9.2, 9.3, 9.4, 9.5 from the bidding-leader-management spec.
+ * 
+ * IMPORTANT: This service works with TWO different tables:
+ * 
+ * 1. `workspace_documents` table - For collaborative editor content (TipTap)
+ *    - Used by: createDocument, getDocument, listDocuments, searchDocuments, 
+ *               updateDocumentContent, updateDocumentMetadata, deleteDocument
+ *    - Contains: title, description, JSONB content for TipTap editor
+ * 
+ * 2. `documents` table - For file attachments/uploads
+ *    - Used by: uploadDocument, getProposalDocuments, deleteProposalDocument,
+ *               validateRequiredDocuments, getDocumentWithUrl
+ *    - Contains: url, doc_type, file_name, file_size for uploaded files
  */
 
 import { createClient } from '@/lib/supabase/server';
@@ -218,15 +230,21 @@ export class DocumentService {
   async getDocument(documentId: string, userId: string): Promise<DocumentResult> {
     try {
       const supabase = await createClient();
+      
+      // Import admin client for bypassing RLS when needed
+      const { createAdminClient } = await import('@/lib/supabase/server');
+      const adminClient = createAdminClient();
 
-      // Query workspace_documents table (for collaborative editing)
-      const { data: document, error } = await supabase
+      // Query workspace_documents table using admin client to bypass RLS
+      // Use explicit relationship name to avoid ambiguity
+      const { data: document, error } = await adminClient
         .from('workspace_documents')
-        .select('*, workspaces!inner(lead_id, project_id)')
+        .select('*, workspaces!workspace_documents_workspace_id_fkey(lead_id, project_id)')
         .eq('id', documentId)
         .single();
 
       if (error || !document) {
+        console.error('Document fetch error:', error);
         return {
           success: false,
           error: 'Document not found',
@@ -239,7 +257,7 @@ export class DocumentService {
       const isCreator = document.created_by === userId;
 
       // Check if user is a collaborator
-      const { data: collaborator } = await supabase
+      const { data: collaborator } = await adminClient
         .from('document_collaborators')
         .select('id')
         .eq('document_id', documentId)
@@ -247,7 +265,7 @@ export class DocumentService {
         .maybeSingle();
 
       // Check if user is a team member for the project
-      const { data: teamMember } = await supabase
+      const { data: teamMember } = await adminClient
         .from('bid_team_members')
         .select('id')
         .eq('project_id', workspace.project_id)
@@ -517,7 +535,7 @@ export class DocumentService {
       // Verify document exists and user has permission
       const { data: document, error: fetchError } = await supabase
         .from('workspace_documents')
-        .select('*, workspaces!inner(lead_id)')
+        .select('*, workspaces!workspace_documents_workspace_id_fkey(lead_id)')
         .eq('id', documentId)
         .single();
 
