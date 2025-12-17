@@ -68,6 +68,8 @@ export function useRealtimeMessages({
 
     setConnectionStatus({ status: "connecting", error: null })
 
+    // Supabase Realtime only supports single filter condition
+    // We filter by project_id and then check proposal_id in the callback
     const channel = supabase
       .channel(channelName)
       .on(
@@ -76,12 +78,25 @@ export function useRealtimeMessages({
           event: "INSERT",
           schema: "public",
           table: "chat_messages",
-          filter: proposalId
-            ? `project_id=eq.${projectId},proposal_id=eq.${proposalId}`
-            : `project_id=eq.${projectId}`,
+          filter: `project_id=eq.${projectId}`,
         },
         (payload) => {
           const newMessage = payload.new as Message
+          
+          // Filter by proposal_id in the callback since Supabase Realtime
+          // doesn't support multiple filter conditions
+          if (proposalId) {
+            // Only process messages for this specific proposal
+            if (newMessage.proposal_id !== proposalId) {
+              return
+            }
+          } else {
+            // Only process project-level messages (proposal_id is null)
+            if (newMessage.proposal_id !== null) {
+              return
+            }
+          }
+          
           if (onMessageReceived) {
             onMessageReceived(newMessage)
           }

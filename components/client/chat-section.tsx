@@ -100,7 +100,13 @@ export function ChatSection({
         timestamp: newMessage.created_at,
       }
 
-      setMessages((prev) => [...prev, formattedMessage])
+      setMessages((prev) => {
+        // Avoid duplicates (message might already be added via optimistic update)
+        if (prev.some((m) => m.id === formattedMessage.id)) {
+          return prev
+        }
+        return [...prev, formattedMessage]
+      })
     },
     [user?.id]
   )
@@ -137,16 +143,41 @@ export function ChatSection({
       throw new Error("You must be logged in to send messages")
     }
 
-    const { error } = await supabase.from("chat_messages").insert({
-      project_id: projectId,
-      proposal_id: proposalId,
-      sender_id: user.id,
-      content,
-      read: false,
-    })
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .insert({
+        project_id: projectId,
+        proposal_id: proposalId,
+        sender_id: user.id,
+        content,
+        read: false,
+      })
+      .select("id, content, created_at, sender_id")
+      .single()
 
     if (error) {
       throw new Error(error.message)
+    }
+
+    // Optimistically add message to local state immediately
+    // This ensures the message shows even if Realtime is not working
+    if (data) {
+      const newMessage: Message = {
+        id: data.id,
+        content: data.content,
+        senderName: "You",
+        senderAvatar: null,
+        senderRole: "client",
+        senderId: data.sender_id,
+        timestamp: data.created_at,
+      }
+      setMessages((prev) => {
+        // Avoid duplicates if Realtime also delivers the message
+        if (prev.some((m) => m.id === newMessage.id)) {
+          return prev
+        }
+        return [...prev, newMessage]
+      })
     }
   }
 

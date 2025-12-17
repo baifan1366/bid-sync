@@ -219,7 +219,7 @@ export const resolvers = {
 
         return {
           id: proposal.id,
-          title: `Proposal for ${project.title}`,
+          title: proposal.title || `Proposal for ${project.title}`,
           biddingTeamName: leadUser?.user?.user_metadata?.full_name || 'Team',
           biddingLead: {
             id: leadUser?.user?.id || '',
@@ -230,12 +230,14 @@ export const resolvers = {
             assignedSections: [],
           },
           teamSize,
-          budgetEstimate: null,
-          timelineEstimate: null,
+          budgetEstimate: proposal.budget_estimate || null,
+          timelineEstimate: proposal.timeline_estimate || null,
+          executiveSummary: proposal.executive_summary || null,
           submissionDate: proposal.submitted_at || proposal.created_at,
           status: proposal.status.toUpperCase(),
           complianceScore,
           unreadMessages: unreadCount || 0,
+          additionalInfo: [], // Required field - empty array as default
         };
       }));
 
@@ -254,11 +256,11 @@ export const resolvers = {
           additionalInfoRequirements: (project.additional_info_requirements || []).map((req: any) => ({
             id: req.id,
             fieldName: req.fieldName,
-            fieldType: req.fieldType.toUpperCase(),
-            required: req.required,
+            fieldType: req.fieldType ? req.fieldType.toUpperCase() : 'TEXT',
+            required: req.required ?? false,
             helpText: req.helpText || null,
             options: req.options || [],
-            order: req.order,
+            order: req.order ?? 0,
           })),
           created_at: project.created_at,
           createdAt: project.created_at,
