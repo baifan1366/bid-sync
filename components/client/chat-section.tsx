@@ -188,7 +188,7 @@ export function ChatSection({
       aria-label="Chat conversation"
     >
       {/* Chat Header */}
-      <div className="flex items-center justify-between p-4 border-b border-yellow-400/20 bg-gradient-to-r from-yellow-400/5 to-transparent">
+      <div className="flex items-center justify-between p-4 border-b border-yellow-400/20 bg-linear-to-r from-yellow-400/5 to-transparent">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className="p-2 bg-yellow-400 rounded-lg relative shrink-0">
             <MessageSquare className="w-5 h-5 text-black" />
@@ -264,7 +264,7 @@ export function ChatSection({
       <Separator className="bg-yellow-400/20" />
 
       {/* Message Composer */}
-      <div className="p-4 bg-gradient-to-r from-yellow-400/5 to-transparent">
+      <div className="p-4 bg-linear-to-r from-yellow-400/5 to-transparent">
         <MessageComposer
           projectId={projectId}
           proposalId={proposalId}
