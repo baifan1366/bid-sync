@@ -186,18 +186,29 @@ export const resolvers = {
       // Build proposal summaries
       const adminClient = createAdminClient();
       const proposalSummaries = await Promise.all((proposals || []).map(async (proposal: any) => {
-        // Get team members for this proposal
-        const { data: teamMembers } = await supabase
+        // Get team members for this proposal - prefer proposal_team_members (new), fallback to bid_team_members (legacy)
+        const { data: proposalTeamMembers } = await supabase
+          .from('proposal_team_members')
+          .select('user_id, role')
+          .eq('proposal_id', proposal.id);
+        
+        const { data: bidTeamMembers } = await supabase
           .from('bid_team_members')
           .select('user_id, role')
           .eq('project_id', proposal.project_id);
         
-        // Get lead info
+        // Use proposal_team_members if available, otherwise use bid_team_members
+        const teamMembers = (proposalTeamMembers && proposalTeamMembers.length > 0) 
+          ? proposalTeamMembers 
+          : bidTeamMembers;
+        
+        // Get lead info - first check proposal's lead_id, then look in team members
         const leadMember = teamMembers?.find((m: any) => m.role === 'lead');
-        const { data: leadUser } = await adminClient.auth.admin.getUserById(leadMember?.user_id || proposal.lead_id);
+        const leadUserId = proposal.lead_id || leadMember?.user_id;
+        const { data: leadUser } = await adminClient.auth.admin.getUserById(leadUserId);
         
         // Get team size
-        const teamSize = teamMembers?.length || 0;
+        const teamSize = teamMembers?.length || 1; // At least 1 for the lead
 
         // Get unread message count
         const { count: unreadCount } = await supabase
@@ -305,27 +316,48 @@ export const resolvers = {
 
       // Authorization check - only client or team members can view
       const isClient = proposal.projects.client_id === user.id;
-      const { data: teamMember } = await supabase
+      const isLead = proposal.lead_id === user.id;
+      
+      // Check proposal_team_members first (new architecture)
+      const { data: proposalTeamMember } = await supabase
+        .from('proposal_team_members')
+        .select('*')
+        .eq('proposal_id', proposalId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+      
+      // Fallback to bid_team_members (legacy)
+      const { data: bidTeamMember } = await supabase
         .from('bid_team_members')
         .select('*')
         .eq('project_id', proposal.project_id)
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (!isClient && !teamMember) {
+      if (!isClient && !isLead && !proposalTeamMember && !bidTeamMember) {
         throw new GraphQLError('Forbidden: You do not have access to this proposal', {
           extensions: { code: 'FORBIDDEN' },
         });
       }
 
-      // Fetch team members
-      const { data: teamMembers } = await supabase
+      // Fetch team members - prefer proposal_team_members, fallback to bid_team_members
+      const { data: proposalTeamMembers } = await supabase
+        .from('proposal_team_members')
+        .select('*')
+        .eq('proposal_id', proposalId);
+
+      const { data: bidTeamMembers } = await supabase
         .from('bid_team_members')
         .select('*')
         .eq('project_id', proposal.project_id);
 
+      // Use proposal_team_members if available, otherwise use bid_team_members
+      const teamMembersData = (proposalTeamMembers && proposalTeamMembers.length > 0) 
+        ? proposalTeamMembers 
+        : bidTeamMembers;
+
       const adminClient = createAdminClient();
-      const teamMembersWithDetails = await Promise.all((teamMembers || []).map(async (member: any) => {
+      const teamMembersWithDetails = await Promise.all((teamMembersData || []).map(async (member: any) => {
         const { data: userData } = await adminClient.auth.admin.getUserById(member.user_id);
         return {
           id: member.user_id,
@@ -1207,6 +1239,13 @@ export const resolvers = {
         });
       }
 
+      // Fetch workspace documents (collaborative editor content)
+      const { data: documents } = await supabase
+        .from('workspace_documents')
+        .select('*')
+        .eq('workspace_id', id)
+        .order('updated_at', { ascending: false });
+
       return {
         id: workspace.id,
         projectId: workspace.project_id,
@@ -1215,6 +1254,18 @@ export const resolvers = {
         description: workspace.description,
         createdAt: workspace.created_at,
         updatedAt: workspace.updated_at,
+        // Include documents for the Workspace type
+        documents: (documents || []).map((doc: any) => ({
+          id: doc.id,
+          workspaceId: doc.workspace_id,
+          title: doc.title,
+          description: doc.description,
+          content: doc.content,
+          createdBy: doc.created_by,
+          lastEditedBy: doc.last_edited_by,
+          createdAt: doc.created_at,
+          updatedAt: doc.updated_at,
+        })),
       };
     },
 
@@ -1236,17 +1287,49 @@ export const resolvers = {
         .eq('lead_id', user.id)
         .single();
 
-      // If not found as lead, try to find any workspace for this project
+      // If not found as lead, check if user is a team member on any proposal for this project
       if (error || !workspace) {
-        const result = await supabase
-          .from('workspaces')
-          .select('*')
-          .eq('project_id', projectId)
+        // Check proposal_team_members first (new architecture)
+        const { data: proposalTeamMember } = await supabase
+          .from('proposal_team_members')
+          .select('proposal_id, proposals!inner(project_id)')
+          .eq('user_id', user.id)
+          .eq('proposals.project_id', projectId)
           .limit(1)
-          .single();
-        
-        workspace = result.data;
-        error = result.error;
+          .maybeSingle();
+
+        if (proposalTeamMember) {
+          // Find workspace for this project (any workspace the user has access to)
+          const result = await supabase
+            .from('workspaces')
+            .select('*')
+            .eq('project_id', projectId)
+            .limit(1)
+            .single();
+          
+          workspace = result.data;
+          error = result.error;
+        } else {
+          // Fallback to bid_team_members (legacy)
+          const { data: bidTeamMember } = await supabase
+            .from('bid_team_members')
+            .select('*')
+            .eq('project_id', projectId)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          if (bidTeamMember) {
+            const result = await supabase
+              .from('workspaces')
+              .select('*')
+              .eq('project_id', projectId)
+              .limit(1)
+              .single();
+            
+            workspace = result.data;
+            error = result.error;
+          }
+        }
       }
 
       if (error || !workspace) {
@@ -1254,6 +1337,13 @@ export const resolvers = {
           extensions: { code: 'NOT_FOUND' },
         });
       }
+
+      // Fetch workspace documents
+      const { data: documents } = await supabase
+        .from('workspace_documents')
+        .select('*')
+        .eq('workspace_id', workspace.id)
+        .order('updated_at', { ascending: false });
 
       return {
         id: workspace.id,
@@ -1263,6 +1353,17 @@ export const resolvers = {
         description: workspace.description,
         createdAt: workspace.created_at,
         updatedAt: workspace.updated_at,
+        documents: (documents || []).map((doc: any) => ({
+          id: doc.id,
+          workspaceId: doc.workspace_id,
+          title: doc.title,
+          description: doc.description,
+          content: doc.content,
+          createdBy: doc.created_by,
+          lastEditedBy: doc.last_edited_by,
+          createdAt: doc.created_at,
+          updatedAt: doc.updated_at,
+        })),
       };
     },
 
