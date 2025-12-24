@@ -303,7 +303,7 @@ export const resolvers = {
         .from('proposals')
         .select(`
           *,
-          projects!inner(client_id)
+          projects!inner(client_id, title)
         `)
         .eq('id', proposalId)
         .single();
@@ -357,11 +357,29 @@ export const resolvers = {
         : bidTeamMembers;
 
       const adminClient = createAdminClient();
+      
+      // Get lead info from proposal.lead_id first
+      let lead: any = null;
+      if (proposal.lead_id) {
+        const { data: leadUserData } = await adminClient.auth.admin.getUserById(proposal.lead_id);
+        if (leadUserData?.user) {
+          lead = {
+            id: proposal.lead_id,
+            name: leadUserData.user.user_metadata?.full_name || leadUserData.user.user_metadata?.name || leadUserData.user.email?.split('@')[0] || 'Unknown',
+            email: leadUserData.user.email || '',
+            avatarUrl: leadUserData.user.user_metadata?.avatar_url || null,
+            role: 'lead',
+            assignedSections: [],
+          };
+        }
+      }
+
+      // Get team members details
       const teamMembersWithDetails = await Promise.all((teamMembersData || []).map(async (member: any) => {
         const { data: userData } = await adminClient.auth.admin.getUserById(member.user_id);
         return {
           id: member.user_id,
-          name: userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || 'Unknown',
+          name: userData?.user?.user_metadata?.full_name || userData?.user?.user_metadata?.name || userData?.user?.email?.split('@')[0] || 'Unknown',
           email: userData?.user?.email || '',
           avatarUrl: userData?.user?.user_metadata?.avatar_url || null,
           role: member.role,
@@ -369,8 +387,13 @@ export const resolvers = {
         };
       }));
 
-      const lead = teamMembersWithDetails.find(m => m.role === 'lead') || teamMembersWithDetails[0];
-      const members = teamMembersWithDetails.filter(m => m.role !== 'lead');
+      // If no lead from proposal.lead_id, try to find from team members
+      if (!lead) {
+        lead = teamMembersWithDetails.find(m => m.role === 'lead') || teamMembersWithDetails[0];
+      }
+      
+      // Filter out the lead from members list
+      const members = teamMembersWithDetails.filter(m => m.id !== lead?.id && m.role !== 'lead');
 
       // Fetch proposal versions
       const { data: versions } = await supabase
@@ -381,11 +404,74 @@ export const resolvers = {
 
       const currentVersion = versions?.[0]?.version_number || 1;
 
-      // Fetch documents
-      const { data: documents } = await supabase
+      // Fetch workspace and document sections for this proposal's project
+      const { data: workspace } = await supabase
+        .from('workspaces')
+        .select('id')
+        .eq('project_id', proposal.project_id)
+        .maybeSingle();
+
+      let sections: any[] = [];
+      let documents: any[] = [];
+
+      if (workspace) {
+        // Fetch workspace documents
+        const { data: workspaceDocs } = await supabase
+          .from('workspace_documents')
+          .select('id, title, content, created_at')
+          .eq('workspace_id', workspace.id);
+
+        // Fetch document sections
+        const { data: docSections } = await supabase
+          .from('document_sections')
+          .select('id, document_id, title, content, "order", status')
+          .in('document_id', (workspaceDocs || []).map(d => d.id))
+          .order('"order"', { ascending: true });
+
+        sections = (docSections || []).map((section: any) => ({
+          id: section.id,
+          title: section.title || 'Untitled Section',
+          content: section.content || '',
+          order: section.order,
+        }));
+
+        // If no sections from document_sections, try to get from workspace_documents content
+        if (sections.length === 0 && workspaceDocs && workspaceDocs.length > 0) {
+          sections = workspaceDocs.map((doc: any, index: number) => ({
+            id: doc.id,
+            title: doc.title || `Document ${index + 1}`,
+            content: doc.content || '',
+            order: index,
+          }));
+        }
+      }
+
+      // Fallback: try to get sections from proposal_versions content
+      if (sections.length === 0 && versions?.[0]?.content?.sections) {
+        sections = versions[0].content.sections.map((section: any, index: number) => ({
+          id: `section-${index}`,
+          title: section.title || `Section ${index + 1}`,
+          content: section.content || '',
+          order: index,
+        }));
+      }
+
+      // Fetch documents from documents table
+      const { data: proposalDocs } = await supabase
         .from('documents')
         .select('*')
         .eq('proposal_id', proposalId);
+
+      documents = (proposalDocs || []).map((doc: any) => ({
+        id: doc.id,
+        name: doc.url?.split('/').pop() || doc.name || 'document',
+        fileType: doc.doc_type || 'unknown',
+        fileSize: doc.file_size || 0,
+        category: doc.category || 'OTHER',
+        url: doc.url,
+        uploadedAt: doc.created_at,
+        uploadedBy: doc.created_by,
+      }));
 
       // Fetch checklist items
       const { data: checklistItems } = await supabase
@@ -395,29 +481,15 @@ export const resolvers = {
 
       return {
         id: proposal.id,
-        title: `Proposal ${proposalId.substring(0, 8)}`,
+        title: proposal.title || `Proposal for ${proposal.projects.title}`,
         status: proposal.status.toUpperCase(),
         submissionDate: proposal.submitted_at || proposal.created_at,
         biddingTeam: {
           lead: lead || { id: '', name: 'Unknown', email: '', avatarUrl: null, role: 'lead', assignedSections: [] },
           members: members || [],
         },
-        sections: (versions?.[0]?.content?.sections || []).map((section: any, index: number) => ({
-          id: `section-${index}`,
-          title: section.title || `Section ${index + 1}`,
-          content: section.content || '',
-          order: index,
-        })),
-        documents: (documents || []).map((doc: any) => ({
-          id: doc.id,
-          name: doc.url.split('/').pop() || 'document',
-          fileType: doc.doc_type || 'unknown',
-          fileSize: 0,
-          category: 'OTHER',
-          url: doc.url,
-          uploadedAt: doc.created_at,
-          uploadedBy: doc.created_by,
-        })),
+        sections,
+        documents,
         complianceChecklist: (checklistItems || []).map((item: any) => ({
           id: item.id,
           category: 'TECHNICAL',
