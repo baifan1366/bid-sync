@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 
 interface UseUnreadMessagesOptions {
@@ -16,7 +16,7 @@ export function useUnreadMessages({
 }: UseUnreadMessagesOptions) {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   // Fetch unread count
   const fetchUnreadCount = useCallback(async () => {

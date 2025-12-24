@@ -426,7 +426,7 @@ export class DocumentService {
   }
 
   /**
-   * Updates document content
+   * Updates document content and creates a version history entry
    */
   async updateDocument(input: UpdateDocumentInput): Promise<DocumentResult> {
     try {
@@ -448,6 +448,20 @@ export class DocumentService {
           success: false,
           error: 'Failed to update document',
         };
+      }
+
+      // Create a version history entry
+      try {
+        const { VersionControlService } = await import('@/lib/version-control-service');
+        const versionService = new VersionControlService();
+        await versionService.createVersion({
+          documentId: input.documentId,
+          content: input.content,
+          userId: input.userId,
+        });
+      } catch (versionError) {
+        // Log version creation error but don't fail the document update
+        console.error('Failed to create version history entry:', versionError);
       }
 
       return {
