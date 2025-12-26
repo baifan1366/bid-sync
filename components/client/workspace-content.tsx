@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -27,11 +28,25 @@ import {
   Loader2,
   Edit3,
   Eye,
-  Users2
+  Users2,
+  MessageSquare
 } from "lucide-react"
 import { TipTapEditor } from "@/components/editor/tiptap-editor"
 import { JSONContent } from "@tiptap/core"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
+
+// Lazy load ChatSection for better performance
+const ChatSection = dynamic(
+  () => import("@/components/client/chat-section").then(mod => ({ default: mod.ChatSection })),
+  {
+    loading: () => (
+      <Card className="h-full flex items-center justify-center border-yellow-400/20">
+        <div className="text-muted-foreground">Loading chat...</div>
+      </Card>
+    ),
+    ssr: false,
+  }
+)
 
 interface ProposalWithProject {
   id: string
@@ -398,7 +413,7 @@ export function WorkspaceContent() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-black dark:text-white mb-2">Workspace</h1>
         <p className="text-muted-foreground">
-          Manage your proposals and view project requirements
+          Manage your proposals and communicate with clients
         </p>
       </div>
 
@@ -413,13 +428,13 @@ export function WorkspaceContent() {
           </p>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
           {/* Proposals List */}
-          <div className="lg:col-span-4 space-y-4">
+          <div className="xl:col-span-3 space-y-4">
             <h2 className="text-lg font-semibold text-black dark:text-white">
               Your Proposals ({proposals.length})
             </h2>
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-2">
               {proposals.map((proposal) => {
                 const statusInfo = statusColors[proposal.status] || statusColors.draft
                 const isSelected = selectedProposalId === proposal.id
@@ -467,7 +482,7 @@ export function WorkspaceContent() {
           </div>
 
           {/* Proposal Details & Editor */}
-          <div className="lg:col-span-8">
+          <div className="xl:col-span-6">
             {selectedProposal ? (
               <div className="space-y-6">
                 {/* Header with Mode Toggle */}
@@ -698,6 +713,17 @@ export function WorkspaceContent() {
                       )}
                   </div>
                 )}
+
+                {/* Chat Section (Mobile/Tablet) */}
+                <div className="xl:hidden">
+                  <div className="h-[500px]">
+                    <ChatSection
+                      projectId={selectedProposal.project.id}
+                      proposalId={null}
+                      projectTitle={selectedProposal.project.title}
+                    />
+                  </div>
+                </div>
               </div>
             ) : (
               <Card className="p-12 border-yellow-400/20 text-center">
@@ -711,6 +737,33 @@ export function WorkspaceContent() {
               </Card>
             )}
           </div>
+
+          {/* Chat Sidebar (Desktop) */}
+          <aside className="hidden xl:block xl:col-span-3" aria-label="Client chat">
+            <div className="sticky top-6">
+              {selectedProposal ? (
+                <div className="h-[calc(100vh-10rem)]">
+                  <ChatSection
+                    projectId={selectedProposal.project.id}
+                    proposalId={null}
+                    projectTitle={selectedProposal.project.title}
+                  />
+                </div>
+              ) : (
+                <Card className="p-6 border-yellow-400/20 text-center h-[400px] flex flex-col items-center justify-center">
+                  <div className="p-4 bg-yellow-400/10 rounded-full mb-4">
+                    <MessageSquare className="h-8 w-8 text-yellow-400" />
+                  </div>
+                  <h3 className="font-semibold text-black dark:text-white mb-2">
+                    Client Chat
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Select a proposal to chat with the client
+                  </p>
+                </Card>
+              )}
+            </div>
+          </aside>
         </div>
       )}
     </div>

@@ -18,12 +18,12 @@ export async function PUT(
     const { name, description, type, content } = body
 
     const { data, error } = await supabase
-      .from('templates')
+      .from('contract_templates')
       .update({
         name,
         description,
-        type,
-        content: JSON.parse(content),
+        category: type,
+        content: typeof content === 'string' ? content : JSON.stringify(content),
         updated_at: new Date().toISOString(),
       })
       .eq('id', id)
@@ -56,7 +56,7 @@ export async function DELETE(
     }
 
     const { error } = await supabase
-      .from('templates')
+      .from('contract_templates')
       .delete()
       .eq('id', id)
 

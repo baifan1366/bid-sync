@@ -9,7 +9,7 @@
  * - Version comparison
  */
 
-import { createClient } from '@/lib/supabase/server'
+import { createClient, createAdminClient } from '@/lib/supabase/server'
 import { z } from 'zod'
 import type { DocumentVersion, JSONContent, Document } from '@/types/document'
 import { broadcastRollbackNotification } from '@/lib/realtime-server-helpers'
@@ -97,10 +97,11 @@ export class VersionControlService {
       // Validate input
       const validated = CreateVersionInputSchema.parse(input)
 
-      const supabase = await createClient()
+      // Use admin client to bypass RLS
+      const adminClient = createAdminClient()
 
       // Check if user has editor or owner permissions
-      const { data: hasPermission } = await supabase
+      const { data: hasPermission } = await adminClient
         .rpc('has_document_permission', {
           p_document_id: validated.documentId,
           p_user_id: validated.userId,
@@ -115,7 +116,7 @@ export class VersionControlService {
       }
 
       // Get next version number
-      const { data: nextVersionNumber, error: versionError } = await supabase
+      const { data: nextVersionNumber, error: versionError } = await adminClient
         .rpc('get_next_version_number', {
           p_document_id: validated.documentId
         })
@@ -131,8 +132,8 @@ export class VersionControlService {
       // Generate changes summary if not provided
       const changesSummary = validated.changesSummary || this.generateChangesSummary(validated.content)
 
-      // Create version
-      const { data: version, error: createError } = await supabase
+      // Create version using admin client to bypass RLS
+      const { data: version, error: createError } = await adminClient
         .from('document_versions')
         .insert({
           document_id: validated.documentId,
@@ -154,7 +155,7 @@ export class VersionControlService {
       }
 
       // Get user details for createdByName
-      const { data: { user } } = await supabase.auth.admin.getUserById(validated.userId)
+      const { data: { user } } = await adminClient.auth.admin.getUserById(validated.userId)
       const createdByName = user?.user_metadata?.full_name || user?.email || 'Unknown User'
 
       // Transform database response to DocumentVersion type
@@ -208,10 +209,11 @@ export class VersionControlService {
       z.string().uuid().parse(documentId)
       z.string().uuid().parse(userId)
 
-      const supabase = await createClient()
+      // Use admin client to bypass RLS
+      const adminClient = createAdminClient()
 
       // Check if user has access to the document
-      const { data: hasPermission } = await supabase
+      const { data: hasPermission } = await adminClient
         .rpc('has_document_permission', {
           p_document_id: documentId,
           p_user_id: userId,
@@ -225,8 +227,8 @@ export class VersionControlService {
         }
       }
 
-      // Get all versions for the document
-      const { data: versions, error } = await supabase
+      // Get all versions for the document using admin client
+      const { data: versions, error } = await adminClient
         .from('document_versions')
         .select('*')
         .eq('document_id', documentId)
@@ -244,10 +246,10 @@ export class VersionControlService {
       const userIds = [...new Set((versions || []).map(v => v.created_by))]
       const userMap = new Map<string, string>()
       
-      for (const userId of userIds) {
-        const { data: { user } } = await supabase.auth.admin.getUserById(userId)
+      for (const visitorId of userIds) {
+        const { data: { user } } = await adminClient.auth.admin.getUserById(visitorId)
         const userName = user?.user_metadata?.full_name || user?.email || 'Unknown User'
-        userMap.set(userId, userName)
+        userMap.set(visitorId, userName)
       }
 
       // Transform database response to DocumentVersion array
@@ -300,10 +302,11 @@ export class VersionControlService {
       z.string().uuid().parse(versionId)
       z.string().uuid().parse(userId)
 
-      const supabase = await createClient()
+      // Use admin client to bypass RLS
+      const adminClient = createAdminClient()
 
       // Get version
-      const { data: version, error } = await supabase
+      const { data: version, error } = await adminClient
         .from('document_versions')
         .select('*')
         .eq('id', versionId)
@@ -317,7 +320,7 @@ export class VersionControlService {
       }
 
       // Check if user has access to the document
-      const { data: hasPermission } = await supabase
+      const { data: hasPermission } = await adminClient
         .rpc('has_document_permission', {
           p_document_id: version.document_id,
           p_user_id: userId,
@@ -332,7 +335,7 @@ export class VersionControlService {
       }
 
       // Get user details for createdByName
-      const { data: { user: versionUser } } = await supabase.auth.admin.getUserById(version.created_by)
+      const { data: { user: versionUser } } = await adminClient.auth.admin.getUserById(version.created_by)
       const createdByName = versionUser?.user_metadata?.full_name || versionUser?.email || 'Unknown User'
 
       // Transform database response to DocumentVersion type

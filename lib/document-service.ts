@@ -430,6 +430,8 @@ export class DocumentService {
    */
   async updateDocument(input: UpdateDocumentInput): Promise<DocumentResult> {
     try {
+      console.log('[updateDocument] Starting update for documentId:', input.documentId);
+      
       const supabase = await createClient();
 
       const { data: document, error } = await supabase
@@ -444,24 +446,33 @@ export class DocumentService {
         .single();
 
       if (error || !document) {
+        console.error('[updateDocument] Failed to update document:', error);
         return {
           success: false,
           error: 'Failed to update document',
         };
       }
+      
+      console.log('[updateDocument] Document updated successfully');
 
       // Create a version history entry
       try {
+        console.log('[updateDocument] Creating version history entry...');
         const { VersionControlService } = await import('@/lib/version-control-service');
         const versionService = new VersionControlService();
-        await versionService.createVersion({
+        const versionResult = await versionService.createVersion({
           documentId: input.documentId,
           content: input.content,
           userId: input.userId,
         });
+        console.log('[updateDocument] Version creation result:', {
+          success: versionResult.success,
+          error: versionResult.error,
+          versionId: versionResult.data?.id
+        });
       } catch (versionError) {
         // Log version creation error but don't fail the document update
-        console.error('Failed to create version history entry:', versionError);
+        console.error('[updateDocument] Failed to create version history entry:', versionError);
       }
 
       return {

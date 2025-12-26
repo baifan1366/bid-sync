@@ -11,7 +11,7 @@ export async function GET() {
     }
 
     const { data, error } = await supabase
-      .from('templates')
+      .from('contract_templates')
       .select('*')
       .order('created_at', { ascending: false })
 
@@ -50,13 +50,14 @@ export async function POST(request: Request) {
       }
     }
 
+    // contract_templates table uses 'content' as TEXT and 'category' instead of 'type'
     const { data, error } = await supabase
-      .from('templates')
+      .from('contract_templates')
       .insert({
         name,
         description,
-        type: type || 'proposal', // Default type if not provided
-        content: parsedContent,
+        category: type || 'proposal',
+        content: typeof parsedContent === 'string' ? parsedContent : JSON.stringify(parsedContent),
         created_by: user.id,
       })
       .select()

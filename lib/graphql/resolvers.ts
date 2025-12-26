@@ -1541,17 +1541,28 @@ export const resolvers = {
 
     // Version Control Queries
     documentVersionHistory: async (_: any, { documentId }: { documentId: string }) => {
+      console.log('[documentVersionHistory] Starting query for documentId:', documentId);
+      
       const supabase = await createClient();
       
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
+        console.log('[documentVersionHistory] Auth error:', authError);
         throw new GraphQLError('Not authenticated', {
           extensions: { code: 'UNAUTHENTICATED' },
         });
       }
+      
+      console.log('[documentVersionHistory] User authenticated:', user.id);
 
       const versionService = new VersionControlService();
       const result = await versionService.getVersionHistory(documentId, user.id);
+      
+      console.log('[documentVersionHistory] Service result:', {
+        success: result.success,
+        error: result.error,
+        dataLength: result.data?.length || 0
+      });
 
       if (!result.success || !result.data) {
         throw new GraphQLError(result.error || 'Failed to fetch version history', {
@@ -1580,6 +1591,8 @@ export const resolvers = {
           };
         })
       );
+      
+      console.log('[documentVersionHistory] Returning versions:', versionsWithNames.length);
 
       return versionsWithNames;
     },

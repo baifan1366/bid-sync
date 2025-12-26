@@ -687,10 +687,11 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
         documentId={documentId}
         isOpen={showVersionHistory}
         onClose={() => setShowVersionHistory(false)}
-        onVersionRestored={() => {
-          refetch()
-          if (editor) {
-            editor.commands.setContent(document?.content || {})
+        onVersionRestored={async () => {
+          // Wait for refetch to complete and get the new data
+          const result = await refetch()
+          if (editor && result.data?.document?.content) {
+            editor.commands.setContent(result.data.document.content)
           }
         }}
         canEdit={canEdit}
