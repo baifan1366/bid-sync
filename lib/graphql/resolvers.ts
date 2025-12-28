@@ -178,10 +178,10 @@ export const resolvers = {
 
       // Calculate proposal counts
       const totalProposals = proposals?.length || 0;
-      const submittedProposals = proposals?.filter(p => p.status === 'submitted').length || 0;
-      const underReviewProposals = proposals?.filter(p => p.status === 'reviewing').length || 0;
-      const acceptedProposals = proposals?.filter(p => p.status === 'approved').length || 0;
-      const rejectedProposals = proposals?.filter(p => p.status === 'rejected').length || 0;
+      const submittedProposals = proposals?.filter((p: any) => p.status === 'submitted').length || 0;
+      const underReviewProposals = proposals?.filter((p: any) => p.status === 'reviewing').length || 0;
+      const acceptedProposals = proposals?.filter((p: any) => p.status === 'approved').length || 0;
+      const rejectedProposals = proposals?.filter((p: any) => p.status === 'rejected').length || 0;
 
       // Build proposal summaries
       const adminClient = createAdminClient();
@@ -10231,5 +10231,135 @@ export const resolvers = {
 
   AdditionalInfoRequirement: {
     fieldType: (parent: any) => (parent.fieldType || parent.fieldType || '').toUpperCase(),
+  },
+
+  // Document type resolver for nested fields
+  Document: {
+    collaborators: async (parent: any) => {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return [];
+      }
+
+      const teamService = new TeamManagementService();
+      const result = await teamService.getCollaborators(parent.id, user.id);
+
+      if (!result.success || !result.data) {
+        return [];
+      }
+
+      // Get added by names using admin client
+      const adminClient = createAdminClient();
+      const collaboratorsWithNames = await Promise.all(
+        result.data.map(async (collab: any) => {
+          const { data: addedByData } = await adminClient.auth.admin.getUserById(collab.addedBy);
+          const addedByName = addedByData?.user?.user_metadata?.full_name || addedByData?.user?.email || 'Unknown';
+
+          return {
+            id: collab.id,
+            documentId: collab.documentId,
+            userId: collab.userId,
+            userName: collab.userName,
+            email: collab.email,
+            role: collab.role.toUpperCase(),
+            addedBy: collab.addedBy,
+            addedByName,
+            addedAt: collab.addedAt,
+          };
+        })
+      );
+
+      return collaboratorsWithNames;
+    },
+
+    versions: async (parent: any) => {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return [];
+      }
+
+      const versionService = new VersionControlService();
+      const result = await versionService.getVersionHistory(parent.id, user.id);
+
+      if (!result.success || !result.data) {
+        return [];
+      }
+
+      return result.data.map((v: any) => ({
+        id: v.id,
+        documentId: v.documentId,
+        versionNumber: v.versionNumber,
+        content: v.content,
+        createdBy: v.createdBy,
+        createdByName: v.createdByName || 'Unknown User',
+        changesSummary: v.changesSummary || '',
+        isRollback: v.isRollback || false,
+        rolledBackFrom: v.rolledBackFrom,
+        createdAt: v.createdAt,
+      }));
+    },
+
+    activeSessions: async (parent: any) => {
+      const supabase = await createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        return [];
+      }
+
+      const collaborationService = new CollaborationService();
+      const result = await collaborationService.getActiveSessions(parent.id, user.id);
+
+      if (!result.success || !result.data) {
+        return [];
+      }
+
+      return result.data.map((session: any) => ({
+        id: session.id || session.sessionId,
+        documentId: parent.id,
+        userId: session.userId,
+        userName: session.userName,
+        userColor: session.userColor,
+        cursorPosition: session.cursorPosition,
+        presenceStatus: (session.presenceStatus || 'ACTIVE').toUpperCase(),
+        currentSection: session.currentSection,
+        lastActivity: session.lastActive || session.lastActivity,
+        joinedAt: session.joinedAt,
+      }));
+    },
+
+    sections: async (parent: any) => {
+      try {
+        const sections = await SectionManagementService.getSections(parent.id);
+
+        return sections.map((s: any) => ({
+          id: s.id,
+          documentId: s.documentId,
+          title: s.title,
+          order: s.order,
+          status: (s.status || 'NOT_STARTED').toUpperCase().replace(/-/g, '_'),
+          assignedTo: s.assignedTo,
+          deadline: s.deadline,
+          content: s.content,
+          createdAt: s.createdAt,
+          updatedAt: s.updatedAt,
+        }));
+      } catch {
+        return [];
+      }
+    },
+
+    deadline: async (parent: any) => {
+      // If deadline is already on the parent, return it
+      if (parent.deadline) {
+        return parent.deadline;
+      }
+      // Otherwise, could fetch from workspace -> project if needed
+      return null;
+    },
   },
 };

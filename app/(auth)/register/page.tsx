@@ -1,5 +1,6 @@
 import { Metadata } from "next"
 import Link from "next/link"
+import Image from "next/image"
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
@@ -23,21 +24,15 @@ export default function RegisterPage() {
                 Login
             </Link>
             <div className="relative hidden h-full flex-col bg-muted p-10 text-white dark:border-r lg:flex">
-                <div className="absolute inset-0 bg-black" />
+                <div className="absolute inset-0 bg-black bg-[url('/bg.png')] bg-cover bg-center bg-no-repeat" />
                 <div className="relative z-20 flex items-center text-lg font-medium">
-                    <div className="mr-2 h-8 w-8 rounded bg-yellow-400 flex items-center justify-center">
-                        <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            className="h-5 w-5 text-black"
-                        >
-                            <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />
-                        </svg>
+                    <div className="mr-2 h-12 w-12 roundedflex items-center justify-center relative">
+                        <Image
+                            src="/logo.png"
+                            alt="BidSync Logo"
+                            fill
+                            className="object-contain"
+                        />
                     </div>
                     <span className="text-white">BidSync</span>
                 </div>

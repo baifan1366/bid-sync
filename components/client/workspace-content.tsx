@@ -30,7 +30,7 @@ import {
   Users2
 } from "lucide-react"
 import { TipTapEditor } from "@/components/editor/tiptap-editor"
-import { JSONContent } from "@tiptap/core"
+type JSONContent = Record<string, unknown>
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 
 interface ProposalWithProject {
@@ -141,8 +141,11 @@ export function WorkspaceContent() {
   // Get selected proposal
   const selectedProposal = React.useMemo(() => {
     if (!selectedProposalId) return null
-    return proposals.find((p) => p.id === selectedProposalId) || null
+    return proposals.find((p: ProposalWithProject) => p.id === selectedProposalId) || null
   }, [selectedProposalId, proposals])
+
+  // Normalize status for comparison (handle uppercase from DB)
+  const isDraft = selectedProposal?.status?.toUpperCase() === 'DRAFT'
 
   // Debug logging
   React.useEffect(() => {
@@ -153,15 +156,15 @@ export function WorkspaceContent() {
       isLoading,
       error: error?.message,
       proposalsCount: proposals.length,
-      proposals: proposals.map(p => ({ id: p.id, title: p.title, status: p.status })),
+      proposals: proposals.map((p: ProposalWithProject) => ({ id: p.id, title: p.title, status: p.status })),
       selectedProposal: selectedProposal ? {
         id: selectedProposal.id,
         title: selectedProposal.title,
         status: selectedProposal.status,
-        isDraft: selectedProposal.status?.toLowerCase() === 'draft'
+        isDraft
       } : null
     })
-  }, [user, shouldFetch, isLoading, error, proposals, selectedProposal])
+  }, [user, shouldFetch, isLoading, error, proposals, selectedProposal, isDraft])
 
   // Fetch proposal scores for the selected proposal
   const { data: scoresData, isLoading: scoresLoading, refetch: refetchScores } = useGraphQLQuery<{ proposalScores: any[] }>(
@@ -169,7 +172,7 @@ export function WorkspaceContent() {
     GET_PROPOSAL_SCORES,
     { proposalId: selectedProposalId || '' },
     {
-      enabled: !!selectedProposalId && selectedProposal?.status !== 'draft',
+      enabled: !!selectedProposalId && !isDraft,
       staleTime: 1 * 60 * 1000,
     }
   )
@@ -180,7 +183,7 @@ export function WorkspaceContent() {
     GET_PROPOSAL_RANKINGS,
     { projectId: selectedProposal?.project.id || '' },
     {
-      enabled: !!selectedProposal?.project.id && selectedProposal?.status !== 'draft',
+      enabled: !!selectedProposal?.project.id && !isDraft,
       staleTime: 1 * 60 * 1000,
     }
   )
@@ -201,7 +204,7 @@ export function WorkspaceContent() {
   // Get scores and ranking for the selected proposal
   const proposalScores = scoresData?.proposalScores || []
   const proposalRanking = rankingsData?.proposalRankings?.find(
-    (r: any) => r.proposal.id === selectedProposalId
+    (r: { proposal: { id: string } }) => r.proposal.id === selectedProposalId
   )
 
   // Determine if proposal has been scored
@@ -277,7 +280,7 @@ export function WorkspaceContent() {
               timelineEstimate: data.timelineEstimate,
               executiveSummary: data.content,
               additionalInfo: Object.entries(data.additionalInfo || {}).map(([fieldId, fieldValue]) => {
-                const req = selectedProposal.project.additionalInfoRequirements?.find(r => r.id === fieldId)
+                const req = selectedProposal.project.additionalInfoRequirements?.find((r: AdditionalInfoRequirement) => r.id === fieldId)
                 return {
                   fieldId,
                   fieldName: req?.fieldName || fieldId,
@@ -389,8 +392,9 @@ export function WorkspaceContent() {
               Your Proposals ({proposals.length})
             </h2>
             <div className="space-y-3">
-              {proposals.map((proposal) => {
-                const statusInfo = statusColors[proposal.status] || statusColors.draft
+              {proposals.map((proposal: ProposalWithProject) => {
+                const normalizedStatus = proposal.status?.toLowerCase() || 'draft'
+                const statusInfo = statusColors[normalizedStatus] || statusColors.draft
                 const isSelected = selectedProposalId === proposal.id
 
                 return (
@@ -447,7 +451,7 @@ export function WorkspaceContent() {
                         {selectedProposal.project.title}
                       </h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        {selectedProposal.status === "draft" ? "Draft Proposal" : "Submitted Proposal"}
+                        {isDraft ? "Draft Proposal" : "Submitted Proposal"}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -460,7 +464,7 @@ export function WorkspaceContent() {
                         <ExternalLink className="h-4 w-4 mr-2" />
                         View Project
                       </Button>
-                      {selectedProposal.status?.toLowerCase() === "draft" && (
+                      {isDraft && (
                         <>
                           <Button
                             size="sm"
@@ -489,7 +493,7 @@ export function WorkspaceContent() {
                 </Card>
 
                 {/* Edit Mode - Proposal Editor */}
-                {viewMode === "edit" && selectedProposal.status?.toLowerCase() === "draft" && (
+                {viewMode === "edit" && isDraft && (
                   <ProposalEditor
                     proposalId={selectedProposal.id}
                     projectId={selectedProposal.project.id}
@@ -507,7 +511,7 @@ export function WorkspaceContent() {
                 )}
 
                 {/* View Mode - Read-only Display */}
-                {(viewMode === "view" || selectedProposal.status?.toLowerCase() !== "draft") && (
+                {(viewMode === "view" || !isDraft) && (
                   <div className="space-y-6">
                     {/* Proposal Content */}
                     <Card className="p-6 border-yellow-400/20 overflow-hidden">
@@ -591,7 +595,7 @@ export function WorkspaceContent() {
                     </Card>
 
                     {/* Scoring Section - Only show for submitted proposals */}
-                    {selectedProposal.status?.toLowerCase() !== 'draft' && (
+                    {!isDraft && (
                       <>
                         {scoresLoading ? (
                           <Card className="p-6 border-yellow-400/20">
@@ -632,8 +636,8 @@ export function WorkspaceContent() {
                         </h3>
                         <div className="space-y-3">
                           {selectedProposal.project.additionalInfoRequirements
-                            ?.sort((a, b) => a.order - b.order)
-                            .map((req) => {
+                            ?.sort((a: AdditionalInfoRequirement, b: AdditionalInfoRequirement) => a.order - b.order)
+                            .map((req: AdditionalInfoRequirement) => {
                               const value = selectedProposal.additionalInfo?.[req.id]
                               if (!value) return null
                               return (
