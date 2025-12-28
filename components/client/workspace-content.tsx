@@ -171,6 +171,9 @@ export function WorkspaceContent() {
     return proposals.find((p: ProposalWithProject) => p.id === selectedProposalId) || null
   }, [selectedProposalId, proposals])
 
+  // Check if selected proposal is in draft status
+  const isDraft = selectedProposal?.status === 'draft'
+
   // Fetch workspace document for the selected proposal's project
   const { data: workspaceData } = useGraphQLQuery<{ 
     workspaceByProject: { 
