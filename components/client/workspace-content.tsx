@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -27,11 +28,25 @@ import {
   Loader2,
   Edit3,
   Eye,
-  Users2
+  Users2,
+  MessageSquare
 } from "lucide-react"
 import { TipTapEditor } from "@/components/editor/tiptap-editor"
 type JSONContent = Record<string, unknown>
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
+
+// Lazy load ChatSection for better performance
+const ChatSection = dynamic(
+  () => import("@/components/client/chat-section").then(mod => ({ default: mod.ChatSection })),
+  {
+    loading: () => (
+      <Card className="h-full flex items-center justify-center border-yellow-400/20">
+        <div className="text-muted-foreground">Loading chat...</div>
+      </Card>
+    ),
+    ssr: false,
+  }
+)
 
 interface ProposalWithProject {
   id: string
@@ -78,6 +93,18 @@ const GET_LEAD_PROPOSALS = gql`
           options
           order
         }
+      }
+    }
+  }
+`
+
+const GET_WORKSPACE_DOCUMENT = gql`
+  query GetWorkspaceByProject($projectId: ID!) {
+    workspaceByProject(projectId: $projectId) {
+      id
+      documents {
+        id
+        title
       }
     }
   }
@@ -144,8 +171,24 @@ export function WorkspaceContent() {
     return proposals.find((p: ProposalWithProject) => p.id === selectedProposalId) || null
   }, [selectedProposalId, proposals])
 
-  // Normalize status for comparison (handle uppercase from DB)
-  const isDraft = selectedProposal?.status?.toUpperCase() === 'DRAFT'
+  // Fetch workspace document for the selected proposal's project
+  const { data: workspaceData } = useGraphQLQuery<{ 
+    workspaceByProject: { 
+      id: string
+      documents: Array<{ id: string; title: string }> 
+    } 
+  }>(
+    ['workspace-document', selectedProposal?.project.id || 'none'],
+    GET_WORKSPACE_DOCUMENT,
+    { projectId: selectedProposal?.project.id || '' },
+    {
+      enabled: !!selectedProposal?.project.id,
+      staleTime: 5 * 60 * 1000,
+    }
+  )
+
+  // Get the first document ID from the workspace (main proposal document)
+  const documentId = workspaceData?.workspaceByProject?.documents?.[0]?.id
 
   // Debug logging
   React.useEffect(() => {
@@ -370,7 +413,7 @@ export function WorkspaceContent() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-black dark:text-white mb-2">Workspace</h1>
         <p className="text-muted-foreground">
-          Manage your proposals and view project requirements
+          Manage your proposals and communicate with clients
         </p>
       </div>
 
@@ -385,16 +428,15 @@ export function WorkspaceContent() {
           </p>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
           {/* Proposals List */}
-          <div className="lg:col-span-4 space-y-4">
+          <div className="xl:col-span-3 space-y-4">
             <h2 className="text-lg font-semibold text-black dark:text-white">
               Your Proposals ({proposals.length})
             </h2>
-            <div className="space-y-3">
-              {proposals.map((proposal: ProposalWithProject) => {
-                const normalizedStatus = proposal.status?.toLowerCase() || 'draft'
-                const statusInfo = statusColors[normalizedStatus] || statusColors.draft
+            <div className="space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-2">
+              {proposals.map((proposal) => {
+                const statusInfo = statusColors[proposal.status] || statusColors.draft
                 const isSelected = selectedProposalId === proposal.id
 
                 return (
@@ -440,7 +482,7 @@ export function WorkspaceContent() {
           </div>
 
           {/* Proposal Details & Editor */}
-          <div className="lg:col-span-8">
+          <div className="xl:col-span-6">
             {selectedProposal ? (
               <div className="space-y-6">
                 {/* Header with Mode Toggle */}
@@ -468,8 +510,15 @@ export function WorkspaceContent() {
                         <>
                           <Button
                             size="sm"
-                            onClick={() => router.push(`/editor/${selectedProposal.id}`)}
-                            className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold"
+                            onClick={() => {
+                              if (documentId) {
+                                router.push(`/editor/${documentId}`)
+                              } else {
+                                alert('Document not found. Please try again.')
+                              }
+                            }}
+                            disabled={!documentId}
+                            className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold disabled:opacity-50"
                           >
                             <Users2 className="h-4 w-4 mr-2" />
                             Collaborative Editor
@@ -664,6 +713,17 @@ export function WorkspaceContent() {
                       )}
                   </div>
                 )}
+
+                {/* Chat Section (Mobile/Tablet) */}
+                <div className="xl:hidden">
+                  <div className="h-[500px]">
+                    <ChatSection
+                      projectId={selectedProposal.project.id}
+                      proposalId={null}
+                      projectTitle={selectedProposal.project.title}
+                    />
+                  </div>
+                </div>
               </div>
             ) : (
               <Card className="p-12 border-yellow-400/20 text-center">
@@ -677,6 +737,33 @@ export function WorkspaceContent() {
               </Card>
             )}
           </div>
+
+          {/* Chat Sidebar (Desktop) */}
+          <aside className="hidden xl:block xl:col-span-3" aria-label="Client chat">
+            <div className="sticky top-6">
+              {selectedProposal ? (
+                <div className="h-[calc(100vh-10rem)]">
+                  <ChatSection
+                    projectId={selectedProposal.project.id}
+                    proposalId={null}
+                    projectTitle={selectedProposal.project.title}
+                  />
+                </div>
+              ) : (
+                <Card className="p-6 border-yellow-400/20 text-center h-[400px] flex flex-col items-center justify-center">
+                  <div className="p-4 bg-yellow-400/10 rounded-full mb-4">
+                    <MessageSquare className="h-8 w-8 text-yellow-400" />
+                  </div>
+                  <h3 className="font-semibold text-black dark:text-white mb-2">
+                    Client Chat
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Select a proposal to chat with the client
+                  </p>
+                </Card>
+              )}
+            </div>
+          </aside>
         </div>
       )}
     </div>

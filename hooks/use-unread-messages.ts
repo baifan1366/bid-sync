@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { createClient } from "@/lib/supabase/client"
 
 interface UseUnreadMessagesOptions {
@@ -16,7 +16,7 @@ export function useUnreadMessages({
 }: UseUnreadMessagesOptions) {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isLoading, setIsLoading] = useState(true)
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   // Fetch unread count
   const fetchUnreadCount = useCallback(async () => {
@@ -98,12 +98,19 @@ export function useUnreadMessages({
           event: "INSERT",
           schema: "public",
           table: "chat_messages",
-          filter: proposalId
-            ? `project_id=eq.${projectId},proposal_id=eq.${proposalId}`
-            : `project_id=eq.${projectId}`,
+          filter: `project_id=eq.${projectId}`,
         },
         (payload) => {
           const newMessage = payload.new as any
+          
+          // Filter by proposal_id in callback since Supabase Realtime
+          // doesn't support multiple filter conditions
+          if (proposalId) {
+            if (newMessage.proposal_id !== proposalId) return
+          } else {
+            if (newMessage.proposal_id !== null) return
+          }
+          
           // Only increment if message is from someone else
           if (newMessage.sender_id !== currentUserId) {
             setUnreadCount((prev) => prev + 1)
@@ -116,11 +123,18 @@ export function useUnreadMessages({
           event: "UPDATE",
           schema: "public",
           table: "chat_messages",
-          filter: proposalId
-            ? `project_id=eq.${projectId},proposal_id=eq.${proposalId}`
-            : `project_id=eq.${projectId}`,
+          filter: `project_id=eq.${projectId}`,
         },
-        () => {
+        (payload) => {
+          const updatedMessage = payload.new as any
+          
+          // Filter by proposal_id in callback
+          if (proposalId) {
+            if (updatedMessage.proposal_id !== proposalId) return
+          } else {
+            if (updatedMessage.proposal_id !== null) return
+          }
+          
           // Refetch count when messages are marked as read
           fetchUnreadCount()
         }

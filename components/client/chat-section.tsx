@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Card } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Badge } from "@/components/ui/badge"
@@ -42,7 +42,7 @@ export function ChatSection({
   const { user } = useUser()
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   // Fetch initial messages
   const fetchMessages = useCallback(async () => {
@@ -100,7 +100,13 @@ export function ChatSection({
         timestamp: newMessage.created_at,
       }
 
-      setMessages((prev) => [...prev, formattedMessage])
+      setMessages((prev) => {
+        // Avoid duplicates (message might already be added via optimistic update)
+        if (prev.some((m) => m.id === formattedMessage.id)) {
+          return prev
+        }
+        return [...prev, formattedMessage]
+      })
     },
     [user?.id]
   )
@@ -137,16 +143,41 @@ export function ChatSection({
       throw new Error("You must be logged in to send messages")
     }
 
-    const { error } = await supabase.from("chat_messages").insert({
-      project_id: projectId,
-      proposal_id: proposalId,
-      sender_id: user.id,
-      content,
-      read: false,
-    })
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .insert({
+        project_id: projectId,
+        proposal_id: proposalId,
+        sender_id: user.id,
+        content,
+        read: false,
+      })
+      .select("id, content, created_at, sender_id")
+      .single()
 
     if (error) {
       throw new Error(error.message)
+    }
+
+    // Optimistically add message to local state immediately
+    // This ensures the message shows even if Realtime is not working
+    if (data) {
+      const newMessage: Message = {
+        id: data.id,
+        content: data.content,
+        senderName: "You",
+        senderAvatar: null,
+        senderRole: "client",
+        senderId: data.sender_id,
+        timestamp: data.created_at,
+      }
+      setMessages((prev) => {
+        // Avoid duplicates if Realtime also delivers the message
+        if (prev.some((m) => m.id === newMessage.id)) {
+          return prev
+        }
+        return [...prev, newMessage]
+      })
     }
   }
 
@@ -157,7 +188,7 @@ export function ChatSection({
       aria-label="Chat conversation"
     >
       {/* Chat Header */}
-      <div className="flex items-center justify-between p-4 border-b border-yellow-400/20 bg-gradient-to-r from-yellow-400/5 to-transparent">
+      <div className="flex items-center justify-between p-4 border-b border-yellow-400/20 bg-linear-to-r from-yellow-400/5 to-transparent">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <div className="p-2 bg-yellow-400 rounded-lg relative shrink-0">
             <MessageSquare className="w-5 h-5 text-black" />
@@ -233,7 +264,7 @@ export function ChatSection({
       <Separator className="bg-yellow-400/20" />
 
       {/* Message Composer */}
-      <div className="p-4 bg-gradient-to-r from-yellow-400/5 to-transparent">
+      <div className="p-4 bg-linear-to-r from-yellow-400/5 to-transparent">
         <MessageComposer
           projectId={projectId}
           proposalId={proposalId}

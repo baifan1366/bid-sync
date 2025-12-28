@@ -205,9 +205,21 @@ pTap Editor Styles */
 
   /* Editor prose styles */
   .tiptap-editor-content .ProseMirror {
-    @apply outline-none min-h-[300px] overflow-hidden;
+    @apply outline-none min-h-[300px];
     word-wrap: break-word;
     overflow-wrap: break-word;
+    white-space: pre-wrap;
+    caret-color: #FBBF24;
+  }
+
+  /* Ensure editor is focusable and editable */
+  .tiptap-editor-content .ProseMirror[contenteditable="true"] {
+    cursor: text;
+  }
+
+  /* Ensure paragraphs in editor are visible */
+  .tiptap-editor-content .ProseMirror > * {
+    position: relative;
   }
 
   /* Prevent content overflow */
@@ -324,11 +336,11 @@ pTap Editor Styles */
   }
 
   .tiptap-editor-content .ProseMirror table th {
-    @apply bg-yellow-400/10 font-semibold;
+    @apply bg-yellow-400/10 font-semibold text-black dark:text-white;
   }
 
   .tiptap-editor-content .ProseMirror table td {
-    @apply bg-white dark:bg-black;
+    @apply bg-white dark:bg-black text-black dark:text-white;
   }
 
   /* Selected cell */

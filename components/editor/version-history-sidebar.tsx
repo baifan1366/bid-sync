@@ -94,7 +94,21 @@ export function VersionHistorySidebar({
   // Fetch version history
   const { data, isLoading, error, refetch } = useGraphQLQuery<{
     documentVersionHistory: DocumentVersion[]
-  }>(['versionHistory', documentId], GET_VERSION_HISTORY, { documentId })
+  }>(['versionHistory', documentId], GET_VERSION_HISTORY, { documentId }, {
+    // Always refetch when sidebar opens
+    staleTime: 0,
+    refetchOnMount: true,
+  })
+
+  // Debug log
+  console.log('[VersionHistorySidebar] Query state:', {
+    isOpen,
+    documentId,
+    isLoading,
+    error: error?.message,
+    versionsCount: data?.documentVersionHistory?.length || 0,
+    data: data
+  })
 
   // Rollback mutation
   const rollbackMutation = useGraphQLMutation<any, any>(ROLLBACK_TO_VERSION, [
@@ -132,14 +146,17 @@ export function VersionHistorySidebar({
   }
 
   const handleCompare = (version: DocumentVersion) => {
-    if (!compareVersions.version1) {
-      setCompareVersions({ version1: version, version2: null })
-    } else if (!compareVersions.version2) {
-      setCompareVersions({ ...compareVersions, version2: version })
+    // Always compare selected version with the current (latest) version
+    const currentVersion = versions[0] // First version is the latest (current)
+    
+    if (currentVersion && version.id !== currentVersion.id) {
+      // Compare selected version with current version
+      setCompareVersions({ version1: version, version2: currentVersion })
       setShowCompareSheet(true)
-    } else {
-      // Reset and start new comparison
-      setCompareVersions({ version1: version, version2: null })
+    } else if (versions.length > 1) {
+      // If clicking on current version, compare with previous version
+      setCompareVersions({ version1: versions[1], version2: currentVersion })
+      setShowCompareSheet(true)
     }
   }
 
@@ -178,6 +195,89 @@ export function VersionHistorySidebar({
 
     const text = extractText(content)
     return text.slice(0, 200) + (text.length > 200 ? '...' : '')
+  }
+
+  // Extract full text from JSONContent
+  const extractFullText = (content: JSONContent): string => {
+    if (!content) return ''
+    
+    const extractText = (node: JSONContent): string => {
+      if (node.text) return node.text
+      if (node.content && Array.isArray(node.content)) {
+        return node.content.map(extractText).join('')
+      }
+      return ''
+    }
+
+    return extractText(content)
+  }
+
+  // Simple character-level diff algorithm for better accuracy
+  const computeDiff = (oldText: string, newText: string): { type: 'same' | 'added' | 'removed'; text: string }[] => {
+    const result: { type: 'same' | 'added' | 'removed'; text: string }[] = []
+    
+    // Find longest common prefix
+    let prefixLen = 0
+    while (prefixLen < oldText.length && prefixLen < newText.length && oldText[prefixLen] === newText[prefixLen]) {
+      prefixLen++
+    }
+    
+    // Find longest common suffix (after prefix)
+    let suffixLen = 0
+    while (
+      suffixLen < oldText.length - prefixLen && 
+      suffixLen < newText.length - prefixLen && 
+      oldText[oldText.length - 1 - suffixLen] === newText[newText.length - 1 - suffixLen]
+    ) {
+      suffixLen++
+    }
+    
+    // Common prefix
+    if (prefixLen > 0) {
+      result.push({ type: 'same', text: oldText.slice(0, prefixLen) })
+    }
+    
+    // Middle part - what was removed from old
+    const oldMiddle = oldText.slice(prefixLen, oldText.length - suffixLen)
+    const newMiddle = newText.slice(prefixLen, newText.length - suffixLen)
+    
+    if (oldMiddle.length > 0) {
+      result.push({ type: 'removed', text: oldMiddle })
+    }
+    
+    if (newMiddle.length > 0) {
+      result.push({ type: 'added', text: newMiddle })
+    }
+    
+    // Common suffix
+    if (suffixLen > 0) {
+      result.push({ type: 'same', text: oldText.slice(oldText.length - suffixLen) })
+    }
+    
+    return result
+  }
+
+  // Render diff with highlighting
+  const renderDiffContent = (oldContent: JSONContent, newContent: JSONContent) => {
+    const oldText = extractFullText(oldContent)
+    const newText = extractFullText(newContent)
+    const diff = computeDiff(oldText, newText)
+
+    return (
+      <div className="whitespace-pre-wrap">
+        {diff.map((segment, index) => (
+          <span
+            key={index}
+            className={cn(
+              segment.type === 'added' && 'bg-green-400/30 text-green-700 dark:text-green-300',
+              segment.type === 'removed' && 'bg-red-400/30 text-red-700 dark:text-red-300 line-through'
+            )}
+          >
+            {segment.text}
+          </span>
+        ))}
+      </div>
+    )
   }
 
   if (!isOpen) return null
@@ -399,43 +499,75 @@ export function VersionHistorySidebar({
             <SheetDescription>
               {compareVersions.version1 && compareVersions.version2 ? (
                 <>
-                  Comparing v{compareVersions.version1.versionNumber} with v
-                  {compareVersions.version2.versionNumber}
+                  Comparing v{compareVersions.version1.versionNumber} (older) with v
+                  {compareVersions.version2.versionNumber} (current)
                 </>
               ) : (
                 'Select two versions to compare'
               )}
             </SheetDescription>
           </SheetHeader>
-          <ScrollArea className="h-[calc(100vh-120px)] mt-4">
+          
+          {/* Legend */}
+          <div className="flex items-center gap-4 mt-4 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-4 h-4 bg-green-400/30 rounded" />
+              <span className="text-muted-foreground">Added</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-4 h-4 bg-red-400/30 rounded" />
+              <span className="text-muted-foreground">Removed</span>
+            </div>
+          </div>
+
+          <ScrollArea className="h-[calc(100vh-180px)] mt-4">
+            {/* Unified Diff View */}
+            <Card className="border-yellow-400/20 p-6 mb-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Badge className="bg-yellow-400 text-black">Unified Diff</Badge>
+                <span className="text-sm text-muted-foreground">
+                  Changes from v{compareVersions.version1?.versionNumber} to v{compareVersions.version2?.versionNumber}
+                </span>
+              </div>
+              <div className="prose prose-sm max-w-none">
+                {compareVersions.version1 && compareVersions.version2 && 
+                  renderDiffContent(compareVersions.version1.content, compareVersions.version2.content)}
+              </div>
+            </Card>
+
+            {/* Side by Side View */}
             <div className="grid grid-cols-2 gap-4">
-              {/* Version 1 */}
+              {/* Version 1 (Older) */}
               <Card className="border-blue-400/20 p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Badge className="bg-blue-400 text-white">
                     v{compareVersions.version1?.versionNumber}
                   </Badge>
-                  <span className="text-sm text-muted-foreground">
-                    {compareVersions.version1?.createdByName}
-                  </span>
+                  <Badge variant="secondary" className="text-xs">Older</Badge>
                 </div>
-                <div className="prose prose-sm max-w-none">
-                  {compareVersions.version1 && renderContent(compareVersions.version1.content)}
+                <div className="text-xs text-muted-foreground mb-2">
+                  {compareVersions.version1?.createdByName} • {compareVersions.version1 && formatDate(compareVersions.version1.createdAt)}
+                </div>
+                <Separator className="my-2" />
+                <div className="prose prose-sm max-w-none text-sm">
+                  {compareVersions.version1 && extractFullText(compareVersions.version1.content)}
                 </div>
               </Card>
 
-              {/* Version 2 */}
+              {/* Version 2 (Current) */}
               <Card className="border-green-400/20 p-4">
                 <div className="flex items-center gap-2 mb-3">
                   <Badge className="bg-green-400 text-white">
                     v{compareVersions.version2?.versionNumber}
                   </Badge>
-                  <span className="text-sm text-muted-foreground">
-                    {compareVersions.version2?.createdByName}
-                  </span>
+                  <Badge variant="secondary" className="text-xs">Current</Badge>
                 </div>
-                <div className="prose prose-sm max-w-none">
-                  {compareVersions.version2 && renderContent(compareVersions.version2.content)}
+                <div className="text-xs text-muted-foreground mb-2">
+                  {compareVersions.version2?.createdByName} • {compareVersions.version2 && formatDate(compareVersions.version2.createdAt)}
+                </div>
+                <Separator className="my-2" />
+                <div className="prose prose-sm max-w-none text-sm">
+                  {compareVersions.version2 && extractFullText(compareVersions.version2.content)}
                 </div>
               </Card>
             </div>

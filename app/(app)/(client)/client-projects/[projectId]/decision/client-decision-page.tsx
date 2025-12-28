@@ -407,7 +407,7 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
           </main>
 
           {/* Chat Sidebar (Desktop) */}
-          <aside className="lg:col-span-4" aria-label="Project chat">
+          <aside className="hidden lg:block lg:col-span-4" aria-label="Project chat">
             <div className="sticky top-6">
               <ChatSection
                 projectId={projectId}

@@ -11,6 +11,8 @@ import { ProposalDetail } from "@/lib/graphql/types"
 import { formatProposalBudget } from "@/lib/proposal-utils"
 import { ProposalSubmissionWizard } from "./proposal-submission-wizard"
 import { useUser } from "@/hooks/use-user"
+import { useGraphQLQuery } from "@/hooks/use-graphql"
+import { GET_PROPOSAL_DETAILS } from "@/lib/graphql/queries"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 
 interface ProposalDetailViewProps {
@@ -21,31 +23,29 @@ interface ProposalDetailViewProps {
 }
 
 export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissionComplete }: ProposalDetailViewProps) {
-  // TODO: Fetch proposal detail data using GraphQL
-  const [isLoading, setIsLoading] = React.useState(true)
-  const [proposal, setProposal] = React.useState<ProposalDetail | null>(null)
   const [wizardOpen, setWizardOpen] = React.useState(false)
   const [additionalInfoRequirements, setAdditionalInfoRequirements] = React.useState<AdditionalInfoRequirement[]>([])
   const { user } = useUser()
 
-  React.useEffect(() => {
-    // Placeholder for data fetching
-    // This will be implemented when GraphQL queries are ready
-    // TODO: Fetch proposal data and additional info requirements
-    setIsLoading(false)
-  }, [proposalId])
+  // Fetch proposal detail data using GraphQL
+  const { data, isLoading, error, refetch } = useGraphQLQuery<{ proposalDetail: ProposalDetail }>(
+    ['proposal-detail', proposalId],
+    GET_PROPOSAL_DETAILS,
+    { proposalId },
+    {
+      enabled: !!proposalId,
+      staleTime: 1 * 60 * 1000,
+      cacheTime: 5 * 60 * 1000,
+      refetchOnWindowFocus: true,
+    }
+  )
+
+  const proposal = data?.proposalDetail ?? null
 
   const refreshProposalData = React.useCallback(async () => {
-    // TODO: Refetch proposal data from GraphQL
-    // This will be called after successful submission
-    setIsLoading(true)
-    try {
-      // Placeholder for refetch logic
-      // await refetchProposal()
-    } finally {
-      setIsLoading(false)
-    }
-  }, [proposalId])
+    // Refetch proposal data from GraphQL
+    await refetch()
+  }, [refetch])
 
   // Handle Escape key to close
   React.useEffect(() => {
@@ -69,7 +69,7 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
   // Check if current user is the proposal lead
   const isProposalLead = React.useMemo(() => {
     if (!user || !proposal) return false
-    return proposal.biddingTeam.lead.id === user.id
+    return proposal.biddingTeam?.lead?.id === user.id
   }, [user, proposal])
 
   // Check if proposal is in draft status
@@ -257,10 +257,11 @@ function OverviewTab({ proposal }: { proposal: ProposalDetail | null }) {
     })
   }
 
-  const compliancePercentage = proposal.complianceChecklist.length > 0
+  const complianceChecklist = proposal.complianceChecklist ?? []
+  const compliancePercentage = complianceChecklist.length > 0
     ? Math.round(
-        (proposal.complianceChecklist.filter((item) => item.completed).length /
-          proposal.complianceChecklist.length) *
+        (complianceChecklist.filter((item) => item.completed).length /
+          complianceChecklist.length) *
           100
       )
     : 0
@@ -288,30 +289,32 @@ function OverviewTab({ proposal }: { proposal: ProposalDetail | null }) {
       </div>
 
       {/* Bidding Lead Information */}
-      <div>
-        <h3 className="mb-4 text-lg font-semibold text-black dark:text-white">
-          Bidding Lead
-        </h3>
-        <div className="flex items-center gap-4">
-          <Avatar className="h-16 w-16">
-            <AvatarImage src={proposal.biddingTeam.lead.avatarUrl || undefined} />
-            <AvatarFallback className="bg-yellow-400 text-black">
-              {getInitials(proposal.biddingTeam.lead.name)}
-            </AvatarFallback>
-          </Avatar>
-          <div>
-            <p className="font-semibold text-black dark:text-white">
-              {proposal.biddingTeam.lead.name}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              {proposal.biddingTeam.lead.email}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Role: {proposal.biddingTeam.lead.role}
-            </p>
+      {proposal.biddingTeam?.lead && (
+        <div>
+          <h3 className="mb-4 text-lg font-semibold text-black dark:text-white">
+            Bidding Lead
+          </h3>
+          <div className="flex items-center gap-4">
+            <Avatar className="h-16 w-16">
+              <AvatarImage src={proposal.biddingTeam.lead.avatarUrl || undefined} />
+              <AvatarFallback className="bg-yellow-400 text-black">
+                {getInitials(proposal.biddingTeam.lead.name)}
+              </AvatarFallback>
+            </Avatar>
+            <div>
+              <p className="font-semibold text-black dark:text-white">
+                {proposal.biddingTeam.lead.name}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {proposal.biddingTeam.lead.email}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Role: {proposal.biddingTeam.lead.role}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Key Information Grid */}
       <div>
@@ -363,8 +366,8 @@ function OverviewTab({ proposal }: { proposal: ProposalDetail | null }) {
                 {compliancePercentage}% Complete
               </p>
               <p className="text-xs text-muted-foreground">
-                {proposal.complianceChecklist.filter((item) => item.completed).length} of{' '}
-                {proposal.complianceChecklist.length} items
+                {complianceChecklist.filter((item) => item.completed).length} of{' '}
+                {complianceChecklist.length} items
               </p>
             </div>
           </div>
@@ -372,13 +375,13 @@ function OverviewTab({ proposal }: { proposal: ProposalDetail | null }) {
       </div>
 
       {/* Compliance Checklist */}
-      {proposal.complianceChecklist.length > 0 && (
+      {complianceChecklist.length > 0 && (
         <div>
           <h3 className="mb-4 text-lg font-semibold text-black dark:text-white">
             Compliance Checklist
           </h3>
           <div className="space-y-2">
-            {proposal.complianceChecklist.map((item) => (
+            {complianceChecklist.map((item) => (
               <div
                 key={item.id}
                 className="flex items-start gap-3 rounded-lg border border-yellow-400/20 p-3"
@@ -778,7 +781,9 @@ function TeamTab({ proposal }: { proposal: ProposalDetail | null }) {
       .slice(0, 2)
   }
 
-  const allMembers = [proposal.biddingTeam.lead, ...proposal.biddingTeam.members]
+  const members = proposal.biddingTeam?.members ?? []
+  const lead = proposal.biddingTeam?.lead
+  const allMembers = lead ? [lead, ...members] : members
 
   return (
     <div className="space-y-6">
@@ -796,74 +801,76 @@ function TeamTab({ proposal }: { proposal: ProposalDetail | null }) {
       </div>
 
       {/* Bidding Lead */}
-      <div>
-        <h4 className="mb-4 flex items-center gap-2 text-lg font-semibold text-black dark:text-white">
-          <Award className="h-5 w-5 text-yellow-400" />
-          Bidding Lead
-        </h4>
-        <div className="rounded-lg border border-yellow-400/20 p-6">
-          <div className="flex items-start gap-4">
-            <Avatar className="h-20 w-20">
-              <AvatarImage src={proposal.biddingTeam.lead.avatarUrl || undefined} />
-              <AvatarFallback className="bg-yellow-400 text-lg text-black">
-                {getInitials(proposal.biddingTeam.lead.name)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1">
-              <button
-                className="text-lg font-semibold text-black transition-colors hover:text-yellow-400 dark:text-white dark:hover:text-yellow-400"
-                onClick={() => {
-                  // TODO: Navigate to profile
-                  console.log('Navigate to profile:', proposal.biddingTeam.lead.id)
-                }}
-              >
-                {proposal.biddingTeam.lead.name}
-              </button>
-              <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
-                <Mail className="h-4 w-4" />
-                <a
-                  href={`mailto:${proposal.biddingTeam.lead.email}`}
-                  className="hover:text-yellow-400"
+      {lead && (
+        <div>
+          <h4 className="mb-4 flex items-center gap-2 text-lg font-semibold text-black dark:text-white">
+            <Award className="h-5 w-5 text-yellow-400" />
+            Bidding Lead
+          </h4>
+          <div className="rounded-lg border border-yellow-400/20 p-6">
+            <div className="flex items-start gap-4">
+              <Avatar className="h-20 w-20">
+                <AvatarImage src={lead.avatarUrl || undefined} />
+                <AvatarFallback className="bg-yellow-400 text-lg text-black">
+                  {getInitials(lead.name)}
+                </AvatarFallback>
+              </Avatar>
+              <div className="flex-1">
+                <button
+                  className="text-lg font-semibold text-black transition-colors hover:text-yellow-400 dark:text-white dark:hover:text-yellow-400"
+                  onClick={() => {
+                    // TODO: Navigate to profile
+                    console.log('Navigate to profile:', lead.id)
+                  }}
                 >
-                  {proposal.biddingTeam.lead.email}
-                </a>
-              </div>
-              <div className="mt-3">
-                <Badge className="bg-yellow-400 text-black">
-                  {proposal.biddingTeam.lead.role}
-                </Badge>
-              </div>
-              {proposal.biddingTeam.lead.assignedSections.length > 0 && (
-                <div className="mt-4">
-                  <p className="mb-2 text-sm font-medium text-black dark:text-white">
-                    Assigned Sections:
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {proposal.biddingTeam.lead.assignedSections.map((section, idx) => (
-                      <span
-                        key={idx}
-                        className="rounded-md border border-yellow-400/40 bg-yellow-400/10 px-2 py-1 text-xs text-black dark:text-white"
-                      >
-                        {section}
-                      </span>
-                    ))}
-                  </div>
+                  {lead.name}
+                </button>
+                <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
+                  <Mail className="h-4 w-4" />
+                  <a
+                    href={`mailto:${lead.email}`}
+                    className="hover:text-yellow-400"
+                  >
+                    {lead.email}
+                  </a>
                 </div>
-              )}
+                <div className="mt-3">
+                  <Badge className="bg-yellow-400 text-black">
+                    {lead.role}
+                  </Badge>
+                </div>
+                {lead.assignedSections && lead.assignedSections.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-2 text-sm font-medium text-black dark:text-white">
+                      Assigned Sections:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {lead.assignedSections.map((section, idx) => (
+                        <span
+                          key={idx}
+                          className="rounded-md border border-yellow-400/40 bg-yellow-400/10 px-2 py-1 text-xs text-black dark:text-white"
+                        >
+                          {section}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Team Members */}
-      {proposal.biddingTeam.members.length > 0 && (
+      {members.length > 0 && (
         <div>
           <h4 className="mb-4 flex items-center gap-2 text-lg font-semibold text-black dark:text-white">
             <Users className="h-5 w-5 text-yellow-400" />
             Team Members
           </h4>
           <div className="space-y-3">
-            {proposal.biddingTeam.members.map((member) => (
+            {members.map((member) => (
               <div
                 key={member.id}
                 className="rounded-lg border border-yellow-400/20 p-4 transition-colors hover:border-yellow-400/40"
@@ -902,7 +909,7 @@ function TeamTab({ proposal }: { proposal: ProposalDetail | null }) {
                         {member.role}
                       </Badge>
                     </div>
-                    {member.assignedSections.length > 0 && (
+                    {member.assignedSections && member.assignedSections.length > 0 && (
                       <div className="mt-3">
                         <p className="mb-1 text-xs font-medium text-black dark:text-white">
                           Assigned Sections:
@@ -928,7 +935,7 @@ function TeamTab({ proposal }: { proposal: ProposalDetail | null }) {
       )}
 
       {/* No Team Members */}
-      {proposal.biddingTeam.members.length === 0 && (
+      {members.length === 0 && (
         <div className="rounded-lg border border-yellow-400/20 bg-yellow-400/5 p-6 text-center">
           <Users className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">

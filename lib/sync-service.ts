@@ -534,3 +534,18 @@ export class SyncService {
 // Export singleton instance
 export const syncService = new SyncService()
 
+// Initialize connection status based on browser online status
+if (typeof window !== 'undefined') {
+  // Set initial status based on browser online state
+  syncService.setConnectionStatus(navigator.onLine ? 'connected' : 'disconnected')
+  
+  // Listen for online/offline events
+  window.addEventListener('online', () => {
+    syncService.setConnectionStatus('connected')
+  })
+  
+  window.addEventListener('offline', () => {
+    syncService.setConnectionStatus('disconnected')
+  })
+}
+

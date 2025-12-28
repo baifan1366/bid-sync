@@ -74,13 +74,24 @@ export async function updateSession(request: NextRequest) {
   // Protected routes
   if (
     path.startsWith('/admin-dashboard') ||
+    path.startsWith('/admin-projects') ||
+    path.startsWith('/admin-proposals') ||
+    path.startsWith('/admin-settings') ||
+    path.startsWith('/analytics') ||
     path.startsWith('/lead-dashboard') ||
+    path.startsWith('/lead-projects') ||
+    path.startsWith('/lead-proposals') ||
+    path.startsWith('/performance') ||
+    path.startsWith('/team') ||
     path.startsWith('/member-dashboard') ||
+    path.startsWith('/client-projects') ||
     path.startsWith('/projects') ||
     path.startsWith('/workspace') ||
     path.startsWith('/profile') ||
+    path.startsWith('/settings') ||
     path.startsWith('/editor') ||
-    path.startsWith('/documents')
+    path.startsWith('/documents') ||
+    path.startsWith('/invitations')
   ) {
     // Check authentication
     if (!user) {
@@ -131,8 +142,13 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url)
     }
 
-    // Lead dashboard protection
-    if (path.startsWith('/lead-dashboard') && role !== 'bidding_lead') {
+    // Lead routes protection (dashboard, projects, proposals, performance, team)
+    if ((path.startsWith('/lead-dashboard') || 
+         path.startsWith('/lead-projects') || 
+         path.startsWith('/lead-proposals') ||
+         path.startsWith('/performance') ||
+         path.startsWith('/team')) && 
+        role !== 'bidding_lead' && role !== 'admin') {
       await logUnauthorizedAccessAttempt(
         supabase,
         user.id,
