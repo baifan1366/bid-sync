@@ -2,7 +2,7 @@
 
 import { memo } from "react"
 import Link from "next/link"
-import { Briefcase } from "lucide-react"
+import Image from "next/image"
 import { cn } from "@/lib/utils"
 
 interface HeaderLogoProps {
@@ -23,9 +23,14 @@ export const HeaderLogo = memo(function HeaderLogo({ className }: HeaderLogoProp
       )}
       aria-label="BidSync home"
     >
-      <div className="flex items-center justify-center w-7 h-7 rounded-md bg-yellow-400" aria-hidden="true">
-        <Briefcase className="h-4 w-4 text-black" />
-      </div>
+      <Image
+        src="/logo.png"
+        alt="BidSync"
+        width={28}
+        height={28}
+        className="rounded-md"
+        priority
+      />
       <span className="text-lg font-semibold text-black dark:text-white tracking-tight">
         BidSync
       </span>
