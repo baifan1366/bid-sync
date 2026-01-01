@@ -28,6 +28,7 @@ import {
 } from "lucide-react"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 import { TipTapEditor } from "@/components/editor/tiptap-editor"
+import { TitleEditor } from "@/components/editor/title-editor"
 import { Textarea } from "@/components/ui/textarea"
 import type { JSONContent } from "@tiptap/core"
 
@@ -259,12 +260,10 @@ export function ProposalEditor({
           <div className="space-y-4">
             <div>
               <Label htmlFor="title">Proposal Title *</Label>
-              <Input
-                id="title"
+              <TitleEditor
                 value={formData.title}
-                onChange={(e) => updateField("title", e.target.value)}
+                onChange={(value) => updateField("title", value)}
                 placeholder="Enter a descriptive title for your proposal"
-                className="border-yellow-400/20 focus:border-yellow-400"
               />
             </div>
 

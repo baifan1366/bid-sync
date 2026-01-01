@@ -29,8 +29,12 @@ import {
   Edit3,
   Eye,
   Users2,
-  MessageSquare
+  MessageSquare,
+  Pencil,
+  Check,
+  X
 } from "lucide-react"
+import { Input } from "@/components/ui/input"
 import { TipTapEditor } from "@/components/editor/tiptap-editor"
 type JSONContent = Record<string, unknown>
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
@@ -148,6 +152,9 @@ export function WorkspaceContent() {
     searchParams.get("proposal")
   )
   const [viewMode, setViewMode] = React.useState<"view" | "edit">("edit")
+  const [editingProposalId, setEditingProposalId] = React.useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = React.useState<string>("")
+  const [isSavingTitle, setIsSavingTitle] = React.useState(false)
 
   // Only fetch proposals if user is a bidding lead
   const shouldFetch = !!user?.id && user?.user_metadata?.role === 'bidding_lead'
@@ -172,7 +179,7 @@ export function WorkspaceContent() {
   }, [selectedProposalId, proposals])
 
   // Check if selected proposal is in draft status
-  const isDraft = selectedProposal?.status === 'draft'
+  const isDraft = selectedProposal?.status?.toLowerCase() === 'draft'
 
   // Fetch workspace document for the selected proposal's project
   const { data: workspaceData } = useGraphQLQuery<{ 
@@ -270,6 +277,61 @@ export function WorkspaceContent() {
     setSelectedProposalId(proposalId)
   }
 
+  const handleStartEditTitle = (e: React.MouseEvent, proposal: ProposalWithProject) => {
+    e.stopPropagation()
+    setEditingProposalId(proposal.id)
+    setEditingTitle(
+      typeof proposal.title === 'string' && !proposal.title.startsWith('[') && !proposal.title.startsWith('{')
+        ? proposal.title
+        : ""
+    )
+  }
+
+  const handleCancelEditTitle = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingProposalId(null)
+    setEditingTitle("")
+  }
+
+  const handleSaveTitle = async (e: React.MouseEvent, proposalId: string) => {
+    e.stopPropagation()
+    if (!editingTitle.trim()) {
+      alert("Proposal title cannot be empty")
+      return
+    }
+
+    setIsSavingTitle(true)
+    try {
+      const response = await fetch("/api/graphql", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: UPDATE_PROPOSAL,
+          variables: {
+            proposalId,
+            title: editingTitle.trim(),
+          },
+        }),
+      })
+
+      const result = await response.json()
+
+      if (result.errors) {
+        throw new Error(result.errors[0]?.message || "Failed to update title")
+      }
+
+      // Refresh data
+      window.location.reload()
+    } catch (error) {
+      console.error("Error updating title:", error)
+      alert(error instanceof Error ? error.message : "Failed to update title")
+    } finally {
+      setIsSavingTitle(false)
+      setEditingProposalId(null)
+      setEditingTitle("")
+    }
+  }
+
   const handleViewProject = (projectId: string) => {
     router.push(`/client-projects/${projectId}`)
   }
@@ -285,12 +347,17 @@ export function WorkspaceContent() {
           query: UPDATE_PROPOSAL,
           variables: {
             proposalId: selectedProposal.id,
-            ...data,
+            title: data.title,
+            content: data.content,
+            budgetEstimate: data.budgetEstimate,
+            timelineEstimate: data.timelineEstimate,
+            additionalInfo: data.additionalInfo,
           },
         }),
       })
 
       const result = await response.json()
+      console.log('Save proposal result:', result)
 
       if (result.errors) {
         throw new Error(result.errors[0]?.message || "Failed to save proposal")
@@ -439,7 +506,8 @@ export function WorkspaceContent() {
             </h2>
             <div className="space-y-3 max-h-[calc(100vh-200px)] overflow-y-auto pr-2">
               {proposals.map((proposal) => {
-                const statusInfo = statusColors[proposal.status] || statusColors.draft
+                const statusKey = proposal.status?.toLowerCase() || 'draft'
+                const statusInfo = statusColors[statusKey] || statusColors.draft
                 const isSelected = selectedProposalId === proposal.id
 
                 return (
@@ -452,11 +520,63 @@ export function WorkspaceContent() {
                   >
                     <div className="space-y-3 overflow-hidden">
                       <div className="overflow-hidden">
-                        <h3 className="font-semibold text-black dark:text-white mb-1 truncate">
-                          {typeof proposal.title === 'string' && !proposal.title.startsWith('[') && !proposal.title.startsWith('{') 
-                            ? proposal.title 
-                            : "Untitled Proposal"}
-                        </h3>
+                        {editingProposalId === proposal.id ? (
+                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            <Input
+                              value={editingTitle}
+                              onChange={(e) => setEditingTitle(e.target.value)}
+                              placeholder="Enter proposal title"
+                              className="h-8 text-sm border-yellow-400/40 focus:border-yellow-400"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleSaveTitle(e as unknown as React.MouseEvent, proposal.id)
+                                } else if (e.key === 'Escape') {
+                                  handleCancelEditTitle(e as unknown as React.MouseEvent)
+                                }
+                              }}
+                            />
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 shrink-0 hover:bg-green-500/10"
+                              onClick={(e) => handleSaveTitle(e, proposal.id)}
+                              disabled={isSavingTitle}
+                            >
+                              {isSavingTitle ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Check className="h-4 w-4 text-green-500" />
+                              )}
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-7 w-7 shrink-0 hover:bg-red-500/10"
+                              onClick={handleCancelEditTitle}
+                              disabled={isSavingTitle}
+                            >
+                              <X className="h-4 w-4 text-red-500" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="flex items-start justify-between gap-2">
+                            <h3 className="font-semibold text-black dark:text-white mb-1 truncate flex-1">
+                              {typeof proposal.title === 'string' && !proposal.title.startsWith('[') && !proposal.title.startsWith('{') 
+                                ? proposal.title 
+                                : "Untitled Proposal"}
+                            </h3>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-6 w-6 shrink-0 hover:bg-yellow-400/10"
+                              onClick={(e) => handleStartEditTitle(e, proposal)}
+                              title="Edit proposal title"
+                            >
+                              <Pencil className="h-3.5 w-3.5 text-muted-foreground hover:text-yellow-400" />
+                            </Button>
+                          </div>
+                        )}
                         <p className="text-sm text-muted-foreground truncate">
                           {proposal.project.title}
                         </p>
@@ -467,7 +587,7 @@ export function WorkspaceContent() {
                           className={`${statusInfo.bg} ${statusInfo.text} flex items-center gap-1`}
                         >
                           {statusInfo.icon}
-                          {proposal.status.replace(/_/g, " ")}
+                          {statusKey.replace(/_/g, " ")}
                         </Badge>
                       </div>
 

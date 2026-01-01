@@ -6559,7 +6559,7 @@ export const resolvers = {
         id: updatedProposal.id,
         title: updatedProposal.title,
         content: updatedProposal.content,
-        status: updatedProposal.status,
+        status: updatedProposal.status?.toUpperCase() || 'DRAFT',
         budgetEstimate: updatedProposal.budget_estimate,
         timelineEstimate: updatedProposal.timeline_estimate,
         additionalInfo: updatedProposal.additional_info,

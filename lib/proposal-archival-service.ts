@@ -394,7 +394,7 @@ export class ProposalArchivalService {
           title: proposal.title || 'Untitled Proposal',
           projectId: proposal.project_id,
           projectTitle: project?.title || 'Unknown Project',
-          status: proposal.status,
+          status: proposal.status?.toUpperCase() || 'DRAFT',
           leadId: proposal.lead_id,
           leadName: leadNames[proposal.lead_id] || 'Unknown',
           submittedAt: proposal.submitted_at || undefined,
