@@ -2877,38 +2877,48 @@ export const resolvers = {
         });
       }
 
-      // Get scores
-      const { data: scores, error: scoresError } = await supabase
+      // Get scores - use admin client to bypass RLS for scoring_criteria join
+      // This is needed because leads need to see criteria but don't have direct RLS access
+      const adminClient = createAdminClient();
+      const { data: scores, error: scoresError } = await adminClient
         .from('proposal_scores')
         .select('*, scoring_criteria(*)')
         .eq('proposal_id', proposalId)
         .eq('is_final', true);
 
       if (scoresError) {
+        console.error('Error fetching proposal scores:', scoresError);
         throw new GraphQLError('Failed to fetch proposal scores', {
           extensions: { code: 'INTERNAL_SERVER_ERROR' },
         });
       }
 
+      // Return empty array if no scores yet (newly submitted proposals won't have scores)
+      if (!scores || scores.length === 0) {
+        return [];
+      }
+
       // Get user details for each score
-      const adminClient = createAdminClient();
       const scoresWithDetails = await Promise.all(
-        (scores || []).map(async (score: any) => {
+        scores.map(async (score: any) => {
           const { data: userData } = await adminClient.auth.admin.getUserById(score.scored_by);
           const userRole = userData?.user?.user_metadata?.role || 'bidding_member';
           const defaultStatus = userRole === 'client' ? 'pending_verification' : 'verified';
+
+          // Handle case where scoring_criteria might be null
+          const criteria = score.scoring_criteria || {};
 
           return {
             id: score.id,
             proposalId: score.proposal_id,
             criterion: {
-              id: score.scoring_criteria.id,
-              templateId: score.scoring_criteria.template_id,
-              name: score.scoring_criteria.name,
-              description: score.scoring_criteria.description,
-              weight: score.scoring_criteria.weight,
-              orderIndex: score.scoring_criteria.order_index,
-              createdAt: score.scoring_criteria.created_at,
+              id: criteria.id || '',
+              templateId: criteria.template_id || '',
+              name: criteria.name || 'Unknown Criterion',
+              description: criteria.description || '',
+              weight: criteria.weight || 0,
+              orderIndex: criteria.order_index || 0,
+              createdAt: criteria.created_at || '',
             },
             rawScore: score.raw_score,
             weightedScore: score.weighted_score,

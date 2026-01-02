@@ -30,6 +30,7 @@ import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 import { TipTapEditor } from "@/components/editor/tiptap-editor"
 import { TitleEditor } from "@/components/editor/title-editor"
 import { Textarea } from "@/components/ui/textarea"
+import { useToast } from "@/components/ui/use-toast"
 import type { JSONContent } from "@tiptap/core"
 
 interface ProposalEditorProps {
@@ -63,10 +64,29 @@ export function ProposalEditor({
   onSave,
   onSubmit,
 }: ProposalEditorProps) {
+  const { toast } = useToast()
   const [isSaving, setIsSaving] = React.useState(false)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
+  // Parse initial content - it might be a JSON string or JSONContent object
+  const parseContent = React.useCallback((content: string | undefined): JSONContent | string => {
+    if (!content) return ""
+    if (typeof content === 'string') {
+      try {
+        const parsed = JSON.parse(content)
+        // Check if it's a valid TipTap JSONContent (has type: 'doc')
+        if (parsed && typeof parsed === 'object' && parsed.type === 'doc') {
+          return parsed as JSONContent
+        }
+        return content
+      } catch {
+        return content
+      }
+    }
+    return content
+  }, [])
+
   const [editorContent, setEditorContent] = React.useState<JSONContent | string>(
-    initialData?.content || ""
+    parseContent(initialData?.content)
   )
   const [formData, setFormData] = React.useState<ProposalFormData>({
     title: initialData?.title || "",
@@ -78,7 +98,7 @@ export function ProposalEditor({
 
   // Reset form when proposal changes
   React.useEffect(() => {
-    setEditorContent(initialData?.content || "")
+    setEditorContent(parseContent(initialData?.content))
     setFormData({
       title: initialData?.title || "",
       content: initialData?.content || "",
@@ -86,12 +106,14 @@ export function ProposalEditor({
       timelineEstimate: initialData?.timelineEstimate || "",
       additionalInfo: initialData?.additionalInfo || {},
     })
-  }, [proposalId, initialData?.title, initialData?.content, initialData?.budgetEstimate, initialData?.timelineEstimate, initialData?.additionalInfo])
+  }, [proposalId, initialData?.title, initialData?.content, initialData?.budgetEstimate, initialData?.timelineEstimate, initialData?.additionalInfo, parseContent])
 
   const handleEditorUpdate = (content: JSONContent) => {
-    // Convert JSONContent to HTML string for storage
-    const htmlContent = JSON.stringify(content)
-    setFormData((prev) => ({ ...prev, content: htmlContent }))
+    // Store as JSON string for database storage
+    const jsonString = JSON.stringify(content)
+    setFormData((prev) => ({ ...prev, content: jsonString }))
+    // Also update editor content state for proper rendering
+    setEditorContent(content)
   }
 
   const sortedRequirements = React.useMemo(
@@ -109,19 +131,63 @@ export function ProposalEditor({
   }
 
   const handleSubmit = async () => {
+    console.log('[ProposalEditor] handleSubmit called')
+    console.log('[ProposalEditor] formData:', {
+      title: formData.title,
+      contentLength: formData.content?.length,
+      budgetEstimate: formData.budgetEstimate,
+      timelineEstimate: formData.timelineEstimate,
+    })
+
     // Validate required fields
+    const validationErrors: string[] = []
+
+    // Check title
+    if (!formData.title?.trim()) {
+      validationErrors.push("Proposal title is required")
+    }
+
+    // Check content
+    if (!formData.content?.trim()) {
+      validationErrors.push("Proposal content is required")
+    }
+
+    // Check budget estimate
+    if (!formData.budgetEstimate || formData.budgetEstimate <= 0) {
+      validationErrors.push("Budget estimate must be a positive number")
+    }
+
+    // Check timeline estimate
+    if (!formData.timelineEstimate?.trim()) {
+      validationErrors.push("Timeline estimate is required")
+    }
+
+    // Check additional info requirements
     const missingRequired = sortedRequirements
       .filter((req) => req.required && !formData.additionalInfo[req.id])
       .map((req) => req.fieldName)
 
     if (missingRequired.length > 0) {
-      alert(`Please fill in all required fields: ${missingRequired.join(", ")}`)
+      validationErrors.push(`Missing required fields: ${missingRequired.join(", ")}`)
+    }
+
+    console.log('[ProposalEditor] validationErrors:', validationErrors)
+
+    if (validationErrors.length > 0) {
+      // Show all validation errors
+      toast({
+        title: "Validation Error",
+        description: validationErrors.join(". "),
+        variant: "destructive",
+      })
       return
     }
 
     setIsSubmitting(true)
     try {
+      console.log('[ProposalEditor] Calling onSubmit...')
       await onSubmit(formData)
+      console.log('[ProposalEditor] onSubmit completed')
     } finally {
       setIsSubmitting(false)
     }
@@ -282,7 +348,7 @@ export function ProposalEditor({
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="budget">Budget Estimate</Label>
+                <Label htmlFor="budget">Budget Estimate *</Label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -292,14 +358,14 @@ export function ProposalEditor({
                     onChange={(e) =>
                       updateField("budgetEstimate", parseFloat(e.target.value) || null)
                     }
-                    placeholder="0.00"
+                    placeholder="Enter your budget estimate"
                     className="pl-9 border-yellow-400/20 focus:border-yellow-400"
                   />
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="timeline">Timeline Estimate</Label>
+                <Label htmlFor="timeline">Timeline Estimate *</Label>
                 <div className="relative">
                   <Clock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -393,7 +459,7 @@ export function ProposalEditor({
 
         <Button
           onClick={handleSubmit}
-          disabled={isSaving || isSubmitting || !formData.title || !formData.content}
+          disabled={isSaving || isSubmitting}
           className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black font-semibold"
         >
           {isSubmitting ? (

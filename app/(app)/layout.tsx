@@ -6,6 +6,7 @@ import { Header } from "@/components/layout/header"
 import { MobileNav } from "@/components/layout/mobile-nav"
 import { RouteAnnouncer } from "@/components/layout/route-announcer"
 import { LayoutErrorBoundary } from "@/components/layout/layout-error-boundary"
+import { Toaster } from "@/components/ui/toaster"
 import { useUser } from "@/hooks/use-user"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -74,6 +75,9 @@ export default function AppLayout({
             {children}
           </div>
         </main>
+        
+        {/* Toast notifications */}
+        <Toaster />
       </div>
     </LayoutErrorBoundary>
   )

@@ -13,13 +13,14 @@ import { LeadScoreCard } from "@/components/lead/lead-score-card"
 import { useUser } from "@/hooks/use-user"
 import { useGraphQLQuery } from "@/hooks/use-graphql"
 import { useRealtimeRankings } from "@/hooks/use-realtime-rankings"
+import { useToast } from "@/components/ui/use-toast"
 import { gql } from "graphql-request"
 import { GET_PROPOSAL_SCORES, GET_PROPOSAL_RANKINGS } from "@/lib/graphql/queries"
-import { 
-  FileText, 
-  Clock, 
-  DollarSign, 
-  Users, 
+import {
+  FileText,
+  Clock,
+  DollarSign,
+  Users,
   Calendar,
   ExternalLink,
   AlertCircle,
@@ -148,6 +149,7 @@ export function WorkspaceContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user, loading: userLoading } = useUser()
+  const { toast } = useToast()
   const [selectedProposalId, setSelectedProposalId] = React.useState<string | null>(
     searchParams.get("proposal")
   )
@@ -296,7 +298,11 @@ export function WorkspaceContent() {
   const handleSaveTitle = async (e: React.MouseEvent, proposalId: string) => {
     e.stopPropagation()
     if (!editingTitle.trim()) {
-      alert("Proposal title cannot be empty")
+      toast({
+        title: "Validation Error",
+        description: "Proposal title cannot be empty",
+        variant: "destructive",
+      })
       return
     }
 
@@ -324,7 +330,11 @@ export function WorkspaceContent() {
       window.location.reload()
     } catch (error) {
       console.error("Error updating title:", error)
-      alert(error instanceof Error ? error.message : "Failed to update title")
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to update title",
+        variant: "destructive",
+      })
     } finally {
       setIsSavingTitle(false)
       setEditingProposalId(null)
@@ -337,89 +347,151 @@ export function WorkspaceContent() {
   }
 
   const handleSaveProposal = async (data: ProposalFormData) => {
-    if (!selectedProposal) return
+    if (!selectedProposal) {
+      console.error('[Save] No selected proposal')
+      return
+    }
+
+    console.log('[Save] Starting save for proposal:', selectedProposal.id)
+    console.log('[Save] Form data:', {
+      title: data.title,
+      contentLength: data.content?.length,
+      budgetEstimate: data.budgetEstimate,
+      timelineEstimate: data.timelineEstimate,
+      additionalInfoKeys: Object.keys(data.additionalInfo || {})
+    })
 
     try {
+      const variables = {
+        proposalId: selectedProposal.id,
+        title: data.title,
+        content: data.content,
+        budgetEstimate: data.budgetEstimate,
+        timelineEstimate: data.timelineEstimate,
+        additionalInfo: data.additionalInfo,
+      }
+      console.log('[Save] Variables:', JSON.stringify(variables, null, 2))
+
       const response = await fetch("/api/graphql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: UPDATE_PROPOSAL,
-          variables: {
-            proposalId: selectedProposal.id,
-            title: data.title,
-            content: data.content,
-            budgetEstimate: data.budgetEstimate,
-            timelineEstimate: data.timelineEstimate,
-            additionalInfo: data.additionalInfo,
-          },
+          variables,
         }),
       })
 
+      console.log('[Save] Response status:', response.status)
       const result = await response.json()
-      console.log('Save proposal result:', result)
+      console.log('[Save] Result:', JSON.stringify(result, null, 2))
 
       if (result.errors) {
+        console.error('[Save] GraphQL errors:', result.errors)
         throw new Error(result.errors[0]?.message || "Failed to save proposal")
       }
 
-      alert("Proposal saved successfully!")
-      // Refresh data
-      window.location.reload()
+      console.log('[Save] Save successful')
+      // Don't show alert or reload when called from submit flow
     } catch (error) {
-      console.error("Error saving proposal:", error)
-      alert(error instanceof Error ? error.message : "Failed to save proposal")
+      console.error("[Save] Error saving proposal:", error)
+      throw error // Re-throw to let caller handle it
+    }
+  }
+
+  // Wrapper for direct save button (shows toast without reload)
+  const handleDirectSave = async (data: ProposalFormData) => {
+    try {
+      await handleSaveProposal(data)
+      toast({
+        title: "Success",
+        description: "Proposal saved successfully!",
+      })
+      // Don't reload - user may want to continue editing or submit
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save proposal",
+        variant: "destructive",
+      })
     }
   }
 
   const handleSubmitProposal = async (data: ProposalFormData) => {
-    if (!selectedProposal) return
+    if (!selectedProposal) {
+      console.error('[Submit] No selected proposal')
+      return
+    }
+
+    console.log('[Submit] Starting submission for proposal:', selectedProposal.id)
+    console.log('[Submit] Form data:', {
+      title: data.title,
+      contentLength: data.content?.length,
+      budgetEstimate: data.budgetEstimate,
+      timelineEstimate: data.timelineEstimate,
+      additionalInfoKeys: Object.keys(data.additionalInfo || {})
+    })
 
     // First save the proposal
+    console.log('[Submit] Saving proposal first...')
     await handleSaveProposal(data)
+    console.log('[Submit] Save completed, now submitting...')
 
     try {
+      const submitInput = {
+        proposalId: selectedProposal.id,
+        projectId: selectedProposal.project.id,
+        title: data.title,
+        budgetEstimate: data.budgetEstimate || 0,
+        timelineEstimate: data.timelineEstimate,
+        executiveSummary: data.content,
+        additionalInfo: Object.entries(data.additionalInfo || {}).map(([fieldId, fieldValue]) => {
+          const req = selectedProposal.project.additionalInfoRequirements?.find((r: AdditionalInfoRequirement) => r.id === fieldId)
+          return {
+            fieldId,
+            fieldName: req?.fieldName || fieldId,
+            fieldValue
+          }
+        })
+      }
+      
+      console.log('[Submit] Submit input:', JSON.stringify(submitInput, null, 2))
+
       const response = await fetch("/api/graphql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: SUBMIT_PROPOSAL,
-          variables: {
-            input: {
-              proposalId: selectedProposal.id,
-              projectId: selectedProposal.project.id,
-              title: data.title,
-              budgetEstimate: data.budgetEstimate || 0,
-              timelineEstimate: data.timelineEstimate,
-              executiveSummary: data.content,
-              additionalInfo: Object.entries(data.additionalInfo || {}).map(([fieldId, fieldValue]) => {
-                const req = selectedProposal.project.additionalInfoRequirements?.find((r: AdditionalInfoRequirement) => r.id === fieldId)
-                return {
-                  fieldId,
-                  fieldName: req?.fieldName || fieldId,
-                  fieldValue
-                }
-              })
-            }
-          },
+          variables: { input: submitInput },
         }),
       })
 
+      console.log('[Submit] Response status:', response.status)
       const result = await response.json()
+      console.log('[Submit] Response result:', JSON.stringify(result, null, 2))
 
       if (result.errors) {
+        console.error('[Submit] GraphQL errors:', result.errors)
         throw new Error(result.errors[0]?.message || "Failed to submit proposal")
       }
 
       if (!result.data?.submitProposal?.success) {
+        console.error('[Submit] Submission failed:', result.data?.submitProposal)
         throw new Error(result.data?.submitProposal?.errors?.join(', ') || "Failed to submit proposal")
       }
 
-      alert("Proposal submitted successfully!")
-      router.push("/lead-dashboard")
+      console.log('[Submit] Success!')
+      toast({
+        title: "Success",
+        description: "Proposal submitted successfully!",
+      })
+      // Stay on current page - user can navigate manually if needed
     } catch (error) {
-      console.error("Error submitting proposal:", error)
-      alert(error instanceof Error ? error.message : "Failed to submit proposal")
+      console.error("[Submit] Error submitting proposal:", error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to submit proposal",
+        variant: "destructive",
+      })
     }
   }
 
@@ -637,7 +709,11 @@ export function WorkspaceContent() {
                               if (documentId) {
                                 router.push(`/editor/${documentId}`)
                               } else {
-                                alert('Document not found. Please try again.')
+                                toast({
+                                  title: "Error",
+                                  description: "Document not found. Please try again.",
+                                  variant: "destructive",
+                                })
                               }
                             }}
                             disabled={!documentId}
@@ -677,7 +753,7 @@ export function WorkspaceContent() {
                       additionalInfo: selectedProposal.additionalInfo || {},
                     }}
                     requirements={selectedProposal.project.additionalInfoRequirements || []}
-                    onSave={handleSaveProposal}
+                    onSave={handleDirectSave}
                     onSubmit={handleSubmitProposal}
                   />
                 )}

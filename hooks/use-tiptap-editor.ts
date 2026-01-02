@@ -1,5 +1,6 @@
 'use client'
 
+import * as React from 'react'
 import { useEffect } from 'react'
 import { useEditor, Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -43,7 +44,7 @@ export interface UseTipTapEditorOptions {
  */
 export function useTipTapEditor(options: UseTipTapEditorOptions = {}): Editor | null {
   const {
-    content = '',
+    content: rawContent = '',
     placeholder = 'Start writing your proposal...',
     editable = true,
     onUpdate,
@@ -54,6 +55,24 @@ export function useTipTapEditor(options: UseTipTapEditorOptions = {}): Editor | 
     userName = 'Anonymous',
     userColor = '#000000',
   } = options
+
+  // Parse content if it's a JSON string
+  const content = React.useMemo(() => {
+    if (!rawContent) return ''
+    if (typeof rawContent === 'string') {
+      try {
+        const parsed = JSON.parse(rawContent)
+        // Check if it's a valid TipTap JSONContent (has type: 'doc')
+        if (parsed && typeof parsed === 'object' && parsed.type === 'doc') {
+          return parsed
+        }
+        return rawContent
+      } catch {
+        return rawContent
+      }
+    }
+    return rawContent
+  }, [rawContent])
 
   const editor = useEditor({
     immediatelyRender: false, // Fix SSR hydration mismatch
