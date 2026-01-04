@@ -2189,8 +2189,11 @@ export const resolvers = {
         });
       }
 
+      // Use admin client to bypass RLS and access admin API
+      const adminClient = createAdminClient();
+
       // Get pending projects
-      const { data: projects, error } = await supabase
+      const { data: projects, error } = await adminClient
         .from('projects')
         .select('*')
         .eq('status', 'pending_review')
@@ -2207,7 +2210,7 @@ export const resolvers = {
       const clientsMap = new Map();
 
       for (const clientId of clientIds) {
-        const { data: { user: clientUser }, error: clientError } = await supabase.auth.admin.getUserById(clientId);
+        const { data: { user: clientUser }, error: clientError } = await adminClient.auth.admin.getUserById(clientId);
         if (!clientError && clientUser) {
           clientsMap.set(clientId, {
             id: clientUser.id,
@@ -2321,11 +2324,14 @@ export const resolvers = {
         });
       }
 
+      // Use admin client to bypass RLS for analytics
+      const adminClient = createAdminClient();
+
       const from = dateFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const to = dateTo || new Date().toISOString();
 
-      // Call the analytics function
-      const { data, error } = await supabase.rpc('calculate_platform_analytics', {
+      // Call the analytics function using admin client
+      const { data, error } = await adminClient.rpc('calculate_platform_analytics', {
         p_date_from: from,
         p_date_to: to,
       });
@@ -2337,15 +2343,15 @@ export const resolvers = {
       }
 
       return {
-        userGrowth: data.userGrowth || [],
-        projectStats: data.projectStats || {
+        userGrowth: data?.userGrowth || [],
+        projectStats: data?.projectStats || {
           total: 0,
           pending: 0,
           open: 0,
           closed: 0,
           awarded: 0,
         },
-        proposalStats: data.proposalStats || {
+        proposalStats: data?.proposalStats || {
           total: 0,
           draft: 0,
           submitted: 0,
@@ -2382,11 +2388,14 @@ export const resolvers = {
         });
       }
 
+      // Use admin client to bypass RLS for analytics
+      const adminClient = createAdminClient();
+
       const from = dateFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const to = dateTo || new Date().toISOString();
 
       // Calculate scoring usage percentage
-      const { data: projectsData, error: projectsError } = await supabase
+      const { data: projectsData, error: projectsError } = await adminClient
         .from('projects')
         .select('id')
         .gte('created_at', from)
@@ -2400,7 +2409,7 @@ export const resolvers = {
 
       const totalProjects = projectsData?.length || 0;
 
-      const { data: templatesData, error: templatesError } = await supabase
+      const { data: templatesData, error: templatesError } = await adminClient
         .from('scoring_templates')
         .select('project_id')
         .gte('created_at', from)
@@ -2416,7 +2425,7 @@ export const resolvers = {
       const scoringUsagePercentage = totalProjects > 0 ? (projectsWithScoring / totalProjects) * 100 : 0;
 
       // Calculate average proposals scored per project
-      const { data: scoresData, error: scoresError } = await supabase
+      const { data: scoresData, error: scoresError } = await adminClient
         .from('proposal_scores')
         .select('proposal_id')
         .eq('is_final', true)
@@ -2433,7 +2442,7 @@ export const resolvers = {
       const averageProposalsScored = projectsWithScoring > 0 ? uniqueScoredProposals / projectsWithScoring : 0;
 
       // Identify most common criteria
-      const { data: criteriaData, error: criteriaError } = await supabase
+      const { data: criteriaData, error: criteriaError } = await adminClient
         .from('scoring_criteria')
         .select('name, template_id')
         .gte('created_at', from)
@@ -2461,7 +2470,7 @@ export const resolvers = {
         .slice(0, 10);
 
       // Calculate average scoring duration (from first score to finalization)
-      const { data: scoringDurations, error: durationError } = await supabase.rpc(
+      const { data: scoringDurations, error: durationError } = await adminClient.rpc(
         'calculate_average_scoring_duration',
         {
           p_date_from: from,
@@ -2558,8 +2567,11 @@ export const resolvers = {
         });
       }
 
-      // Build query
-      let query = supabase
+      // Use admin client to bypass RLS - admin needs to see ALL proposals
+      const adminClient = createAdminClient();
+
+      // Build query using admin client to bypass RLS
+      let query = adminClient
         .from('proposals')
         .select(`
           id,
@@ -2592,12 +2604,11 @@ export const resolvers = {
         });
       }
 
-      // Get related data (projects, users)
-      const adminClient = createAdminClient();
+      // Get related data (projects, users) - use adminClient to bypass RLS
       const proposalsWithDetails = await Promise.all(
         (proposals || []).map(async (proposal: any) => {
-          // Get project
-          const { data: project } = await supabase
+          // Get project using admin client
+          const { data: project } = await adminClient
             .from('projects')
             .select('id, title')
             .eq('id', proposal.project_id)
@@ -2608,7 +2619,7 @@ export const resolvers = {
 
           // Try to find bidding team through bid_team_members table
           let biddingTeam = null;
-          const { data: teamMember } = await supabase
+          const { data: teamMember } = await adminClient
             .from('bid_team_members')
             .select('bidding_team_id, bidding_teams(id, name)')
             .eq('user_id', proposal.lead_id)
@@ -2675,8 +2686,11 @@ export const resolvers = {
         });
       }
 
+      // Use admin client to bypass RLS
+      const adminClient = createAdminClient();
+
       // Query contract_templates table (the actual table name)
-      const { data: templates, error } = await supabase
+      const { data: templates, error } = await adminClient
         .from('contract_templates')
         .select('*')
         .order('created_at', { ascending: false });
