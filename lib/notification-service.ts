@@ -14,7 +14,7 @@
  * For types, import from '@/lib/notification-types' instead.
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createAdminClient } from '@/lib/supabase/server';
 
 // Re-export types for convenience
 export type {
@@ -146,9 +146,11 @@ export class NotificationService {
       }
 
       const supabase = await createClient();
+      // Use admin client for inserting notifications to bypass RLS
+      const adminClient = createAdminClient();
 
-      // Verify user exists
-      const { data: user, error: userError } = await supabase
+      // Verify user exists using admin client
+      const { data: user, error: userError } = await adminClient
         .from('users')
         .select('id, email, full_name')
         .eq('id', input.userId)
@@ -172,8 +174,8 @@ export class NotificationService {
         };
       }
 
-      // Requirement 1.1: Create in-app notification
-      const { data: notification, error: notificationError } = await supabase
+      // Requirement 1.1: Create in-app notification using admin client to bypass RLS
+      const { data: notification, error: notificationError } = await adminClient
         .from('notification_queue')
         .insert({
           user_id: input.userId,
@@ -210,7 +212,7 @@ export class NotificationService {
 
           // Mark as sent via email if successful
           if (emailResult.success) {
-            await supabase
+            await adminClient
               .from('notification_queue')
               .update({ sent_via_email: true })
               .eq('id', notification.id);
@@ -465,10 +467,11 @@ export class NotificationService {
         return true;
       }
 
-      const supabase = await createClient();
+      // Use admin client to bypass RLS when checking preferences
+      const adminClient = createAdminClient();
 
       // Get user preferences
-      const { data: preferences, error } = await supabase
+      const { data: preferences, error } = await adminClient
         .from('user_notification_preferences')
         .select('*')
         .eq('user_id', userId)
@@ -516,10 +519,11 @@ export class NotificationService {
         return true;
       }
 
-      const supabase = await createClient();
+      // Use admin client to bypass RLS when checking preferences
+      const adminClient = createAdminClient();
 
       // Get user preferences
-      const { data: preferences, error } = await supabase
+      const { data: preferences, error } = await adminClient
         .from('user_notification_preferences')
         .select('email_notifications')
         .eq('user_id', userId)

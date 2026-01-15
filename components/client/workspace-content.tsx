@@ -110,6 +110,7 @@ const GET_WORKSPACE_DOCUMENT = gql`
       documents {
         id
         title
+        content
       }
     }
   }
@@ -184,10 +185,10 @@ export function WorkspaceContent() {
   const isDraft = selectedProposal?.status?.toLowerCase() === 'draft'
 
   // Fetch workspace document for the selected proposal's project
-  const { data: workspaceData } = useGraphQLQuery<{ 
+  const { data: workspaceData, refetch: refetchWorkspace } = useGraphQLQuery<{ 
     workspaceByProject: { 
       id: string
-      documents: Array<{ id: string; title: string }> 
+      documents: Array<{ id: string; title: string; content: any }> 
     } 
   }>(
     ['workspace-document', selectedProposal?.project.id || 'none'],
@@ -195,12 +196,15 @@ export function WorkspaceContent() {
     { projectId: selectedProposal?.project.id || '' },
     {
       enabled: !!selectedProposal?.project.id,
-      staleTime: 5 * 60 * 1000,
+      staleTime: 30 * 1000, // Reduce stale time to 30 seconds for fresher data
     }
   )
 
   // Get the first document ID from the workspace (main proposal document)
   const documentId = workspaceData?.workspaceByProject?.documents?.[0]?.id
+  
+  // Get document content from workspace_documents (source of truth for collaborative editor)
+  const documentContent = workspaceData?.workspaceByProject?.documents?.[0]?.content
 
   // Debug logging
   React.useEffect(() => {
@@ -747,7 +751,11 @@ export function WorkspaceContent() {
                     projectId={selectedProposal.project.id}
                     initialData={{
                       title: selectedProposal.title || "",
-                      content: selectedProposal.content || "",
+                      // Prefer document content from workspace_documents (collaborative editor source)
+                      // Fall back to proposal content if document content is not available
+                      content: documentContent 
+                        ? (typeof documentContent === 'string' ? documentContent : JSON.stringify(documentContent))
+                        : (selectedProposal.content || ""),
                       budgetEstimate: selectedProposal.budgetEstimate || undefined,
                       timelineEstimate: selectedProposal.timelineEstimate || "",
                       additionalInfo: selectedProposal.additionalInfo || {},
@@ -775,11 +783,12 @@ export function WorkspaceContent() {
                               return title
                             })()}
                           </h3>
-                          {selectedProposal.content ? (
+                          {(documentContent || selectedProposal.content) ? (
                             <div className="overflow-hidden">
                               <TipTapEditor
                                 content={(() => {
-                                  const content = selectedProposal.content
+                                  // Prefer document content from workspace_documents
+                                  const content = documentContent || selectedProposal.content
                                   if (!content) return ""
                                   if (typeof content === 'string') {
                                     try {

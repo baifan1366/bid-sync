@@ -17,6 +17,30 @@ import { ProgressTrackerService } from '@/lib/progress-tracker-service';
 import { SectionManagementService } from '@/lib/section-management-service';
 import { ProposalService } from '@/lib/proposal-service';
 
+// Helper function to map database project to GraphQL schema
+const mapProject = (project: any) => ({
+  id: project.id,
+  clientId: project.client_id,
+  title: project.title,
+  description: project.description,
+  status: project.status?.toUpperCase() || 'PENDING_REVIEW',
+  budget: project.budget,
+  budgetMin: project.budget_min,
+  budgetMax: project.budget_max,
+  deadline: project.deadline,
+  additionalInfoRequirements: (project.additional_info_requirements || []).map((req: any) => ({
+    id: req.id,
+    fieldName: req.fieldName,
+    fieldType: req.fieldType?.toUpperCase() || 'TEXT',
+    required: req.required ?? false,
+    helpText: req.helpText || null,
+    options: req.options || [],
+    order: req.order ?? 0,
+  })),
+  createdAt: project.created_at,
+  updatedAt: project.updated_at,
+});
+
 export const resolvers = {
   Query: {
     me: async (_: any, __: any, context: any) => {
@@ -77,7 +101,7 @@ export const resolvers = {
         });
       }
 
-      return projects || [];
+      return (projects || []).map(mapProject);
     },
 
     openProjects: async () => {
@@ -97,7 +121,7 @@ export const resolvers = {
         });
       }
 
-      return projects || [];
+      return (projects || []).map(mapProject);
     },
 
     project: async (_: any, { id }: { id: string }) => {
@@ -130,7 +154,7 @@ export const resolvers = {
         });
       }
 
-      return project;
+      return mapProject(project);
     },
 
     projectWithProposals: async (_: any, { projectId }: { projectId: string }) => {
@@ -1241,11 +1265,17 @@ export const resolvers = {
           created_at,
           projects (
             id,
+            client_id,
             title,
             description,
+            budget,
+            budget_min,
+            budget_max,
             deadline,
             status,
-            additional_info_requirements
+            additional_info_requirements,
+            created_at,
+            updated_at
           )
         `)
         .eq('lead_id', leadId)
@@ -1269,18 +1299,22 @@ export const resolvers = {
         submissionDate: proposal.submitted_at || proposal.created_at,
         project: {
           id: proposal.projects.id,
+          clientId: proposal.projects.client_id,
           title: proposal.projects.title,
           description: proposal.projects.description,
+          budget: proposal.projects.budget,
+          budgetMin: proposal.projects.budget_min,
+          budgetMax: proposal.projects.budget_max,
           deadline: proposal.projects.deadline,
           status: proposal.projects.status?.toUpperCase() || 'PENDING_REVIEW',
           additionalInfoRequirements: (proposal.projects.additional_info_requirements || []).map((req: any) => ({
             id: req.id,
             fieldName: req.fieldName,
-            fieldType: req.fieldType.toUpperCase(),
-            required: req.required,
+            fieldType: req.fieldType?.toUpperCase() || 'TEXT',
+            required: req.required ?? false,
             helpText: req.helpText || null,
             options: req.options || [],
-            order: req.order,
+            order: req.order ?? 0,
           })),
           createdAt: proposal.projects.created_at,
           updatedAt: proposal.projects.updated_at,
@@ -2228,9 +2262,19 @@ export const resolvers = {
         title: project.title,
         description: project.description,
         budget: project.budget,
+        budgetMin: project.budget_min,
+        budgetMax: project.budget_max,
         deadline: project.deadline,
-        status: project.status,
-        additionalInfoRequirements: project.additional_info_requirements || [],
+        status: project.status?.toUpperCase() || 'PENDING_REVIEW',
+        additionalInfoRequirements: (project.additional_info_requirements || []).map((req: any) => ({
+          id: req.id,
+          fieldName: req.fieldName,
+          fieldType: req.fieldType?.toUpperCase() || 'TEXT',
+          required: req.required ?? false,
+          helpText: req.helpText || null,
+          options: req.options || [],
+          order: req.order ?? 0,
+        })),
         createdAt: project.created_at,
         updatedAt: project.updated_at,
       }));
@@ -2307,17 +2351,20 @@ export const resolvers = {
       _: any,
       { dateFrom, dateTo }: { dateFrom?: string; dateTo?: string }
     ) => {
+      console.log('[platformAnalytics] Starting query...');
       const supabase = await createClient();
       
       // Verify admin
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
+        console.log('[platformAnalytics] Auth error:', authError);
         throw new GraphQLError('Not authenticated', {
           extensions: { code: 'UNAUTHENTICATED' },
         });
       }
 
       const role = user.user_metadata?.role;
+      console.log('[platformAnalytics] User role:', role);
       if (role !== 'admin') {
         throw new GraphQLError('Admin access required', {
           extensions: { code: 'FORBIDDEN' },
@@ -2329,42 +2376,107 @@ export const resolvers = {
 
       const from = dateFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
       const to = dateTo || new Date().toISOString();
+      console.log('[platformAnalytics] Date range:', { from, to });
 
-      // Call the analytics function using admin client
-      const { data, error } = await adminClient.rpc('calculate_platform_analytics', {
-        p_date_from: from,
-        p_date_to: to,
-      });
+      // Try direct queries instead of RPC function
+      try {
+        // Get user growth
+        console.log('[platformAnalytics] Fetching user growth...');
+        const { data: usersData, error: usersError } = await adminClient.auth.admin.listUsers();
+        
+        if (usersError) {
+          console.error('[platformAnalytics] Users error:', usersError);
+        }
+        
+        const users = usersData?.users || [];
+        const filteredUsers = users.filter((u: any) => {
+          const createdAt = new Date(u.created_at);
+          return createdAt >= new Date(from) && createdAt <= new Date(to);
+        });
+        
+        // Group by date
+        const userGrowthMap = new Map<string, number>();
+        filteredUsers.forEach((u: any) => {
+          const date = new Date(u.created_at).toISOString().split('T')[0];
+          userGrowthMap.set(date, (userGrowthMap.get(date) || 0) + 1);
+        });
+        
+        const userGrowth = Array.from(userGrowthMap.entries())
+          .map(([date, value]) => ({ date, value }))
+          .sort((a, b) => a.date.localeCompare(b.date));
+        
+        console.log('[platformAnalytics] User growth:', userGrowth.length, 'entries');
 
-      if (error) {
+        // Get project stats
+        console.log('[platformAnalytics] Fetching project stats...');
+        const { data: projects, error: projectsError } = await adminClient
+          .from('projects')
+          .select('status, created_at')
+          .gte('created_at', from)
+          .lte('created_at', to);
+
+        if (projectsError) {
+          console.error('[platformAnalytics] Projects error:', projectsError);
+        }
+
+        const projectStats = {
+          total: projects?.length || 0,
+          pending: projects?.filter((p: any) => p.status === 'pending_review').length || 0,
+          open: projects?.filter((p: any) => p.status === 'open').length || 0,
+          closed: projects?.filter((p: any) => p.status === 'closed').length || 0,
+          awarded: projects?.filter((p: any) => p.status === 'awarded').length || 0,
+        };
+        console.log('[platformAnalytics] Project stats:', projectStats);
+
+        // Get proposal stats
+        console.log('[platformAnalytics] Fetching proposal stats...');
+        const { data: proposals, error: proposalsError } = await adminClient
+          .from('proposals')
+          .select('status, created_at')
+          .gte('created_at', from)
+          .lte('created_at', to);
+
+        if (proposalsError) {
+          console.error('[platformAnalytics] Proposals error:', proposalsError);
+        }
+
+        const proposalStats = {
+          total: proposals?.length || 0,
+          draft: proposals?.filter((p: any) => p.status === 'draft').length || 0,
+          submitted: proposals?.filter((p: any) => p.status === 'submitted').length || 0,
+          accepted: proposals?.filter((p: any) => p.status === 'approved').length || 0,
+          rejected: proposals?.filter((p: any) => p.status === 'rejected').length || 0,
+        };
+        console.log('[platformAnalytics] Proposal stats:', proposalStats);
+
+        // Calculate conversion rates
+        const totalProjects = projects?.length || 0;
+        const approvedProjects = projects?.filter((p: any) => p.status !== 'pending_review').length || 0;
+        const projectApprovalRate = totalProjects > 0 ? (approvedProjects / totalProjects) * 100 : 0;
+
+        const totalProposals = proposals?.length || 0;
+        const acceptedProposals = proposals?.filter((p: any) => p.status === 'approved').length || 0;
+        const proposalAcceptanceRate = totalProposals > 0 ? (acceptedProposals / totalProposals) * 100 : 0;
+
+        console.log('[platformAnalytics] Query completed successfully');
+
+        return {
+          userGrowth,
+          projectStats,
+          proposalStats,
+          revenueData: [],
+          conversionRates: {
+            projectApprovalRate: Math.round(projectApprovalRate * 100) / 100,
+            proposalAcceptanceRate: Math.round(proposalAcceptanceRate * 100) / 100,
+            clientRetentionRate: 0,
+          },
+        };
+      } catch (err) {
+        console.error('[platformAnalytics] Unexpected error:', err);
         throw new GraphQLError('Failed to calculate analytics', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          extensions: { code: 'INTERNAL_SERVER_ERROR', details: String(err) },
         });
       }
-
-      return {
-        userGrowth: data?.userGrowth || [],
-        projectStats: data?.projectStats || {
-          total: 0,
-          pending: 0,
-          open: 0,
-          closed: 0,
-          awarded: 0,
-        },
-        proposalStats: data?.proposalStats || {
-          total: 0,
-          draft: 0,
-          submitted: 0,
-          accepted: 0,
-          rejected: 0,
-        },
-        revenueData: [],
-        conversionRates: {
-          projectApprovalRate: 0,
-          proposalAcceptanceRate: 0,
-          clientRetentionRate: 0,
-        },
-      };
     },
 
     scoringAnalytics: async (
@@ -2532,7 +2644,7 @@ export const resolvers = {
       return sections.map((section: any) => ({
         id: section.id,
         title: section.title,
-        status: section.status,
+        status: section.status?.toUpperCase() || 'NOT_STARTED',
         deadline: section.deadline,
         document: {
           id: section.document.id,
@@ -3690,8 +3802,10 @@ export const resolvers = {
           clientId: project.clientId,
           title: project.title,
           description: project.description,
-          status: project.status,
+          status: project.status?.toUpperCase() || 'OPEN',
           budget: project.budget,
+          budgetMin: project.budgetMin,
+          budgetMax: project.budgetMax,
           deadline: project.deadline,
           additionalInfoRequirements: project.additionalInfoRequirements || [],
           createdAt: project.createdAt,
@@ -3728,8 +3842,10 @@ export const resolvers = {
           clientId: project.clientId,
           title: project.title,
           description: project.description,
-          status: project.status,
+          status: project.status?.toUpperCase() || 'OPEN',
           budget: project.budget,
+          budgetMin: project.budgetMin,
+          budgetMax: project.budgetMax,
           deadline: project.deadline,
           additionalInfoRequirements: project.additionalInfoRequirements || [],
           createdAt: project.createdAt,
@@ -3762,7 +3878,7 @@ export const resolvers = {
           } : null,
           title: project.title,
           description: project.description,
-          status: project.status,
+          status: project.status?.toUpperCase() || 'OPEN',
           budget: project.budget,
           deadline: project.deadline,
           additionalInfoRequirements: project.additionalInfoRequirements || [],
@@ -4745,8 +4861,24 @@ export const resolvers = {
         .eq('user_id', user.id)
         .eq('read', false);
 
+      // Map database fields to GraphQL schema fields
+      const mappedNotifications = (notifications || []).map((n: any) => ({
+        id: n.id,
+        userId: n.user_id,
+        type: n.type,
+        title: n.title,
+        body: n.body,
+        data: n.data,
+        read: n.read,
+        readAt: n.read_at,
+        sentViaEmail: n.sent_via_email || false,
+        legalHold: n.legal_hold || false,
+        createdAt: n.created_at,
+        updatedAt: n.updated_at,
+      }));
+
       return {
-        notifications: notifications || [],
+        notifications: mappedNotifications,
         unreadCount: unreadCount || 0,
       };
     },
@@ -4991,6 +5123,76 @@ export const resolvers = {
         throw new GraphQLError('Failed to send message', {
           extensions: { code: 'INTERNAL_SERVER_ERROR' },
         });
+      }
+
+      // Send notification to message recipient(s)
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        // Get project details
+        const { data: project } = await supabase
+          .from('projects')
+          .select('client_id, title')
+          .eq('id', input.projectId)
+          .single();
+
+        if (project) {
+          const senderName = user.user_metadata?.full_name || user.user_metadata?.name || 'Someone';
+          const senderRole = user.user_metadata?.role;
+          
+          if (senderRole === 'client') {
+            // Client sent message - notify the lead(s)
+            if (input.proposalId) {
+              // Notify specific proposal lead
+              const { data: proposal } = await supabase
+                .from('proposals')
+                .select('lead_id')
+                .eq('id', input.proposalId)
+                .single();
+              
+              if (proposal && proposal.lead_id !== user.id) {
+                await NotificationService.createNotification({
+                  userId: proposal.lead_id,
+                  type: 'message_received',
+                  title: 'New Message from Client',
+                  body: `${senderName} sent you a message about "${project.title}": "${input.content.substring(0, 80)}${input.content.length > 80 ? '...' : ''}"`,
+                  data: {
+                    projectId: input.projectId,
+                    proposalId: input.proposalId,
+                    messageId: message.id,
+                    senderId: user.id,
+                  },
+                  sendEmail: true,
+                  priority: NotificationService.NotificationPriority.HIGH,
+                }).catch(error => {
+                  console.error('Failed to send message notification:', error);
+                });
+              }
+            }
+          } else {
+            // Lead/member sent message - notify the client
+            if (project.client_id !== user.id) {
+              await NotificationService.createNotification({
+                userId: project.client_id,
+                type: 'message_received',
+                title: 'New Message on Your Project',
+                body: `${senderName} sent you a message about "${project.title}": "${input.content.substring(0, 80)}${input.content.length > 80 ? '...' : ''}"`,
+                data: {
+                  projectId: input.projectId,
+                  proposalId: input.proposalId,
+                  messageId: message.id,
+                  senderId: user.id,
+                },
+                sendEmail: true,
+                priority: NotificationService.NotificationPriority.HIGH,
+              }).catch(error => {
+                console.error('Failed to send message notification:', error);
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error sending message notification:', error);
       }
 
       return {
@@ -6323,6 +6525,28 @@ export const resolvers = {
         reason: 'User account reactivated',
       });
 
+      // Send notification to reactivated user
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        await NotificationService.createNotification({
+          userId: userId,
+          type: 'verification_approved', // Reusing this type for account reactivation
+          title: '✅ Account Reactivated',
+          body: 'Your account has been reactivated. You can now access all platform features again.',
+          data: {
+            reactivatedAt: new Date().toISOString(),
+            reactivatedBy: user.id,
+          },
+          sendEmail: true,
+          priority: NotificationService.NotificationPriority.HIGH,
+        }).catch(error => {
+          console.error('Failed to send account reactivation notification:', error);
+        });
+      } catch (error) {
+        console.error('Error sending account reactivation notification:', error);
+      }
+
       const u = updatedUser.user;
       const role = u.user_metadata?.role || 'bidding_member';
       const defaultStatus = role === 'client' ? 'pending_verification' : 'verified';
@@ -6568,6 +6792,75 @@ export const resolvers = {
         });
       }
 
+      // Sync content to workspace_documents if content was updated
+      // This ensures collaborative editor shows the latest content from workspace page
+      if (content !== undefined) {
+        try {
+          // Find the workspace for this proposal's project
+          const { data: workspace } = await supabase
+            .from('workspaces')
+            .select('id')
+            .eq('project_id', proposal.project_id)
+            .eq('lead_id', user.id)
+            .single();
+
+          if (workspace) {
+            // Find the main document in this workspace
+            const { data: document } = await supabase
+              .from('workspace_documents')
+              .select('id')
+              .eq('workspace_id', workspace.id)
+              .order('created_at', { ascending: true })
+              .limit(1)
+              .single();
+
+            if (document) {
+              // Parse content if it's a JSON string, otherwise wrap it in TipTap format
+              let documentContent: any;
+              try {
+                documentContent = typeof content === 'string' ? JSON.parse(content) : content;
+              } catch {
+                // If content is plain text, wrap it in TipTap document format
+                documentContent = {
+                  type: 'doc',
+                  content: [
+                    {
+                      type: 'paragraph',
+                      content: content ? [{ type: 'text', text: content }] : []
+                    }
+                  ]
+                };
+              }
+
+              const { error: docUpdateError } = await adminClient
+                .from('workspace_documents')
+                .update({
+                  content: documentContent,
+                  last_edited_by: user.id,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', document.id);
+
+              if (docUpdateError) {
+                console.error('[updateProposal] Failed to sync content to workspace document:', docUpdateError);
+              } else {
+                console.log('[updateProposal] Successfully synced content to workspace document:', document.id);
+              }
+            }
+          }
+        } catch (syncError) {
+          console.error('[updateProposal] Error syncing content to workspace document:', syncError);
+          // Don't fail the proposal update, just log the error
+        }
+      }
+
+      // Get project for response
+      const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', updatedProposal.project_id)
+        .single();
+
       // Log activity
       await logActivity({
         userId: user.id,
@@ -6581,13 +6874,40 @@ export const resolvers = {
 
       return {
         id: updatedProposal.id,
+        projectId: updatedProposal.project_id,
+        leadId: updatedProposal.lead_id,
         title: updatedProposal.title,
         content: updatedProposal.content,
         status: updatedProposal.status?.toUpperCase() || 'DRAFT',
         budgetEstimate: updatedProposal.budget_estimate,
         timelineEstimate: updatedProposal.timeline_estimate,
+        executiveSummary: updatedProposal.executive_summary,
         additionalInfo: updatedProposal.additional_info,
+        submissionDate: updatedProposal.submitted_at,
+        createdAt: updatedProposal.created_at,
         updatedAt: updatedProposal.updated_at,
+        project: project ? {
+          id: project.id,
+          clientId: project.client_id,
+          title: project.title,
+          description: project.description,
+          status: project.status?.toUpperCase() || 'PENDING_REVIEW',
+          budget: project.budget,
+          budgetMin: project.budget_min,
+          budgetMax: project.budget_max,
+          deadline: project.deadline,
+          additionalInfoRequirements: (project.additional_info_requirements || []).map((req: any) => ({
+            id: req.id,
+            fieldName: req.fieldName,
+            fieldType: req.fieldType?.toUpperCase() || 'TEXT',
+            required: req.required ?? false,
+            helpText: req.helpText || null,
+            options: req.options || [],
+            order: req.order ?? 0,
+          })),
+          createdAt: project.created_at,
+          updatedAt: project.updated_at,
+        } : null,
       };
     },
 
@@ -6854,6 +7174,47 @@ export const resolvers = {
             document: null,
             error: contentResult.error || 'Failed to update document content',
           };
+        }
+
+        // Sync document content to the corresponding proposal
+        // This ensures workspace page shows the latest content from collaborative editor
+        try {
+          // Get workspace info from the document
+          const { data: docWithWorkspace } = await supabase
+            .from('workspace_documents')
+            .select('workspace_id, workspaces!inner(project_id, lead_id)')
+            .eq('id', documentId)
+            .single();
+
+          if (docWithWorkspace) {
+            const workspace = docWithWorkspace.workspaces as any;
+            const projectId = workspace.project_id;
+            const leadId = workspace.lead_id;
+
+            // Update the proposal content for this project and lead
+            const contentString = typeof input.content === 'string' 
+              ? input.content 
+              : JSON.stringify(input.content);
+
+            const { error: proposalUpdateError } = await supabase
+              .from('proposals')
+              .update({ 
+                content: contentString,
+                updated_at: new Date().toISOString()
+              })
+              .eq('project_id', projectId)
+              .eq('lead_id', leadId);
+
+            if (proposalUpdateError) {
+              console.error('[updateDocument] Failed to sync content to proposal:', proposalUpdateError);
+              // Don't fail the document update, just log the error
+            } else {
+              console.log('[updateDocument] Successfully synced content to proposal for project:', projectId);
+            }
+          }
+        } catch (syncError) {
+          console.error('[updateDocument] Error syncing content to proposal:', syncError);
+          // Don't fail the document update, just log the error
         }
 
         return {
@@ -8116,15 +8477,49 @@ export const resolvers = {
         metadata: { notes },
       });
 
+      // Send notification to project client
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        await NotificationService.createNotification({
+          userId: project.client_id,
+          type: 'project_approved',
+          title: '🎉 Project Approved',
+          body: `Your project "${project.title}" has been approved and is now open for proposals.`,
+          data: {
+            projectId: project.id,
+            projectTitle: project.title,
+            approvedBy: user.id,
+            notes: notes || null,
+          },
+          sendEmail: true,
+          priority: NotificationService.NotificationPriority.HIGH,
+        }).catch(error => {
+          console.error('Failed to send project approval notification:', error);
+        });
+      } catch (error) {
+        console.error('Error sending project approval notification:', error);
+      }
+
       return {
         id: project.id,
         clientId: project.client_id,
         title: project.title,
         description: project.description,
         budget: project.budget,
+        budgetMin: project.budget_min,
+        budgetMax: project.budget_max,
         deadline: project.deadline,
-        status: project.status,
-        additionalInfoRequirements: project.additional_info_requirements || [],
+        status: project.status?.toUpperCase() || 'OPEN',
+        additionalInfoRequirements: (project.additional_info_requirements || []).map((req: any) => ({
+          id: req.id,
+          fieldName: req.fieldName,
+          fieldType: req.fieldType?.toUpperCase() || 'TEXT',
+          required: req.required ?? false,
+          helpText: req.helpText || null,
+          options: req.options || [],
+          order: req.order ?? 0,
+        })),
         createdAt: project.created_at,
         updatedAt: project.updated_at,
       };
@@ -8191,15 +8586,49 @@ export const resolvers = {
         metadata: { reason },
       });
 
+      // Send notification to project client
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        await NotificationService.createNotification({
+          userId: project.client_id,
+          type: 'project_rejected',
+          title: 'Project Not Approved',
+          body: `Your project "${project.title}" was not approved. Reason: ${reason}`,
+          data: {
+            projectId: project.id,
+            projectTitle: project.title,
+            rejectedBy: user.id,
+            reason,
+          },
+          sendEmail: true,
+          priority: NotificationService.NotificationPriority.HIGH,
+        }).catch(error => {
+          console.error('Failed to send project rejection notification:', error);
+        });
+      } catch (error) {
+        console.error('Error sending project rejection notification:', error);
+      }
+
       return {
         id: project.id,
         clientId: project.client_id,
         title: project.title,
         description: project.description,
         budget: project.budget,
+        budgetMin: project.budget_min,
+        budgetMax: project.budget_max,
         deadline: project.deadline,
-        status: project.status,
-        additionalInfoRequirements: project.additional_info_requirements || [],
+        status: project.status?.toUpperCase() || 'CLOSED',
+        additionalInfoRequirements: (project.additional_info_requirements || []).map((req: any) => ({
+          id: req.id,
+          fieldName: req.fieldName,
+          fieldType: req.fieldType?.toUpperCase() || 'TEXT',
+          required: req.required ?? false,
+          helpText: req.helpText || null,
+          options: req.options || [],
+          order: req.order ?? 0,
+        })),
         createdAt: project.created_at,
         updatedAt: project.updated_at,
       };
@@ -8251,15 +8680,49 @@ export const resolvers = {
         metadata: { changes },
       });
 
+      // Send notification to project client
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        await NotificationService.createNotification({
+          userId: project.client_id,
+          type: 'project_status_changed',
+          title: 'Changes Requested for Your Project',
+          body: `An administrator has requested changes to your project "${project.title}".`,
+          data: {
+            projectId: project.id,
+            projectTitle: project.title,
+            requestedBy: user.id,
+            changes,
+          },
+          sendEmail: true,
+          priority: NotificationService.NotificationPriority.MEDIUM,
+        }).catch(error => {
+          console.error('Failed to send project changes request notification:', error);
+        });
+      } catch (error) {
+        console.error('Error sending project changes request notification:', error);
+      }
+
       return {
         id: project.id,
         clientId: project.client_id,
         title: project.title,
         description: project.description,
         budget: project.budget,
+        budgetMin: project.budget_min,
+        budgetMax: project.budget_max,
         deadline: project.deadline,
-        status: project.status,
-        additionalInfoRequirements: project.additional_info_requirements || [],
+        status: project.status?.toUpperCase() || 'PENDING_REVIEW',
+        additionalInfoRequirements: (project.additional_info_requirements || []).map((req: any) => ({
+          id: req.id,
+          fieldName: req.fieldName,
+          fieldType: req.fieldType?.toUpperCase() || 'TEXT',
+          required: req.required ?? false,
+          helpText: req.helpText || null,
+          options: req.options || [],
+          order: req.order ?? 0,
+        })),
         createdAt: project.created_at,
         updatedAt: project.updated_at,
       };
@@ -8319,6 +8782,41 @@ export const resolvers = {
         resourceId: projectId,
         metadata: { questionId: newQuestion.id },
       });
+
+      // Send notification to project client about new question
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        // Get project details to find client
+        const { data: project } = await supabase
+          .from('projects')
+          .select('client_id, title')
+          .eq('id', projectId)
+          .single();
+
+        if (project && project.client_id !== user.id) {
+          const askerName = newQuestion.askedBy.raw_user_meta_data?.full_name || newQuestion.askedBy.email || 'A bidding team';
+          
+          await NotificationService.createNotification({
+            userId: project.client_id,
+            type: 'qa_question_posted',
+            title: 'New Question on Your Project',
+            body: `${askerName} asked a question about "${project.title}": "${question.substring(0, 100)}${question.length > 100 ? '...' : ''}"`,
+            data: {
+              projectId,
+              projectTitle: project.title,
+              questionId: newQuestion.id,
+              askedBy: user.id,
+            },
+            sendEmail: true,
+            priority: NotificationService.NotificationPriority.MEDIUM,
+          }).catch(error => {
+            console.error('Failed to send question notification:', error);
+          });
+        }
+      } catch (error) {
+        console.error('Error sending question notification:', error);
+      }
 
       return {
         id: newQuestion.id,
@@ -8386,6 +8884,76 @@ export const resolvers = {
         resourceId: questionId,
         metadata: { answerId: newAnswer.id },
       });
+
+      // Send notification to question asker and all bidding leads
+      try {
+        const { NotificationService } = await import('../notification-service');
+        
+        // Get question details with project info
+        const { data: questionData } = await supabase
+          .from('project_questions')
+          .select('asked_by, question, project_id, projects(title, client_id)')
+          .eq('id', questionId)
+          .single();
+
+        if (questionData) {
+          const answererName = newAnswer.answeredBy.raw_user_meta_data?.full_name || newAnswer.answeredBy.email || 'Someone';
+          const projectData = questionData.projects as any;
+          
+          // Notify the question asker if they're not the answerer
+          if (questionData.asked_by !== user.id) {
+            await NotificationService.createNotification({
+              userId: questionData.asked_by,
+              type: 'qa_answer_posted',
+              title: 'Your Question Was Answered',
+              body: `${answererName} answered your question: "${questionData.question.substring(0, 60)}${questionData.question.length > 60 ? '...' : ''}"`,
+              data: {
+                questionId,
+                projectId: questionData.project_id,
+                answerId: newAnswer.id,
+                answeredBy: user.id,
+              },
+              sendEmail: true,
+              priority: NotificationService.NotificationPriority.HIGH,
+            }).catch(error => {
+              console.error('Failed to send answer notification to asker:', error);
+            });
+          }
+
+          // If client answered, notify all bidding leads with proposals
+          if (user.user_metadata?.role === 'client') {
+            const { data: proposals } = await supabase
+              .from('proposals')
+              .select('lead_id')
+              .eq('project_id', questionData.project_id);
+
+            if (proposals && proposals.length > 0) {
+              for (const proposal of proposals) {
+                if (proposal.lead_id !== user.id && proposal.lead_id !== questionData.asked_by) {
+                  await NotificationService.createNotification({
+                    userId: proposal.lead_id,
+                    type: 'qa_answer_posted',
+                    title: 'New Q&A Answer Posted',
+                    body: `The client answered a question about "${projectData?.title || 'the project'}"`,
+                    data: {
+                      questionId,
+                      projectId: questionData.project_id,
+                      answerId: newAnswer.id,
+                      answeredBy: user.id,
+                    },
+                    sendEmail: true,
+                    priority: NotificationService.NotificationPriority.MEDIUM,
+                  }).catch(error => {
+                    console.error('Failed to send answer notification to lead:', error);
+                  });
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error sending answer notifications:', error);
+      }
 
       return {
         id: newAnswer.id,
