@@ -510,6 +510,69 @@ export class TeamInvitationService {
         joinedAt: teamMember.joined_at || teamMember.created_at,
       }
 
+      // Get user and project details for notifications
+      const { data: newMember } = await supabase
+        .from('users')
+        .select('full_name, email')
+        .eq('id', validated.userId)
+        .single()
+
+      const { data: proposal } = await supabase
+        .from('proposals')
+        .select('project_id')
+        .eq('id', invitation.proposal_id)
+        .single()
+
+      let projectTitle = 'the project'
+      if (proposal?.project_id) {
+        const { data: project } = await supabase
+          .from('projects')
+          .select('title')
+          .eq('id', proposal.project_id)
+          .single()
+        
+        if (project?.title) {
+          projectTitle = project.title
+        }
+      }
+
+      const newMemberName = newMember?.full_name || newMember?.email || 'A new member'
+
+      // Requirement 7.5: Notify the invitation creator (team lead) that someone joined
+      NotificationService.createNotification({
+        userId: invitation.created_by,
+        type: 'team_member_joined',
+        title: 'New Team Member Joined',
+        body: `${newMemberName} has joined your team for ${projectTitle}.`,
+        data: {
+          proposalId: invitation.proposal_id,
+          projectId: proposal?.project_id,
+          projectTitle: projectTitle,
+          newMemberId: validated.userId,
+          newMemberName: newMemberName,
+          invitationId: invitation.id,
+        },
+        sendEmail: true,
+      }).catch(error => {
+        console.error('Failed to send team member joined notification to lead:', error)
+      })
+
+      // Notify the new member that they successfully joined
+      NotificationService.createNotification({
+        userId: validated.userId,
+        type: 'team_invitation_accepted',
+        title: 'Welcome to the Team!',
+        body: `You have successfully joined the team for ${projectTitle}.`,
+        data: {
+          proposalId: invitation.proposal_id,
+          projectId: proposal?.project_id,
+          projectTitle: projectTitle,
+        },
+        sendEmail: true,
+      }).catch(error => {
+        console.error('Failed to send welcome notification to new member:', error)
+      })
+
       return {
         success: true,
         data: result,

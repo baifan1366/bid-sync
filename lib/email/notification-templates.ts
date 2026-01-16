@@ -271,15 +271,51 @@ ${data.rank !== undefined ? `- Rank: #${data.rank}` : ''}
           <div class="info-box">
             <p><strong>Team Update:</strong></p>
             ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
-            ${data.memberName ? `<p><strong>Member:</strong> ${data.memberName}</p>` : ''}
+            ${data.newMemberName || data.memberName ? `<p><strong>Member:</strong> ${data.newMemberName || data.memberName}</p>` : ''}
             ${data.role ? `<p><strong>Role:</strong> ${data.role}</p>` : ''}
           </div>
         `,
         text: `
 Team Update:
 ${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
-${data.memberName ? `- Member: ${data.memberName}` : ''}
+${data.newMemberName || data.memberName ? `- Member: ${data.newMemberName || data.memberName}` : ''}
 ${data.role ? `- Role: ${data.role}` : ''}
+        `.trim(),
+      };
+
+    case 'team_invitation_created':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>Invitation Details:</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
+            ${data.code ? `<p><strong>Invitation Code:</strong> <code style="background-color: #FBBF24; color: #000; padding: 4px 8px; border-radius: 4px; font-family: monospace;">${data.code}</code></p>` : ''}
+            ${data.expiresAt ? `<p><strong>Expires:</strong> ${new Date(data.expiresAt).toLocaleDateString()}</p>` : ''}
+            ${data.isMultiUse !== undefined ? `<p><strong>Type:</strong> ${data.isMultiUse ? 'Multi-use' : 'Single-use'}</p>` : ''}
+          </div>
+        `,
+        text: `
+Invitation Details:
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+${data.code ? `- Invitation Code: ${data.code}` : ''}
+${data.expiresAt ? `- Expires: ${new Date(data.expiresAt).toLocaleDateString()}` : ''}
+${data.isMultiUse !== undefined ? `- Type: ${data.isMultiUse ? 'Multi-use' : 'Single-use'}` : ''}
+        `.trim(),
+      };
+
+    case 'team_invitation_accepted':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>Welcome to the Team!</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
+            <p>You can now collaborate with your team members on proposals and documents.</p>
+          </div>
+        `,
+        text: `
+Welcome to the Team!
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+You can now collaborate with your team members on proposals and documents.
         `.trim(),
       };
 

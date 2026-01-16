@@ -17,6 +17,171 @@ import { ProgressTrackerService } from '@/lib/progress-tracker-service';
 import { SectionManagementService } from '@/lib/section-management-service';
 import { ProposalService } from '@/lib/proposal-service';
 
+// ============================================================
+// ERROR HANDLING UTILITIES
+// ============================================================
+
+interface ErrorDetails {
+  code: string;
+  message: string;
+  operation?: string;
+  table?: string;
+  field?: string;
+  hint?: string;
+  originalError?: any;
+  timestamp?: string;
+  userId?: string;
+  resourceId?: string;
+}
+
+/**
+ * Creates a detailed GraphQL error with enhanced debugging information
+ */
+const createDetailedError = (
+  message: string,
+  code: string,
+  details?: Partial<ErrorDetails>
+): GraphQLError => {
+  const errorInfo: ErrorDetails = {
+    code,
+    message,
+    timestamp: new Date().toISOString(),
+    ...details,
+  };
+
+  // Log error for server-side debugging
+  console.error(`[GraphQL Error] ${code}:`, {
+    message,
+    ...details,
+    stack: details?.originalError?.stack,
+  });
+
+  return new GraphQLError(message, {
+    extensions: {
+      code,
+      details: {
+        operation: errorInfo.operation,
+        table: errorInfo.table,
+        field: errorInfo.field,
+        hint: errorInfo.hint,
+        timestamp: errorInfo.timestamp,
+        // Only include safe error details in response
+        dbError: details?.originalError?.code || null,
+        dbMessage: details?.originalError?.message || null,
+        dbHint: details?.originalError?.hint || null,
+        dbDetails: details?.originalError?.details || null,
+      },
+    },
+  });
+};
+
+/**
+ * Handles Supabase database errors with detailed information
+ */
+const handleSupabaseError = (
+  error: any,
+  operation: string,
+  context?: { table?: string; userId?: string; resourceId?: string }
+): GraphQLError => {
+  const errorCode = error?.code || 'UNKNOWN';
+  const errorMessage = error?.message || 'An unknown database error occurred';
+  
+  // Map common Supabase/PostgreSQL error codes to user-friendly messages
+  const errorMap: Record<string, { code: string; message: string; hint?: string }> = {
+    '23505': { 
+      code: 'DUPLICATE_ENTRY', 
+      message: 'A record with this value already exists',
+      hint: 'Check for duplicate entries in unique fields'
+    },
+    '23503': { 
+      code: 'FOREIGN_KEY_VIOLATION', 
+      message: 'Referenced record does not exist',
+      hint: 'Ensure the related record exists before creating this entry'
+    },
+    '23502': { 
+      code: 'NOT_NULL_VIOLATION', 
+      message: 'Required field is missing',
+      hint: 'Provide all required fields'
+    },
+    '42P01': { 
+      code: 'TABLE_NOT_FOUND', 
+      message: 'Database table not found',
+      hint: 'Run database migrations to create required tables'
+    },
+    '42703': { 
+      code: 'COLUMN_NOT_FOUND', 
+      message: 'Database column not found',
+      hint: 'Check if the column exists or run migrations'
+    },
+    'PGRST116': { 
+      code: 'NOT_FOUND', 
+      message: 'Record not found',
+      hint: 'The requested resource does not exist'
+    },
+    '42501': { 
+      code: 'PERMISSION_DENIED', 
+      message: 'Permission denied for this operation',
+      hint: 'Check RLS policies and user permissions'
+    },
+    '22P02': { 
+      code: 'INVALID_INPUT', 
+      message: 'Invalid input syntax',
+      hint: 'Check the format of your input data'
+    },
+    '22003': { 
+      code: 'NUMERIC_VALUE_OUT_OF_RANGE', 
+      message: 'Numeric value out of range',
+      hint: 'Ensure numeric values are within acceptable limits'
+    },
+  };
+
+  const mappedError = errorMap[errorCode] || {
+    code: 'INTERNAL_SERVER_ERROR',
+    message: `Database operation failed: ${errorMessage}`,
+    hint: 'Please try again or contact support if the issue persists'
+  };
+
+  return createDetailedError(mappedError.message, mappedError.code, {
+    operation,
+    table: context?.table,
+    hint: mappedError.hint,
+    originalError: error,
+    userId: context?.userId,
+    resourceId: context?.resourceId,
+  });
+};
+
+/**
+ * Wraps an async resolver function with error handling
+ */
+const withErrorHandling = <T extends any[], R>(
+  operation: string,
+  fn: (...args: T) => Promise<R>
+) => {
+  return async (...args: T): Promise<R> => {
+    try {
+      return await fn(...args);
+    } catch (error: any) {
+      // If it's already a GraphQL error, re-throw it
+      if (error instanceof GraphQLError) {
+        throw error;
+      }
+      
+      // Handle Supabase errors
+      if (error?.code || error?.message?.includes('supabase')) {
+        throw handleSupabaseError(error, operation);
+      }
+      
+      // Handle generic errors
+      throw createDetailedError(
+        error?.message || 'An unexpected error occurred',
+        'INTERNAL_SERVER_ERROR',
+        { operation, originalError: error }
+      );
+    }
+  };
+};
+
 // Helper function to map database project to GraphQL schema
 const mapProject = (project: any) => ({
   id: project.id,
@@ -96,8 +261,10 @@ export const resolvers = {
       const { data: projects, error } = await query;
 
       if (error) {
-        throw new GraphQLError('Failed to fetch projects', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(error, 'projects.fetch', {
+          table: 'projects',
+          userId: user?.id,
+          resourceId: clientId,
         });
       }
 
@@ -116,8 +283,8 @@ export const resolvers = {
         .order('created_at', { ascending: false });
 
       if (error) {
-        throw new GraphQLError('Failed to fetch open projects', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(error, 'openProjects.fetch', {
+          table: 'projects',
         });
       }
 
@@ -130,8 +297,10 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'project.fetch',
+          hint: 'Please log in to access this resource',
+          originalError: authError,
         });
       }
 
@@ -141,16 +310,30 @@ export const resolvers = {
         .eq('id', id)
         .single();
 
-      if (error || !project) {
-        throw new GraphQLError('Project not found', {
-          extensions: { code: 'NOT_FOUND' },
+      if (error) {
+        throw handleSupabaseError(error, 'project.fetch', {
+          table: 'projects',
+          userId: user.id,
+          resourceId: id,
+        });
+      }
+
+      if (!project) {
+        throw createDetailedError('Project not found', 'NOT_FOUND', {
+          operation: 'project.fetch',
+          table: 'projects',
+          resourceId: id,
+          hint: 'The project may have been deleted or you may not have access',
         });
       }
 
       // Authorization check - only client can view their project
       if (user.user_metadata?.role === 'client' && project.client_id !== user.id) {
-        throw new GraphQLError('Forbidden: You do not have access to this project', {
-          extensions: { code: 'FORBIDDEN' },
+        throw createDetailedError('Forbidden: You do not have access to this project', 'FORBIDDEN', {
+          operation: 'project.fetch',
+          userId: user.id,
+          resourceId: id,
+          hint: 'You can only view projects that you own',
         });
       }
 
@@ -163,8 +346,10 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'projectWithProposals.fetch',
+          hint: 'Please log in to access this resource',
+          originalError: authError,
         });
       }
 
@@ -175,9 +360,20 @@ export const resolvers = {
         .eq('id', projectId)
         .single();
 
-      if (projectError || !project) {
-        throw new GraphQLError('Project not found', {
-          extensions: { code: 'NOT_FOUND' },
+      if (projectError) {
+        throw handleSupabaseError(projectError, 'projectWithProposals.fetchProject', {
+          table: 'projects',
+          userId: user.id,
+          resourceId: projectId,
+        });
+      }
+
+      if (!project) {
+        throw createDetailedError('Project not found', 'NOT_FOUND', {
+          operation: 'projectWithProposals.fetchProject',
+          table: 'projects',
+          resourceId: projectId,
+          hint: 'The project may have been deleted',
         });
       }
 
@@ -317,8 +513,10 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'proposalDetail.fetch',
+          hint: 'Please log in to view proposal details',
+          originalError: authError,
         });
       }
 
@@ -332,9 +530,20 @@ export const resolvers = {
         .eq('id', proposalId)
         .single();
 
-      if (proposalError || !proposal) {
-        throw new GraphQLError('Proposal not found', {
-          extensions: { code: 'NOT_FOUND' },
+      if (proposalError) {
+        throw handleSupabaseError(proposalError, 'proposalDetail.fetchProposal', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: proposalId,
+        });
+      }
+
+      if (!proposal) {
+        throw createDetailedError('Proposal not found', 'NOT_FOUND', {
+          operation: 'proposalDetail.fetchProposal',
+          table: 'proposals',
+          resourceId: proposalId,
+          hint: 'The proposal may have been deleted or does not exist',
         });
       }
 
@@ -359,8 +568,11 @@ export const resolvers = {
         .maybeSingle();
 
       if (!isClient && !isLead && !proposalTeamMember && !bidTeamMember) {
-        throw new GraphQLError('Forbidden: You do not have access to this proposal', {
-          extensions: { code: 'FORBIDDEN' },
+        throw createDetailedError('Forbidden: You do not have access to this proposal', 'FORBIDDEN', {
+          operation: 'proposalDetail.authorization',
+          userId: user.id,
+          resourceId: proposalId,
+          hint: 'You must be the client, lead, or a team member to view this proposal',
         });
       }
 
@@ -542,8 +754,10 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'chatMessages.fetch',
+          hint: 'Please log in to view messages',
+          originalError: authError,
         });
       }
 
@@ -562,8 +776,10 @@ export const resolvers = {
       const { data: messages, error: messagesError } = await query;
 
       if (messagesError) {
-        throw new GraphQLError('Failed to fetch messages', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(messagesError, 'chatMessages.fetch', {
+          table: 'chat_messages',
+          userId: user.id,
+          resourceId: projectId,
         });
       }
 
@@ -599,8 +815,10 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'unreadMessageCount.fetch',
+          hint: 'Please log in to check unread messages',
+          originalError: authError,
         });
       }
 
@@ -5094,15 +5312,19 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'sendMessage',
+          hint: 'Please log in to send messages',
+          originalError: authError,
         });
       }
 
       // Validate content is not empty
       if (!input.content.trim()) {
-        throw new GraphQLError('Message content cannot be empty', {
-          extensions: { code: 'BAD_USER_INPUT' },
+        throw createDetailedError('Message content cannot be empty', 'BAD_USER_INPUT', {
+          operation: 'sendMessage',
+          field: 'content',
+          hint: 'Please provide a message to send',
         });
       }
 
@@ -5120,8 +5342,10 @@ export const resolvers = {
         .single();
 
       if (insertError) {
-        throw new GraphQLError('Failed to send message', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(insertError, 'sendMessage.insert', {
+          table: 'chat_messages',
+          userId: user.id,
+          resourceId: input.projectId,
         });
       }
 
@@ -5254,8 +5478,10 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'acceptProposal',
+          hint: 'Please log in to accept proposals',
+          originalError: authError,
         });
       }
 
@@ -5266,28 +5492,51 @@ export const resolvers = {
         .eq('id', projectId)
         .single();
 
-      if (projectError || !project) {
-        throw new GraphQLError('Project not found', {
-          extensions: { code: 'NOT_FOUND' },
+      if (projectError) {
+        throw handleSupabaseError(projectError, 'acceptProposal.fetchProject', {
+          table: 'projects',
+          userId: user.id,
+          resourceId: projectId,
+        });
+      }
+
+      if (!project) {
+        throw createDetailedError('Project not found', 'NOT_FOUND', {
+          operation: 'acceptProposal.fetchProject',
+          resourceId: projectId,
+          hint: 'The project may have been deleted',
         });
       }
 
       if (project.client_id !== user.id) {
-        throw new GraphQLError('Forbidden: Only the project client can accept proposals', {
-          extensions: { code: 'FORBIDDEN' },
+        throw createDetailedError('Forbidden: Only the project client can accept proposals', 'FORBIDDEN', {
+          operation: 'acceptProposal',
+          userId: user.id,
+          resourceId: projectId,
+          hint: 'You must be the project owner to accept proposals',
         });
       }
 
       // Get proposal details for notifications
       const { data: proposal, error: proposalFetchError } = await supabase
         .from('proposals')
-        .select('lead_id')
+        .select('lead_id, status')
         .eq('id', proposalId)
         .single();
 
-      if (proposalFetchError || !proposal) {
-        throw new GraphQLError('Proposal not found', {
-          extensions: { code: 'NOT_FOUND' },
+      if (proposalFetchError) {
+        throw handleSupabaseError(proposalFetchError, 'acceptProposal.fetchProposal', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: proposalId,
+        });
+      }
+
+      if (!proposal) {
+        throw createDetailedError('Proposal not found', 'NOT_FOUND', {
+          operation: 'acceptProposal.fetchProposal',
+          resourceId: proposalId,
+          hint: 'The proposal may have been deleted or does not exist',
         });
       }
 
@@ -5298,8 +5547,10 @@ export const resolvers = {
         .eq('id', proposalId);
 
       if (acceptError) {
-        throw new GraphQLError('Failed to accept proposal', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(acceptError, 'acceptProposal.updateStatus', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: proposalId,
         });
       }
 
@@ -5311,8 +5562,10 @@ export const resolvers = {
         .neq('id', proposalId);
 
       if (rejectError) {
-        throw new GraphQLError('Failed to reject other proposals', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(rejectError, 'acceptProposal.rejectOthers', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: projectId,
         });
       }
 
@@ -5323,8 +5576,10 @@ export const resolvers = {
         .eq('id', projectId);
 
       if (projectUpdateError) {
-        throw new GraphQLError('Failed to update project status', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(projectUpdateError, 'acceptProposal.updateProjectStatus', {
+          table: 'projects',
+          userId: user.id,
+          resourceId: projectId,
         });
       }
 
@@ -5341,8 +5596,10 @@ export const resolvers = {
         .single();
 
       if (decisionError) {
-        throw new GraphQLError('Failed to record decision', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(decisionError, 'acceptProposal.createDecision', {
+          table: 'proposal_decisions',
+          userId: user.id,
+          resourceId: proposalId,
         });
       }
 
@@ -5422,15 +5679,19 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'rejectProposal',
+          hint: 'Please log in to reject proposals',
+          originalError: authError,
         });
       }
 
       // Validate feedback is not empty
       if (!input.feedback.trim()) {
-        throw new GraphQLError('Rejection feedback is required', {
-          extensions: { code: 'BAD_USER_INPUT' },
+        throw createDetailedError('Rejection feedback is required', 'BAD_USER_INPUT', {
+          operation: 'rejectProposal',
+          field: 'feedback',
+          hint: 'Please provide feedback explaining why the proposal was rejected',
         });
       }
 
@@ -5441,28 +5702,51 @@ export const resolvers = {
         .eq('id', input.projectId)
         .single();
 
-      if (projectError || !project) {
-        throw new GraphQLError('Project not found', {
-          extensions: { code: 'NOT_FOUND' },
+      if (projectError) {
+        throw handleSupabaseError(projectError, 'rejectProposal.fetchProject', {
+          table: 'projects',
+          userId: user.id,
+          resourceId: input.projectId,
+        });
+      }
+
+      if (!project) {
+        throw createDetailedError('Project not found', 'NOT_FOUND', {
+          operation: 'rejectProposal.fetchProject',
+          resourceId: input.projectId,
+          hint: 'The project may have been deleted',
         });
       }
 
       if (project.client_id !== user.id) {
-        throw new GraphQLError('Forbidden: Only the project client can reject proposals', {
-          extensions: { code: 'FORBIDDEN' },
+        throw createDetailedError('Forbidden: Only the project client can reject proposals', 'FORBIDDEN', {
+          operation: 'rejectProposal',
+          userId: user.id,
+          resourceId: input.projectId,
+          hint: 'You must be the project owner to reject proposals',
         });
       }
 
       // Get proposal details for notifications
       const { data: proposal, error: proposalFetchError } = await supabase
         .from('proposals')
-        .select('lead_id')
+        .select('lead_id, status')
         .eq('id', input.proposalId)
         .single();
 
-      if (proposalFetchError || !proposal) {
-        throw new GraphQLError('Proposal not found', {
-          extensions: { code: 'NOT_FOUND' },
+      if (proposalFetchError) {
+        throw handleSupabaseError(proposalFetchError, 'rejectProposal.fetchProposal', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: input.proposalId,
+        });
+      }
+
+      if (!proposal) {
+        throw createDetailedError('Proposal not found', 'NOT_FOUND', {
+          operation: 'rejectProposal.fetchProposal',
+          resourceId: input.proposalId,
+          hint: 'The proposal may have been deleted or does not exist',
         });
       }
 
@@ -5473,8 +5757,10 @@ export const resolvers = {
         .eq('id', input.proposalId);
 
       if (rejectError) {
-        throw new GraphQLError('Failed to reject proposal', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(rejectError, 'rejectProposal.updateStatus', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: input.proposalId,
         });
       }
 
@@ -5492,8 +5778,10 @@ export const resolvers = {
         .single();
 
       if (decisionError) {
-        throw new GraphQLError('Failed to record decision', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        throw handleSupabaseError(decisionError, 'rejectProposal.createDecision', {
+          table: 'proposal_decisions',
+          userId: user.id,
+          resourceId: input.proposalId,
         });
       }
 
@@ -5658,27 +5946,51 @@ export const resolvers = {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'createProject',
+          hint: 'Please log in to create a project',
+          originalError: authError,
         });
       }
 
       // Check if user is a client
       const userRole = user.user_metadata?.role;
       if (userRole !== 'client') {
-        throw new GraphQLError('Only clients can create projects', {
-          extensions: { code: 'FORBIDDEN' },
+        throw createDetailedError('Only clients can create projects', 'FORBIDDEN', {
+          operation: 'createProject',
+          userId: user.id,
+          hint: `Your current role is "${userRole}". Only users with "client" role can create projects.`,
         });
       }
 
       // Check verification status
       const verificationStatus = user.user_metadata?.verification_status;
       if (verificationStatus !== 'verified') {
-        throw new GraphQLError('Account verification required. Your account must be verified by a Content Coordinator before you can create projects.', {
-          extensions: { 
-            code: 'FORBIDDEN',
-            verificationStatus: verificationStatus || 'pending_verification'
-          },
+        throw createDetailedError(
+          'Account verification required. Your account must be verified by a Content Coordinator before you can create projects.',
+          'FORBIDDEN',
+          {
+            operation: 'createProject',
+            userId: user.id,
+            hint: `Your verification status is "${verificationStatus || 'pending_verification'}". Please wait for admin approval.`,
+          }
+        );
+      }
+
+      // Validate required fields
+      if (!input.title?.trim()) {
+        throw createDetailedError('Project title is required', 'BAD_USER_INPUT', {
+          operation: 'createProject',
+          field: 'title',
+          hint: 'Please provide a title for your project',
+        });
+      }
+
+      if (!input.description?.trim()) {
+        throw createDetailedError('Project description is required', 'BAD_USER_INPUT', {
+          operation: 'createProject',
+          field: 'description',
+          hint: 'Please provide a description for your project',
         });
       }
 
@@ -5698,12 +6010,9 @@ export const resolvers = {
         .single();
 
       if (createError) {
-        console.error('Database error creating project:', createError);
-        throw new GraphQLError(`Failed to create project: ${createError.message}`, {
-          extensions: { 
-            code: 'INTERNAL_SERVER_ERROR',
-            details: createError 
-          },
+        throw handleSupabaseError(createError, 'createProject.insert', {
+          table: 'projects',
+          userId: user.id,
         });
       }
 
@@ -6625,16 +6934,20 @@ export const resolvers = {
       // Get authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'createProposal',
+          hint: 'Please log in to create a proposal',
+          originalError: authError,
         });
       }
 
       // Verify user is a bidding lead
       const userRole = user.user_metadata?.role;
       if (userRole !== 'bidding_lead') {
-        throw new GraphQLError('Forbidden: Only bidding leads can create proposals', {
-          extensions: { code: 'FORBIDDEN' },
+        throw createDetailedError('Forbidden: Only bidding leads can create proposals', 'FORBIDDEN', {
+          operation: 'createProposal',
+          userId: user.id,
+          hint: `Your current role is "${userRole}". Only users with "bidding_lead" role can create proposals.`,
         });
       }
 
@@ -6642,7 +6955,15 @@ export const resolvers = {
       const result = await ProposalService.createProposal(projectId, user.id);
 
       if (!result.success) {
-        // Map error codes to GraphQL errors
+        // Map error codes to detailed errors
+        const errorHints: Record<string, string> = {
+          'DUPLICATE_PROPOSAL': 'You have already created a proposal for this project',
+          'PROJECT_NOT_FOUND': 'The project you are trying to bid on does not exist or has been deleted',
+          'UNAUTHORIZED': 'You do not have permission to create a proposal for this project',
+          'WORKSPACE_CREATION_FAILED': 'Failed to create the proposal workspace. Please try again.',
+          'UNKNOWN': 'An unexpected error occurred. Please try again or contact support.',
+        };
+
         const errorCodeMap: Record<string, string> = {
           'DUPLICATE_PROPOSAL': 'BAD_USER_INPUT',
           'PROJECT_NOT_FOUND': 'NOT_FOUND',
@@ -6651,11 +6972,16 @@ export const resolvers = {
           'UNKNOWN': 'INTERNAL_SERVER_ERROR',
         };
 
-        throw new GraphQLError(result.error || 'Failed to create proposal', {
-          extensions: { 
-            code: errorCodeMap[result.errorCode || 'UNKNOWN'] || 'INTERNAL_SERVER_ERROR' 
-          },
-        });
+        throw createDetailedError(
+          result.error || 'Failed to create proposal',
+          errorCodeMap[result.errorCode || 'UNKNOWN'] || 'INTERNAL_SERVER_ERROR',
+          {
+            operation: 'createProposal',
+            userId: user.id,
+            resourceId: projectId,
+            hint: errorHints[result.errorCode || 'UNKNOWN'],
+          }
+        );
       }
 
       // Get project details for response
@@ -6665,9 +6991,19 @@ export const resolvers = {
         .eq('id', projectId)
         .single();
 
-      if (projectError || !project) {
-        throw new GraphQLError('Project not found', {
-          extensions: { code: 'NOT_FOUND' },
+      if (projectError) {
+        throw handleSupabaseError(projectError, 'createProposal.fetchProject', {
+          table: 'projects',
+          userId: user.id,
+          resourceId: projectId,
+        });
+      }
+
+      if (!project) {
+        throw createDetailedError('Project not found', 'NOT_FOUND', {
+          operation: 'createProposal.fetchProject',
+          resourceId: projectId,
+          hint: 'The project may have been deleted after proposal creation',
         });
       }
 
