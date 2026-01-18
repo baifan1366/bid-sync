@@ -702,3 +702,106 @@ export function validateFields(
     errors,
   }
 }
+
+// ============================================================
+// SEARCH INPUT SANITIZATION
+// ============================================================
+
+/**
+ * Sanitizes search input for use in database queries
+ * 
+ * SECURITY: This function escapes special characters that could be used
+ * in SQL injection or pattern matching attacks when used with ILIKE queries.
+ * 
+ * While Supabase/PostgREST parameterizes queries, escaping special characters
+ * provides defense-in-depth and prevents unexpected pattern matching behavior.
+ * 
+ * @param input - The raw search input from user
+ * @param options - Configuration options
+ * @returns Sanitized search string safe for database queries
+ */
+export function sanitizeSearchInput(
+  input: string | null | undefined,
+  options: {
+    maxLength?: number
+    allowWildcards?: boolean
+  } = {}
+): string {
+  const { maxLength = 200, allowWildcards = false } = options
+
+  // Return empty string for null/undefined
+  if (input == null) return ''
+
+  // Convert to string and trim
+  let sanitized = String(input).trim()
+
+  // Limit length to prevent DoS
+  if (sanitized.length > maxLength) {
+    sanitized = sanitized.substring(0, maxLength)
+  }
+
+  // Escape special PostgreSQL LIKE/ILIKE pattern characters
+  // These characters have special meaning in LIKE patterns:
+  // % - matches any sequence of characters
+  // _ - matches any single character
+  // \ - escape character
+  if (!allowWildcards) {
+    sanitized = sanitized
+      .replace(/\\/g, '\\\\')  // Escape backslashes first
+      .replace(/%/g, '\\%')    // Escape percent signs
+      .replace(/_/g, '\\_')    // Escape underscores
+  }
+
+  // Remove null bytes and other control characters
+  sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+
+  return sanitized
+}
+
+/**
+ * Validates and sanitizes search input, returning validation result
+ * 
+ * @param input - The raw search input from user
+ * @param fieldName - Name of the field for error messages
+ * @param options - Configuration options
+ * @returns Validation result with sanitized value
+ */
+export function validateSearchInput(
+  input: string | null | undefined,
+  fieldName: string = 'Search',
+  options: {
+    required?: boolean
+    minLength?: number
+    maxLength?: number
+    allowWildcards?: boolean
+  } = {}
+): ValidationResult & { sanitizedValue: string } {
+  const { required = false, minLength = 1, maxLength = 200, allowWildcards = false } = options
+
+  // Sanitize first
+  const sanitizedValue = sanitizeSearchInput(input, { maxLength, allowWildcards })
+
+  // Check if required
+  if (required && sanitizedValue.length === 0) {
+    return {
+      valid: false,
+      error: generateErrorMessage('required', fieldName),
+      sanitizedValue,
+    }
+  }
+
+  // Check minimum length (only if value is provided)
+  if (sanitizedValue.length > 0 && sanitizedValue.length < minLength) {
+    return {
+      valid: false,
+      error: generateErrorMessage('minLength', fieldName, { minLength }),
+      sanitizedValue,
+    }
+  }
+
+  return {
+    valid: true,
+    sanitizedValue,
+  }
+}
+

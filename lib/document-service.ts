@@ -19,6 +19,7 @@
  */
 
 import { createClient } from '@/lib/supabase/server';
+import { sanitizeSearchInput } from './validation-utils';
 
 // File type validation
 const ALLOWED_FILE_TYPES = [
@@ -391,7 +392,10 @@ export class DocumentService {
       }
 
       // Search in title and description
-      query = query.or(`title.ilike.%${input.query}%,description.ilike.%${input.query}%`);
+      const sanitizedQuery = sanitizeSearchInput(input.query);
+      if (sanitizedQuery) {
+        query = query.or(`title.ilike.%${sanitizedQuery}%,description.ilike.%${sanitizedQuery}%`);
+      }
 
       const { data: documents, error } = await query.order('updated_at', { ascending: false });
 

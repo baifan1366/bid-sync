@@ -24,6 +24,24 @@ interface NotificationEmailParams {
 }
 
 /**
+ * Escapes HTML special characters to prevent XSS attacks
+ * @param str - String to escape
+ * @returns Escaped string safe for HTML insertion
+ */
+function escapeHtml(str: string | undefined | null): string {
+  if (str === undefined || str === null) {
+    return '';
+  }
+  const stringValue = String(str);
+  return stringValue
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
  * Base email template with BidSync branding
  * 
  * Requirements:
@@ -169,18 +187,24 @@ export function getNotificationEmail(
   const { userName, title, body, data, actionUrl, actionText } = params;
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://bidsync.com';
 
+  // Escape user-provided content for HTML safety
+  const safeUserName = escapeHtml(userName);
+  const safeTitle = escapeHtml(title);
+  const safeBody = body ? escapeHtml(body) : '';
+  const safeActionText = actionText ? escapeHtml(actionText) : 'View Details';
+
   // Generate type-specific content
   const typeContent = getTypeSpecificContent(type, data);
   
   const html = getEmailBase(`
     <div class="content">
-      <h1>${title}</h1>
-      <p>Hello ${userName},</p>
-      ${body ? `<p>${body}</p>` : ''}
+      <h1>${safeTitle}</h1>
+      <p>Hello ${safeUserName},</p>
+      ${safeBody ? `<p>${safeBody}</p>` : ''}
       ${typeContent.html}
       ${actionUrl ? `
         <div style="text-align: center;">
-          <a href="${actionUrl}" class="button">${actionText || 'View Details'}</a>
+          <a href="${escapeHtml(actionUrl)}" class="button">${safeActionText}</a>
         </div>
       ` : `
         <div style="text-align: center;">
@@ -214,6 +238,37 @@ This is an automated message from BidSync.
 }
 
 /**
+ * Helper to safely get and escape a data field for HTML
+ */
+function safeField(data: Record<string, any>, field: string): string {
+  const value = data[field];
+  if (value === undefined || value === null) return '';
+  return escapeHtml(String(value));
+}
+
+/**
+ * Helper to format a date safely
+ */
+function safeDate(dateValue: any): string {
+  if (!dateValue) return '';
+  try {
+    return escapeHtml(new Date(dateValue).toLocaleDateString());
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Helper to format a number safely
+ */
+function safeNumber(value: any, decimals: number = 0): string {
+  if (value === undefined || value === null) return '';
+  const num = Number(value);
+  if (isNaN(num)) return '';
+  return escapeHtml(decimals > 0 ? num.toFixed(decimals) : String(num));
+}
+
+/**
  * Generate type-specific content for notifications
  */
 function getTypeSpecificContent(
@@ -230,9 +285,9 @@ function getTypeSpecificContent(
         html: `
           <div class="info-box">
             <p><strong>Proposal Details:</strong></p>
-            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
-            ${data.proposalTitle ? `<p><strong>Proposal:</strong> ${data.proposalTitle}</p>` : ''}
-            ${data.teamName ? `<p><strong>Team:</strong> ${data.teamName}</p>` : ''}
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.proposalTitle ? `<p><strong>Proposal:</strong> ${safeField(data, 'proposalTitle')}</p>` : ''}
+            ${data.teamName ? `<p><strong>Team:</strong> ${safeField(data, 'teamName')}</p>` : ''}
           </div>
         `,
         text: `
@@ -249,10 +304,10 @@ ${data.teamName ? `- Team: ${data.teamName}` : ''}
         html: `
           <div class="info-box">
             <p><strong>Scoring Results:</strong></p>
-            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
-            ${data.proposalTitle ? `<p><strong>Proposal:</strong> ${data.proposalTitle}</p>` : ''}
-            ${data.totalScore !== undefined ? `<p><strong>Total Score:</strong> ${data.totalScore.toFixed(2)}</p>` : ''}
-            ${data.rank !== undefined ? `<p><strong>Rank:</strong> #${data.rank}</p>` : ''}
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.proposalTitle ? `<p><strong>Proposal:</strong> ${safeField(data, 'proposalTitle')}</p>` : ''}
+            ${data.totalScore !== undefined ? `<p><strong>Total Score:</strong> ${safeNumber(data.totalScore, 2)}</p>` : ''}
+            ${data.rank !== undefined ? `<p><strong>Rank:</strong> #${safeNumber(data.rank)}</p>` : ''}
           </div>
         `,
         text: `
@@ -270,9 +325,9 @@ ${data.rank !== undefined ? `- Rank: #${data.rank}` : ''}
         html: `
           <div class="info-box">
             <p><strong>Team Update:</strong></p>
-            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
-            ${data.newMemberName || data.memberName ? `<p><strong>Member:</strong> ${data.newMemberName || data.memberName}</p>` : ''}
-            ${data.role ? `<p><strong>Role:</strong> ${data.role}</p>` : ''}
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.newMemberName || data.memberName ? `<p><strong>Member:</strong> ${safeField(data, data.newMemberName ? 'newMemberName' : 'memberName')}</p>` : ''}
+            ${data.role ? `<p><strong>Role:</strong> ${safeField(data, 'role')}</p>` : ''}
           </div>
         `,
         text: `
@@ -288,9 +343,9 @@ ${data.role ? `- Role: ${data.role}` : ''}
         html: `
           <div class="info-box">
             <p><strong>Invitation Details:</strong></p>
-            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
-            ${data.code ? `<p><strong>Invitation Code:</strong> <code style="background-color: #FBBF24; color: #000; padding: 4px 8px; border-radius: 4px; font-family: monospace;">${data.code}</code></p>` : ''}
-            ${data.expiresAt ? `<p><strong>Expires:</strong> ${new Date(data.expiresAt).toLocaleDateString()}</p>` : ''}
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.code ? `<p><strong>Invitation Code:</strong> <code style="background-color: #FBBF24; color: #000; padding: 4px 8px; border-radius: 4px; font-family: monospace;">${safeField(data, 'code')}</code></p>` : ''}
+            ${data.expiresAt ? `<p><strong>Expires:</strong> ${safeDate(data.expiresAt)}</p>` : ''}
             ${data.isMultiUse !== undefined ? `<p><strong>Type:</strong> ${data.isMultiUse ? 'Multi-use' : 'Single-use'}</p>` : ''}
           </div>
         `,
@@ -308,7 +363,7 @@ ${data.isMultiUse !== undefined ? `- Type: ${data.isMultiUse ? 'Multi-use' : 'Si
         html: `
           <div class="info-box">
             <p><strong>Welcome to the Team!</strong></p>
-            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
             <p>You can now collaborate with your team members on proposals and documents.</p>
           </div>
         `,
@@ -324,9 +379,9 @@ You can now collaborate with your team members on proposals and documents.
         html: `
           <div class="info-box">
             <p><strong>Delivery Details:</strong></p>
-            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
-            ${data.teamName ? `<p><strong>Team:</strong> ${data.teamName}</p>` : ''}
-            ${data.deliverableCount !== undefined ? `<p><strong>Deliverables:</strong> ${data.deliverableCount}</p>` : ''}
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.teamName ? `<p><strong>Team:</strong> ${safeField(data, 'teamName')}</p>` : ''}
+            ${data.deliverableCount !== undefined ? `<p><strong>Deliverables:</strong> ${safeNumber(data.deliverableCount)}</p>` : ''}
           </div>
         `,
         text: `
@@ -343,10 +398,10 @@ ${data.deliverableCount !== undefined ? `- Deliverables: ${data.deliverableCount
         html: `
           <div class="info-box">
             <p><strong>Deadline Alert:</strong></p>
-            ${data.projectTitle ? `<p><strong>Project:</strong> ${data.projectTitle}</p>` : ''}
-            ${data.sectionTitle ? `<p><strong>Section:</strong> ${data.sectionTitle}</p>` : ''}
-            ${data.daysRemaining !== undefined ? `<p><strong>Days Remaining:</strong> ${data.daysRemaining}</p>` : ''}
-            ${data.deadline ? `<p><strong>Deadline:</strong> ${new Date(data.deadline).toLocaleDateString()}</p>` : ''}
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.sectionTitle ? `<p><strong>Section:</strong> ${safeField(data, 'sectionTitle')}</p>` : ''}
+            ${data.daysRemaining !== undefined ? `<p><strong>Days Remaining:</strong> ${safeNumber(data.daysRemaining)}</p>` : ''}
+            ${data.deadline ? `<p><strong>Deadline:</strong> ${safeDate(data.deadline)}</p>` : ''}
           </div>
         `,
         text: `
@@ -364,9 +419,9 @@ ${data.deadline ? `- Deadline: ${new Date(data.deadline).toLocaleDateString()}` 
         html: `
           <div class="info-box">
             <p><strong>Section Assignment:</strong></p>
-            ${data.documentTitle ? `<p><strong>Document:</strong> ${data.documentTitle}</p>` : ''}
-            ${data.sectionTitle ? `<p><strong>Section:</strong> ${data.sectionTitle}</p>` : ''}
-            ${data.deadline ? `<p><strong>Deadline:</strong> ${new Date(data.deadline).toLocaleDateString()}</p>` : ''}
+            ${data.documentTitle ? `<p><strong>Document:</strong> ${safeField(data, 'documentTitle')}</p>` : ''}
+            ${data.sectionTitle ? `<p><strong>Section:</strong> ${safeField(data, 'sectionTitle')}</p>` : ''}
+            ${data.deadline ? `<p><strong>Deadline:</strong> ${safeDate(data.deadline)}</p>` : ''}
           </div>
         `,
         text: `
@@ -383,7 +438,7 @@ ${data.deadline ? `- Deadline: ${new Date(data.deadline).toLocaleDateString()}` 
         html: `
           <div class="info-box">
             <p><strong>Account Status Update</strong></p>
-            ${data.reason ? `<p><strong>Reason:</strong> ${data.reason}</p>` : ''}
+            ${data.reason ? `<p><strong>Reason:</strong> ${safeField(data, 'reason')}</p>` : ''}
           </div>
         `,
         text: `
@@ -397,14 +452,193 @@ ${data.reason ? `- Reason: ${data.reason}` : ''}
         html: `
           <div class="info-box">
             <p><strong>Suspension Details:</strong></p>
-            ${data.reason ? `<p><strong>Reason:</strong> ${data.reason}</p>` : ''}
-            ${data.suspendedAt ? `<p><strong>Date:</strong> ${new Date(data.suspendedAt).toLocaleDateString()}</p>` : ''}
+            ${data.reason ? `<p><strong>Reason:</strong> ${safeField(data, 'reason')}</p>` : ''}
+            ${data.suspendedAt ? `<p><strong>Date:</strong> ${safeDate(data.suspendedAt)}</p>` : ''}
           </div>
         `,
         text: `
 Suspension Details:
 ${data.reason ? `- Reason: ${data.reason}` : ''}
 ${data.suspendedAt ? `- Date: ${new Date(data.suspendedAt).toLocaleDateString()}` : ''}
+        `.trim(),
+      };
+
+    case 'message_received':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>New Message:</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.senderName ? `<p><strong>From:</strong> ${safeField(data, 'senderName')}</p>` : ''}
+          </div>
+        `,
+        text: `
+New Message:
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+${data.senderName ? `- From: ${data.senderName}` : ''}
+        `.trim(),
+      };
+
+    case 'qa_question_posted':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>New Question Posted:</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.askedByName ? `<p><strong>Asked by:</strong> ${safeField(data, 'askedByName')}</p>` : ''}
+            ${data.question ? `<p><strong>Question:</strong> ${safeField(data, 'question')}</p>` : ''}
+          </div>
+        `,
+        text: `
+New Question Posted:
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+${data.askedByName ? `- Asked by: ${data.askedByName}` : ''}
+${data.question ? `- Question: ${data.question}` : ''}
+        `.trim(),
+      };
+
+    case 'qa_answer_posted':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>New Answer Posted:</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.answeredByName ? `<p><strong>Answered by:</strong> ${safeField(data, 'answeredByName')}</p>` : ''}
+          </div>
+        `,
+        text: `
+New Answer Posted:
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+${data.answeredByName ? `- Answered by: ${data.answeredByName}` : ''}
+        `.trim(),
+      };
+
+    case 'proposal_accepted':
+    case 'proposal_rejected':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>Proposal Update:</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.proposalTitle ? `<p><strong>Proposal:</strong> ${safeField(data, 'proposalTitle')}</p>` : ''}
+            ${data.feedback ? `<p><strong>Feedback:</strong> ${safeField(data, 'feedback')}</p>` : ''}
+          </div>
+        `,
+        text: `
+Proposal Update:
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+${data.proposalTitle ? `- Proposal: ${data.proposalTitle}` : ''}
+${data.feedback ? `- Feedback: ${data.feedback}` : ''}
+        `.trim(),
+      };
+
+    case 'completion_accepted':
+    case 'revision_requested':
+    case 'revision_completed':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>Completion Update:</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.feedback ? `<p><strong>Feedback:</strong> ${safeField(data, 'feedback')}</p>` : ''}
+          </div>
+        `,
+        text: `
+Completion Update:
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+${data.feedback ? `- Feedback: ${data.feedback}` : ''}
+        `.trim(),
+      };
+
+    case 'deliverable_uploaded':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>New Deliverable:</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.fileName ? `<p><strong>File:</strong> ${safeField(data, 'fileName')}</p>` : ''}
+            ${data.uploadedByName ? `<p><strong>Uploaded by:</strong> ${safeField(data, 'uploadedByName')}</p>` : ''}
+          </div>
+        `,
+        text: `
+New Deliverable:
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+${data.fileName ? `- File: ${data.fileName}` : ''}
+${data.uploadedByName ? `- Uploaded by: ${data.uploadedByName}` : ''}
+        `.trim(),
+      };
+
+    case 'document_shared':
+    case 'document_version_created':
+    case 'document_rollback':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>Document Update:</strong></p>
+            ${data.documentTitle ? `<p><strong>Document:</strong> ${safeField(data, 'documentTitle')}</p>` : ''}
+            ${data.sharedByName ? `<p><strong>Shared by:</strong> ${safeField(data, 'sharedByName')}</p>` : ''}
+            ${data.versionNumber ? `<p><strong>Version:</strong> ${safeNumber(data.versionNumber)}</p>` : ''}
+          </div>
+        `,
+        text: `
+Document Update:
+${data.documentTitle ? `- Document: ${data.documentTitle}` : ''}
+${data.sharedByName ? `- Shared by: ${data.sharedByName}` : ''}
+${data.versionNumber ? `- Version: ${data.versionNumber}` : ''}
+        `.trim(),
+      };
+
+    case 'document_comment_added':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>New Comment:</strong></p>
+            ${data.documentTitle ? `<p><strong>Document:</strong> ${safeField(data, 'documentTitle')}</p>` : ''}
+            ${data.commenterName ? `<p><strong>From:</strong> ${safeField(data, 'commenterName')}</p>` : ''}
+            ${data.comment ? `<p><strong>Comment:</strong> ${safeField(data, 'comment')}</p>` : ''}
+          </div>
+        `,
+        text: `
+New Comment:
+${data.documentTitle ? `- Document: ${data.documentTitle}` : ''}
+${data.commenterName ? `- From: ${data.commenterName}` : ''}
+${data.comment ? `- Comment: ${data.comment}` : ''}
+        `.trim(),
+      };
+
+    case 'section_completed':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>Section Completed:</strong></p>
+            ${data.documentTitle ? `<p><strong>Document:</strong> ${safeField(data, 'documentTitle')}</p>` : ''}
+            ${data.sectionTitle ? `<p><strong>Section:</strong> ${safeField(data, 'sectionTitle')}</p>` : ''}
+            ${data.completerName ? `<p><strong>Completed by:</strong> ${safeField(data, 'completerName')}</p>` : ''}
+          </div>
+        `,
+        text: `
+Section Completed:
+${data.documentTitle ? `- Document: ${data.documentTitle}` : ''}
+${data.sectionTitle ? `- Section: ${data.sectionTitle}` : ''}
+${data.completerName ? `- Completed by: ${data.completerName}` : ''}
+        `.trim(),
+      };
+
+    case 'all_proposals_scored':
+      return {
+        html: `
+          <div class="info-box">
+            <p><strong>All Proposals Scored:</strong></p>
+            ${data.projectTitle ? `<p><strong>Project:</strong> ${safeField(data, 'projectTitle')}</p>` : ''}
+            ${data.proposalCount !== undefined ? `<p><strong>Total Proposals:</strong> ${safeNumber(data.proposalCount)}</p>` : ''}
+            <p>You can now review the rankings and make your decision.</p>
+          </div>
+        `,
+        text: `
+All Proposals Scored:
+${data.projectTitle ? `- Project: ${data.projectTitle}` : ''}
+${data.proposalCount !== undefined ? `- Total Proposals: ${data.proposalCount}` : ''}
+You can now review the rankings and make your decision.
         `.trim(),
       };
 
@@ -425,7 +659,7 @@ export function getProjectNotificationEmail(params: {
 }): { subject: string; html: string; text: string } {
   const { userName, projectTitle, projectId, type, additionalInfo } = params;
   const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://bidsync.com';
-  const projectUrl = `${baseUrl}/projects/${projectId}`;
+  const projectUrl = `${baseUrl}/projects/${escapeHtml(projectId)}`;
 
   const titles: Record<typeof type, string> = {
     created: 'New Project Created',
@@ -436,14 +670,17 @@ export function getProjectNotificationEmail(params: {
   };
 
   const title = titles[type];
+  const safeUserName = escapeHtml(userName);
+  const safeProjectTitle = escapeHtml(projectTitle);
+  const safeAdditionalInfo = additionalInfo ? escapeHtml(additionalInfo) : '';
 
   const html = getEmailBase(`
     <div class="content">
       <h1>${title}</h1>
-      <p>Hello ${userName},</p>
+      <p>Hello ${safeUserName},</p>
       <div class="info-box">
-        <p><strong>Project:</strong> ${projectTitle}</p>
-        ${additionalInfo ? `<p>${additionalInfo}</p>` : ''}
+        <p><strong>Project:</strong> ${safeProjectTitle}</p>
+        ${safeAdditionalInfo ? `<p>${safeAdditionalInfo}</p>` : ''}
       </div>
       <div style="text-align: center;">
         <a href="${projectUrl}" class="button">View Project</a>
@@ -492,20 +729,27 @@ export function getDeadlineReminderEmail(params: {
   });
 
   const urgencyEmoji = daysRemaining <= 1 ? '🚨' : daysRemaining <= 3 ? '⚠️' : '📅';
+  
+  // Escape user-provided content
+  const safeUserName = escapeHtml(userName);
+  const safeItemTitle = escapeHtml(itemTitle);
+  const safeDeadlineDate = escapeHtml(deadlineDate);
+  const safeItemUrl = escapeHtml(itemUrl);
+  const safeDaysRemaining = escapeHtml(String(daysRemaining));
 
   const html = getEmailBase(`
     <div class="content">
       <h1>${urgencyEmoji} Deadline Reminder</h1>
-      <p>Hello ${userName},</p>
+      <p>Hello ${safeUserName},</p>
       <p>This is a reminder that your ${itemType} deadline is approaching.</p>
       <div class="info-box">
-        <p><strong>${itemType === 'project' ? 'Project' : 'Section'}:</strong> ${itemTitle}</p>
-        <p><strong>Deadline:</strong> ${deadlineDate}</p>
-        <p><strong>Days Remaining:</strong> ${daysRemaining}</p>
+        <p><strong>${itemType === 'project' ? 'Project' : 'Section'}:</strong> ${safeItemTitle}</p>
+        <p><strong>Deadline:</strong> ${safeDeadlineDate}</p>
+        <p><strong>Days Remaining:</strong> ${safeDaysRemaining}</p>
       </div>
       <p>Please ensure you complete your work before the deadline.</p>
       <div style="text-align: center;">
-        <a href="${itemUrl}" class="button">View ${itemType === 'project' ? 'Project' : 'Section'}</a>
+        <a href="${safeItemUrl}" class="button">View ${itemType === 'project' ? 'Project' : 'Section'}</a>
       </div>
     </div>
   `);

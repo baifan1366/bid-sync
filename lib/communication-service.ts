@@ -10,6 +10,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { NotificationService } from './notification-service';
+import { sanitizeSearchInput } from './validation-utils';
 
 export interface Message {
   id: string;
@@ -208,8 +209,24 @@ export class CommunicationService {
             .eq('project_id', input.projectId);
           
           if (proposals && proposals.length > 0) {
-            // TODO: Notify all leads about new message
-            // This would require implementing a message notification method
+            // Notify all leads about new message
+            for (const proposal of proposals) {
+              if (proposal.lead_id && proposal.lead_id !== input.senderId) {
+                NotificationService.createNotification({
+                  userId: proposal.lead_id,
+                  type: 'message_received',
+                  title: 'New Message',
+                  body: `You have a new message regarding project "${project.title}"`,
+                  data: {
+                    projectId: input.projectId,
+                    proposalId: input.proposalId,
+                    senderId: input.senderId,
+                    senderName: sender.full_name || sender.email,
+                  },
+                  sendEmail: true,
+                }).catch(err => console.error('Failed to send message notification:', err));
+              }
+            }
           }
           recipientId = proposals?.[0]?.lead_id || project.client_id;
         }
@@ -220,8 +237,19 @@ export class CommunicationService {
 
       // Send notification to recipient
       if (recipientId && recipientId !== input.senderId) {
-        // TODO: Notify recipient about new message
-        // This would require implementing a message notification method
+        NotificationService.createNotification({
+          userId: recipientId,
+          type: 'message_received',
+          title: 'New Message',
+          body: `You have a new message regarding project "${project.title}"`,
+          data: {
+            projectId: input.projectId,
+            proposalId: input.proposalId,
+            senderId: input.senderId,
+            senderName: sender.full_name || sender.email,
+          },
+          sendEmail: true,
+        }).catch(err => console.error('Failed to send message notification:', err));
       }
 
       // Map to Message interface
@@ -300,7 +328,10 @@ export class CommunicationService {
 
       // Search filter
       if (searchTerm && searchTerm.trim().length > 0) {
-        query = query.ilike('content', `%${searchTerm}%`);
+        const sanitizedSearch = sanitizeSearchInput(searchTerm);
+        if (sanitizedSearch) {
+          query = query.ilike('content', `%${sanitizedSearch}%`);
+        }
       }
 
       const { data: messages, error } = await query;
@@ -684,7 +715,7 @@ export class CommunicationService {
           )
         `)
         .eq('project_id', projectId)
-        .ilike('question', `%${searchTerm}%`)
+        .ilike('question', `%${sanitizeSearchInput(searchTerm)}%`)
         .order('created_at', { ascending: false });
 
       if (questionsError) {

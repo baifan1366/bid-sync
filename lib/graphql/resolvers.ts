@@ -16,6 +16,7 @@ import { SectionLockManager } from '@/lib/section-lock-service';
 import { ProgressTrackerService } from '@/lib/progress-tracker-service';
 import { SectionManagementService } from '@/lib/section-management-service';
 import { ProposalService } from '@/lib/proposal-service';
+import { sanitizeSearchInput } from '@/lib/validation-utils';
 
 // ============================================================
 // ERROR HANDLING UTILITIES
@@ -2922,7 +2923,10 @@ export const resolvers = {
 
       // Apply search filter
       if (search && search.trim()) {
-        query = query.or(`title.ilike.%${search}%`);
+        const sanitizedSearch = sanitizeSearchInput(search);
+        if (sanitizedSearch) {
+          query = query.or(`title.ilike.%${sanitizedSearch}%`);
+        }
       }
 
       const { data: proposals, error } = await query;

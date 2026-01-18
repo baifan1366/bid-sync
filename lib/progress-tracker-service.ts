@@ -9,6 +9,7 @@
 
 import { createClient } from '@/lib/supabase/client';
 import type { RealtimeChannel } from '@supabase/supabase-js';
+import { NotificationService } from './notification-service';
 
 // ============================================================
 // TYPES
@@ -388,10 +389,26 @@ export class ProgressTrackerService {
         d => !d.isOverdue && d.hoursRemaining <= 24 && d.hoursRemaining > 0
       );
 
-      // TODO: Integrate with notification system
-      // For now, we'll just log the deadlines that need notification
+      // Send notifications for upcoming deadlines
       if (deadlinesNeedingNotification.length > 0) {
-        console.log('Deadlines needing notification:', deadlinesNeedingNotification);
+        for (const deadline of deadlinesNeedingNotification) {
+          if (deadline.assignedTo) {
+            NotificationService.createNotification({
+              userId: deadline.assignedTo,
+              type: 'section_deadline_approaching',
+              title: 'Section Deadline Approaching',
+              body: `Your section "${deadline.title}" is due in ${Math.ceil(deadline.hoursRemaining)} hours.`,
+              data: {
+                documentId,
+                sectionId: deadline.sectionId,
+                sectionTitle: deadline.title,
+                deadline: deadline.deadline?.toISOString(),
+                hoursRemaining: deadline.hoursRemaining,
+              },
+              sendEmail: true,
+            }).catch(err => console.error('Failed to send deadline notification:', err));
+          }
+        }
       }
     } catch (error) {
       console.error('Exception checking deadlines:', error);

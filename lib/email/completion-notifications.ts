@@ -4,10 +4,30 @@
  * Handles email notifications for project delivery and completion events.
  * 
  * Implements requirements 2.2, 4.3, 5.3 from the project-delivery-archival spec.
+ * 
+ * SECURITY: All user-provided content MUST be escaped using escapeHtml() before
+ * being inserted into HTML templates to prevent XSS attacks.
  */
 
 import { sendEmail } from './service';
 import { createClient } from '@/lib/supabase/server';
+
+// ============================================================
+// XSS PROTECTION UTILITIES
+// ============================================================
+
+/**
+ * Escapes HTML special characters to prevent XSS attacks
+ */
+function escapeHtml(unsafe: string | null | undefined): string {
+  if (unsafe == null) return '';
+  return String(unsafe)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 /**
  * Parameters for client notification on ready for delivery
@@ -70,8 +90,12 @@ export async function sendClientReadyForDeliveryNotification(
       };
     }
 
-    const clientName = client.full_name || 'Valued Client';
-    const projectUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/client-projects/${params.projectId}`;
+    // Escape user-provided content
+    const clientName = escapeHtml(client.full_name || 'Valued Client');
+    const safeProjectTitle = escapeHtml(params.projectTitle);
+    const safeTeamName = escapeHtml(params.teamName);
+    
+    const projectUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/client-projects/${encodeURIComponent(params.projectId)}`;
 
     const subject = `Project Ready for Review: ${params.projectTitle}`;
 
@@ -85,8 +109,8 @@ export async function sendClientReadyForDeliveryNotification(
         </p>
         <div class="info-box">
           <p style="margin: 0;"><strong>Project Details:</strong></p>
-          <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${params.projectTitle}</p>
-          <p style="margin: 4px 0 0 0;"><strong>Team:</strong> ${params.teamName}</p>
+          <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${safeProjectTitle}</p>
+          <p style="margin: 4px 0 0 0;"><strong>Team:</strong> ${safeTeamName}</p>
           <p style="margin: 4px 0 0 0;"><strong>Deliverables:</strong> ${params.deliverableCount} file${params.deliverableCount !== 1 ? 's' : ''}</p>
         </div>
         <p>
@@ -184,7 +208,11 @@ export async function sendTeamCompletionNotifications(
       };
     }
 
-    const projectUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/lead-projects/${params.projectId}`;
+    // Escape user-provided content
+    const safeProjectTitle = escapeHtml(params.projectTitle);
+    const safeClientName = escapeHtml(params.clientName);
+    
+    const projectUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/lead-projects/${encodeURIComponent(params.projectId)}`;
 
     // Send notification to each team member
     const notificationPromises = teamMembers.map(async (member) => {
@@ -193,7 +221,7 @@ export async function sendTeamCompletionNotifications(
         return { success: false };
       }
 
-      const memberName = user.full_name || 'Team Member';
+      const memberName = escapeHtml(user.full_name || 'Team Member');
       const subject = `Project Completed: ${params.projectTitle}`;
 
       const html = getEmailBase(`
@@ -206,8 +234,8 @@ export async function sendTeamCompletionNotifications(
           </p>
           <div class="info-box">
             <p style="margin: 0;"><strong>Project Details:</strong></p>
-            <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${params.projectTitle}</p>
-            <p style="margin: 4px 0 0 0;"><strong>Client:</strong> ${params.clientName}</p>
+            <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${safeProjectTitle}</p>
+            <p style="margin: 4px 0 0 0;"><strong>Client:</strong> ${safeClientName}</p>
             <p style="margin: 4px 0 0 0;"><strong>Status:</strong> Completed</p>
           </div>
           <p>
@@ -303,8 +331,13 @@ export async function sendLeadRevisionRequestNotification(
       };
     }
 
-    const leadName = lead.full_name || 'Team Lead';
-    const projectUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/lead-projects/${params.projectId}`;
+    // Escape user-provided content
+    const leadName = escapeHtml(lead.full_name || 'Team Lead');
+    const safeProjectTitle = escapeHtml(params.projectTitle);
+    const safeClientName = escapeHtml(params.clientName);
+    const safeRevisionNotes = escapeHtml(params.revisionNotes);
+    
+    const projectUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/lead-projects/${encodeURIComponent(params.projectId)}`;
 
     const subject = `Revisions Requested: ${params.projectTitle}`;
 
@@ -318,12 +351,12 @@ export async function sendLeadRevisionRequestNotification(
         </p>
         <div class="info-box">
           <p style="margin: 0;"><strong>Project Details:</strong></p>
-          <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${params.projectTitle}</p>
-          <p style="margin: 4px 0 0 0;"><strong>Client:</strong> ${params.clientName}</p>
+          <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${safeProjectTitle}</p>
+          <p style="margin: 4px 0 0 0;"><strong>Client:</strong> ${safeClientName}</p>
         </div>
         <div class="info-box" style="background-color: rgba(251, 191, 36, 0.15);">
           <p style="margin: 0;"><strong>Revision Notes from Client:</strong></p>
-          <p style="margin: 8px 0 0 0; color: #000000; white-space: pre-wrap;">${params.revisionNotes}</p>
+          <p style="margin: 8px 0 0 0; color: #000000; white-space: pre-wrap;">${safeRevisionNotes}</p>
         </div>
         <p>
           The project status has been changed back to "awarded" so you can upload additional 
@@ -346,7 +379,7 @@ export async function sendLeadRevisionRequestNotification(
     const text = `
 Revisions Requested
 
-Hello ${leadName},
+Hello ${lead.full_name || 'Team Lead'},
 
 The client has reviewed the deliverables and is requesting revisions before accepting the project completion.
 

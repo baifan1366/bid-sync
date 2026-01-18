@@ -2,7 +2,61 @@
  * Email Templates for BidSync Admin Notifications
  * 
  * These templates follow the BidSync design system with yellow-black-white color scheme
+ * 
+ * SECURITY: All user-provided content MUST be escaped using escapeHtml() before
+ * being inserted into HTML templates to prevent XSS attacks.
  */
+
+// ============================================================
+// XSS PROTECTION UTILITIES
+// ============================================================
+
+/**
+ * Escapes HTML special characters to prevent XSS attacks
+ * CRITICAL: Use this for ALL user-provided content in email templates
+ */
+function escapeHtml(unsafe: string | null | undefined): string {
+  if (unsafe == null) return '';
+  return String(unsafe)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+/**
+ * Safely gets a field value and escapes it
+ */
+function safeField(value: string | null | undefined, fallback: string = ''): string {
+  return escapeHtml(value || fallback);
+}
+
+/**
+ * Safely formats a date string
+ */
+function safeDate(dateStr: string | null | undefined, options?: Intl.DateTimeFormatOptions): string {
+  if (!dateStr) return '';
+  try {
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return escapeHtml(dateStr);
+    return date.toLocaleDateString('en-US', options || {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return escapeHtml(dateStr);
+  }
+}
+
+/**
+ * Safely formats a number
+ */
+function safeNumber(value: number | null | undefined, fallback: string = '0'): string {
+  if (value == null || isNaN(value)) return fallback;
+  return value.toLocaleString();
+}
 
 interface AdminInvitationEmailParams {
   inviteeEmail: string;
@@ -236,8 +290,14 @@ function getEmailBase(content: string): string {
  */
 export function getAdminInvitationEmail(params: AdminInvitationEmailParams): { subject: string; html: string; text: string } {
   const { inviteeEmail, inviterName, invitationToken, expiresAt } = params;
-  const invitationUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/admin/accept-invitation?token=${invitationToken}`;
-  const expiryDate = new Date(expiresAt).toLocaleDateString('en-US', { 
+  
+  // Escape user-provided content
+  const safeInviteeEmail = escapeHtml(inviteeEmail);
+  const safeInviterName = escapeHtml(inviterName);
+  const safeToken = encodeURIComponent(invitationToken);
+  
+  const invitationUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/admin/accept-invitation?token=${safeToken}`;
+  const expiryDate = safeDate(expiresAt, { 
     year: 'numeric', 
     month: 'long', 
     day: 'numeric' 
@@ -248,12 +308,12 @@ export function getAdminInvitationEmail(params: AdminInvitationEmailParams): { s
       <h1>You've Been Invited to Join BidSync as an Administrator</h1>
       <p>Hello,</p>
       <p>
-        <strong>${inviterName}</strong> has invited you to become an administrator on BidSync. 
+        <strong>${safeInviterName}</strong> has invited you to become an administrator on BidSync. 
         As an admin, you'll have access to manage users, verify client registrations, and oversee platform operations.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Invitation Details:</strong></p>
-        <p style="margin: 8px 0 0 0;">Email: ${inviteeEmail}</p>
+        <p style="margin: 8px 0 0 0;">Email: ${safeInviteeEmail}</p>
         <p style="margin: 4px 0 0 0;">Expires: ${expiryDate}</p>
       </div>
       <p>Click the button below to accept your invitation and set up your admin account:</p>
@@ -262,7 +322,7 @@ export function getAdminInvitationEmail(params: AdminInvitationEmailParams): { s
       </div>
       <p style="font-size: 14px; color: #6B7280;">
         If the button doesn't work, copy and paste this link into your browser:<br>
-        <a href="${invitationUrl}" style="color: #FBBF24; word-break: break-all;">${invitationUrl}</a>
+        <a href="${invitationUrl}" style="color: #FBBF24; word-break: break-all;">${escapeHtml(invitationUrl)}</a>
       </p>
       <p style="font-size: 14px; color: #6B7280;">
         This invitation will expire on ${expiryDate}. If you didn't expect this invitation, you can safely ignore this email.
@@ -304,12 +364,16 @@ This is an automated message from BidSync.
  */
 export function getVerificationApprovalEmail(params: VerificationApprovalEmailParams): { subject: string; html: string; text: string } {
   const { clientName, clientEmail } = params;
+  
+  // Escape user-provided content
+  const safeClientName = escapeHtml(clientName);
+  
   const dashboardUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/projects`;
 
   const html = getEmailBase(`
     <div class="content">
       <h1>🎉 Your Account Has Been Verified!</h1>
-      <p>Hello ${clientName},</p>
+      <p>Hello ${safeClientName},</p>
       <p>
         Great news! Your BidSync account has been successfully verified by our team. 
         You can now create and post projects to connect with qualified bidding teams.
@@ -369,19 +433,24 @@ This is an automated message from BidSync.
  */
 export function getVerificationRejectionEmail(params: VerificationRejectionEmailParams): { subject: string; html: string; text: string } {
   const { clientName, clientEmail, reason } = params;
+  
+  // Escape user-provided content
+  const safeClientName = escapeHtml(clientName);
+  const safeReason = escapeHtml(reason);
+  
   const supportUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/support`;
 
   const html = getEmailBase(`
     <div class="content">
       <h1>Update on Your Account Verification</h1>
-      <p>Hello ${clientName},</p>
+      <p>Hello ${safeClientName},</p>
       <p>
         Thank you for your interest in BidSync. After reviewing your account verification request, 
         we're unable to approve your account at this time.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Reason:</strong></p>
-        <p style="margin: 8px 0 0 0;">${reason}</p>
+        <p style="margin: 8px 0 0 0;">${safeReason}</p>
       </div>
       <p>
         If you believe this decision was made in error or if you'd like to provide additional information, 
@@ -431,8 +500,14 @@ This is an automated message from BidSync.
  */
 export function getAccountSuspensionEmail(params: AccountSuspensionEmailParams): { subject: string; html: string; text: string } {
   const { userName, userEmail, reason, suspendedAt } = params;
+  
+  // Escape user-provided content
+  const safeUserName = escapeHtml(userName);
+  const safeUserEmail = escapeHtml(userEmail);
+  const safeReason = escapeHtml(reason);
+  
   const supportUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-domain.com'}/support`;
-  const suspensionDate = new Date(suspendedAt).toLocaleDateString('en-US', { 
+  const suspensionDate = safeDate(suspendedAt, { 
     year: 'numeric', 
     month: 'long', 
     day: 'numeric',
@@ -443,14 +518,14 @@ export function getAccountSuspensionEmail(params: AccountSuspensionEmailParams):
   const html = getEmailBase(`
     <div class="content">
       <h1>Your BidSync Account Has Been Suspended</h1>
-      <p>Hello ${userName},</p>
+      <p>Hello ${safeUserName},</p>
       <p>
-        We're writing to inform you that your BidSync account (${userEmail}) has been suspended 
+        We're writing to inform you that your BidSync account (${safeUserEmail}) has been suspended 
         as of ${suspensionDate}.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Reason for Suspension:</strong></p>
-        <p style="margin: 8px 0 0 0;">${reason}</p>
+        <p style="margin: 8px 0 0 0;">${safeReason}</p>
       </div>
       <p>
         During this suspension period, you will not be able to access your account or use BidSync services.
@@ -505,7 +580,14 @@ This is an automated message from BidSync.
  */
 export function getProposalSubmissionClientEmail(params: ProposalSubmissionClientEmailParams): { subject: string; html: string; text: string } {
   const { clientName, projectTitle, proposalTitle, teamName, submittedAt, proposalUrl } = params;
-  const submissionDate = new Date(submittedAt).toLocaleDateString('en-US', { 
+  
+  // Escape user-provided content
+  const safeClientName = escapeHtml(clientName);
+  const safeProjectTitle = escapeHtml(projectTitle);
+  const safeProposalTitle = escapeHtml(proposalTitle);
+  const safeTeamName = escapeHtml(teamName);
+  
+  const submissionDate = safeDate(submittedAt, { 
     year: 'numeric', 
     month: 'long', 
     day: 'numeric',
@@ -516,16 +598,16 @@ export function getProposalSubmissionClientEmail(params: ProposalSubmissionClien
   const html = getEmailBase(`
     <div class="content">
       <h1>New Proposal Submitted for Your Project</h1>
-      <p>Hello ${clientName},</p>
+      <p>Hello ${safeClientName},</p>
       <p>
         Great news! A new proposal has been submitted for your project. 
         A bidding team is interested in working with you.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Proposal Details:</strong></p>
-        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${projectTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Proposal:</strong> ${proposalTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Team:</strong> ${teamName}</p>
+        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${safeProjectTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Proposal:</strong> ${safeProposalTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Team:</strong> ${safeTeamName}</p>
         <p style="margin: 4px 0 0 0;"><strong>Submitted:</strong> ${submissionDate}</p>
       </div>
       <p>
@@ -675,7 +757,14 @@ This is an automated message from BidSync.
  */
 export function getProposalSubmissionAdminEmail(params: ProposalSubmissionAdminEmailParams): { subject: string; html: string; text: string } {
   const { projectTitle, clientName, teamName, proposalTitle, submittedAt, projectUrl, proposalUrl } = params;
-  const submissionDate = new Date(submittedAt).toLocaleDateString('en-US', { 
+  
+  // Escape user-provided content
+  const safeProjectTitle = escapeHtml(projectTitle);
+  const safeClientName = escapeHtml(clientName);
+  const safeTeamName = escapeHtml(teamName);
+  const safeProposalTitle = escapeHtml(proposalTitle);
+  
+  const submissionDate = safeDate(submittedAt, { 
     year: 'numeric', 
     month: 'long', 
     day: 'numeric',
@@ -693,10 +782,10 @@ export function getProposalSubmissionAdminEmail(params: ProposalSubmissionAdminE
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Activity Details:</strong></p>
-        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${projectTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Client:</strong> ${clientName}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Proposal:</strong> ${proposalTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Team:</strong> ${teamName}</p>
+        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${safeProjectTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Client:</strong> ${safeClientName}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Proposal:</strong> ${safeProposalTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Team:</strong> ${safeTeamName}</p>
         <p style="margin: 4px 0 0 0;"><strong>Submitted:</strong> ${submissionDate}</p>
       </div>
       <p>
@@ -755,7 +844,14 @@ This is an automated message from BidSync.
  */
 export function getDocumentInvitationEmail(params: DocumentInvitationEmailParams): { subject: string; html: string; text: string } {
   const { inviterName, documentTitle, role, invitationUrl, expiresAt } = params;
-  const expiryDate = new Date(expiresAt).toLocaleDateString('en-US', { 
+  
+  // Escape user-provided content
+  const safeInviterName = escapeHtml(inviterName);
+  const safeDocumentTitle = escapeHtml(documentTitle);
+  const safeRole = escapeHtml(role);
+  const safeInvitationUrl = escapeHtml(invitationUrl);
+  
+  const expiryDate = safeDate(expiresAt, { 
     year: 'numeric', 
     month: 'long', 
     day: 'numeric',
@@ -768,12 +864,12 @@ export function getDocumentInvitationEmail(params: DocumentInvitationEmailParams
       <h1>You've Been Invited to Collaborate</h1>
       <p>Hello,</p>
       <p>
-        <strong>${inviterName}</strong> has invited you to collaborate on a document.
+        <strong>${safeInviterName}</strong> has invited you to collaborate on a document.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Invitation Details:</strong></p>
-        <p style="margin: 8px 0 0 0;"><strong>Document:</strong> ${documentTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Your Role:</strong> ${role.charAt(0).toUpperCase() + role.slice(1)}</p>
+        <p style="margin: 8px 0 0 0;"><strong>Document:</strong> ${safeDocumentTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Your Role:</strong> ${safeRole.charAt(0).toUpperCase() + safeRole.slice(1)}</p>
         <p style="margin: 4px 0 0 0;"><strong>Expires:</strong> ${expiryDate}</p>
       </div>
       <p>
@@ -787,7 +883,7 @@ export function getDocumentInvitationEmail(params: DocumentInvitationEmailParams
       </div>
       <p style="font-size: 14px; color: #6B7280;">
         If the button doesn't work, copy and paste this link into your browser:<br>
-        <a href="${invitationUrl}" style="color: #FBBF24; word-break: break-all;">${invitationUrl}</a>
+        <a href="${invitationUrl}" style="color: #FBBF24; word-break: break-all;">${safeInvitationUrl}</a>
       </p>
       <p style="font-size: 14px; color: #6B7280;">
         This invitation will expire on ${expiryDate}. If you didn't expect this invitation, you can safely ignore this email.
@@ -835,21 +931,27 @@ This is an automated message from BidSync.
 export function getRollbackNotificationEmail(params: RollbackNotificationEmailParams): { subject: string; html: string; text: string } {
   const { userName, documentTitle, versionNumber, rolledBackBy, documentUrl } = params;
 
+  // Escape user-provided content
+  const safeUserName = escapeHtml(userName);
+  const safeDocumentTitle = escapeHtml(documentTitle);
+  const safeRolledBackBy = escapeHtml(rolledBackBy);
+  const safeVersionNumber = safeNumber(versionNumber);
+
   const html = getEmailBase(`
     <div class="content">
       <h1>Document Rolled Back to Previous Version</h1>
-      <p>Hello ${userName},</p>
+      <p>Hello ${safeUserName},</p>
       <p>
         A document you're collaborating on has been rolled back to a previous version.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Rollback Details:</strong></p>
-        <p style="margin: 8px 0 0 0;"><strong>Document:</strong> ${documentTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Restored Version:</strong> Version ${versionNumber}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Rolled Back By:</strong> ${rolledBackBy}</p>
+        <p style="margin: 8px 0 0 0;"><strong>Document:</strong> ${safeDocumentTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Restored Version:</strong> Version ${safeVersionNumber}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Rolled Back By:</strong> ${safeRolledBackBy}</p>
       </div>
       <p>
-        The document has been restored to an earlier state. Any changes made after version ${versionNumber} 
+        The document has been restored to an earlier state. Any changes made after version ${safeVersionNumber} 
         are no longer visible in the current document, but they remain preserved in the version history.
       </p>
       <p>
@@ -904,6 +1006,11 @@ This is an automated message from BidSync.
 export function getRoleChangeNotificationEmail(params: RoleChangeNotificationEmailParams): { subject: string; html: string; text: string } {
   const { userName, documentTitle, newRole, documentUrl } = params;
 
+  // Escape user-provided content
+  const safeUserName = escapeHtml(userName);
+  const safeDocumentTitle = escapeHtml(documentTitle);
+  const safeNewRole = escapeHtml(newRole);
+
   const roleDescriptions: Record<string, string> = {
     owner: 'You now have full control over the document, including the ability to manage team members and delete the document.',
     editor: 'You can now make changes to the document and collaborate in real-time with other team members.',
@@ -914,14 +1021,14 @@ export function getRoleChangeNotificationEmail(params: RoleChangeNotificationEma
   const html = getEmailBase(`
     <div class="content">
       <h1>Your Role Has Been Updated</h1>
-      <p>Hello ${userName},</p>
+      <p>Hello ${safeUserName},</p>
       <p>
         Your role on a document has been updated.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Update Details:</strong></p>
-        <p style="margin: 8px 0 0 0;"><strong>Document:</strong> ${documentTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>New Role:</strong> ${newRole.charAt(0).toUpperCase() + newRole.slice(1)}</p>
+        <p style="margin: 8px 0 0 0;"><strong>Document:</strong> ${safeDocumentTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>New Role:</strong> ${safeNewRole.charAt(0).toUpperCase() + safeNewRole.slice(1)}</p>
       </div>
       <p>
         ${roleDescriptions[newRole] || 'Your permissions have been updated.'}
@@ -978,15 +1085,19 @@ This is an automated message from BidSync.
 export function getAccessRevocationEmail(params: AccessRevocationEmailParams): { subject: string; html: string; text: string } {
   const { userName, documentTitle } = params;
 
+  // Escape user-provided content
+  const safeUserName = escapeHtml(userName);
+  const safeDocumentTitle = escapeHtml(documentTitle);
+
   const html = getEmailBase(`
     <div class="content">
       <h1>Your Access Has Been Revoked</h1>
-      <p>Hello ${userName},</p>
+      <p>Hello ${safeUserName},</p>
       <p>
         Your access to a document has been revoked by the document owner.
       </p>
       <div class="info-box">
-        <p style="margin: 0;"><strong>Document:</strong> ${documentTitle}</p>
+        <p style="margin: 0;"><strong>Document:</strong> ${safeDocumentTitle}</p>
       </div>
       <p>
         You will no longer be able to view or edit this document. If you believe this was done in error, 
@@ -1030,17 +1141,22 @@ This is an automated message from BidSync.
 export function getProposalScoredEmail(params: ProposalScoredEmailParams): { subject: string; html: string; text: string } {
   const { leadName, proposalTitle, projectTitle, totalScore, rank, proposalUrl } = params;
 
+  // Escape user-provided content
+  const safeLeadName = escapeHtml(leadName);
+  const safeProposalTitle = escapeHtml(proposalTitle);
+  const safeProjectTitle = escapeHtml(projectTitle);
+
   const html = getEmailBase(`
     <div class="content">
       <h1>Your Proposal Has Been Scored</h1>
-      <p>Hello ${leadName},</p>
+      <p>Hello ${safeLeadName},</p>
       <p>
         Great news! The client has evaluated your proposal and assigned scores across multiple criteria.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Scoring Results:</strong></p>
-        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${projectTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Proposal:</strong> ${proposalTitle}</p>
+        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${safeProjectTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Proposal:</strong> ${safeProposalTitle}</p>
         <p style="margin: 4px 0 0 0;"><strong>Total Score:</strong> ${totalScore.toFixed(2)}</p>
         <p style="margin: 4px 0 0 0;"><strong>Current Rank:</strong> #${rank}</p>
       </div>
@@ -1101,6 +1217,11 @@ This is an automated message from BidSync.
 export function getScoreUpdatedEmail(params: ScoreUpdatedEmailParams): { subject: string; html: string; text: string } {
   const { leadName, proposalTitle, projectTitle, previousScore, newScore, previousRank, newRank, proposalUrl } = params;
   
+  // Escape user-provided content
+  const safeLeadName = escapeHtml(leadName);
+  const safeProposalTitle = escapeHtml(proposalTitle);
+  const safeProjectTitle = escapeHtml(projectTitle);
+  
   const scoreChange = newScore - previousScore;
   const rankChange = previousRank - newRank; // Positive means improved rank
   const scoreIncreased = scoreChange > 0;
@@ -1109,14 +1230,14 @@ export function getScoreUpdatedEmail(params: ScoreUpdatedEmailParams): { subject
   const html = getEmailBase(`
     <div class="content">
       <h1>Your Proposal Scores Have Been Updated</h1>
-      <p>Hello ${leadName},</p>
+      <p>Hello ${safeLeadName},</p>
       <p>
         The client has revised the scores for your proposal. Here's what changed:
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Score Update:</strong></p>
-        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${projectTitle}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Proposal:</strong> ${proposalTitle}</p>
+        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${safeProjectTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Proposal:</strong> ${safeProposalTitle}</p>
         <p style="margin: 4px 0 0 0;"><strong>Previous Score:</strong> ${previousScore.toFixed(2)}</p>
         <p style="margin: 4px 0 0 0;"><strong>New Score:</strong> ${newScore.toFixed(2)} ${scoreIncreased ? '📈' : '📉'} (${scoreChange > 0 ? '+' : ''}${scoreChange.toFixed(2)})</p>
         <p style="margin: 4px 0 0 0;"><strong>Previous Rank:</strong> #${previousRank}</p>
@@ -1176,19 +1297,24 @@ This is an automated message from BidSync.
 export function getAllProposalsScoredEmail(params: AllProposalsScoredEmailParams): { subject: string; html: string; text: string } {
   const { clientName, projectTitle, proposalCount, topProposalTitle, topProposalScore, projectUrl } = params;
 
+  // Escape user-provided content
+  const safeClientName = escapeHtml(clientName);
+  const safeProjectTitle = escapeHtml(projectTitle);
+  const safeTopProposalTitle = escapeHtml(topProposalTitle);
+
   const html = getEmailBase(`
     <div class="content">
       <h1>🎉 All Proposals Have Been Scored</h1>
-      <p>Hello ${clientName},</p>
+      <p>Hello ${safeClientName},</p>
       <p>
         Congratulations! You've completed scoring all ${proposalCount} proposal${proposalCount !== 1 ? 's' : ''} 
         for your project. You can now review the complete rankings and make your final decision.
       </p>
       <div class="info-box">
         <p style="margin: 0;"><strong>Scoring Complete:</strong></p>
-        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${projectTitle}</p>
+        <p style="margin: 8px 0 0 0;"><strong>Project:</strong> ${safeProjectTitle}</p>
         <p style="margin: 4px 0 0 0;"><strong>Proposals Scored:</strong> ${proposalCount}</p>
-        <p style="margin: 4px 0 0 0;"><strong>Top Ranked Proposal:</strong> ${topProposalTitle}</p>
+        <p style="margin: 4px 0 0 0;"><strong>Top Ranked Proposal:</strong> ${safeTopProposalTitle}</p>
         <p style="margin: 4px 0 0 0;"><strong>Top Score:</strong> ${topProposalScore.toFixed(2)}</p>
       </div>
       <p>
