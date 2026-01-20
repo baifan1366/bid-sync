@@ -9,11 +9,11 @@ import {
   FileText, 
   CheckCircle, 
   TrendingUp,
-  Loader2,
   Calendar
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScoringAnalytics } from './scoring-analytics'
+import { AnalyticsDashboardSkeleton } from './analytics-dashboard-skeleton'
 
 const PLATFORM_ANALYTICS_QUERY = `
   query PlatformAnalytics($dateFrom: String, $dateTo: String) {
@@ -67,11 +67,7 @@ export function AnalyticsDashboard() {
   })
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
-      </div>
-    )
+    return <AnalyticsDashboardSkeleton />
   }
 
   const analytics = data?.platformAnalytics

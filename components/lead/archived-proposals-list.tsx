@@ -18,6 +18,7 @@ import {
   FolderOpen,
 } from "lucide-react"
 import { formatDistanceToNow } from "date-fns"
+import { ArchivedProposalsSkeleton } from "./archived-proposals-skeleton"
 
 interface ArchivedProposal {
   id: string
@@ -107,13 +108,7 @@ export function ArchivedProposalsList({ userId }: ArchivedProposalsListProps) {
   )
 
   if (isLoading) {
-    return (
-      <Card className="border-yellow-400/20">
-        <CardContent className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
-        </CardContent>
-      </Card>
-    )
+    return <ArchivedProposalsSkeleton />
   }
 
   return (

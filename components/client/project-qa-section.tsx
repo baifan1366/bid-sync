@@ -163,15 +163,7 @@ export function ProjectQASection({ projectId }: ProjectQASectionProps) {
   }
 
   if (isLoading) {
-    return (
-      <Card className="border-yellow-400/20">
-        <CardContent className="py-12">
-          <div className="flex items-center justify-center">
-            <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
-          </div>
-        </CardContent>
-      </Card>
-    )
+    return <ProjectQASkeleton />
   }
 
   const questions = data?.projectQuestions || []

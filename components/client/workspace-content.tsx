@@ -39,6 +39,7 @@ import { Input } from "@/components/ui/input"
 import { TipTapEditor } from "@/components/editor/tiptap-editor"
 type JSONContent = Record<string, unknown>
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
+import { WorkspaceSkeleton } from "./workspace-skeleton"
 
 // Lazy load ChatSection for better performance
 const ChatSection = dynamic(
@@ -500,13 +501,7 @@ export function WorkspaceContent() {
   }
 
   if (userLoading || isLoading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
-        </div>
-      </div>
-    )
+    return <WorkspaceSkeleton />
   }
 
   if (error && shouldFetch) {

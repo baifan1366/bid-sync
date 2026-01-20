@@ -29,6 +29,7 @@ import {
   UpdatePreferencesInput 
 } from '@/lib/notification-preferences-service'
 import { BrowserNotificationSettings } from './browser-notification-settings'
+import { NotificationPreferencesSkeleton } from './notification-preferences-skeleton'
 
 interface NotificationPreferencesProps {
   userId: string
@@ -225,25 +226,7 @@ export function NotificationPreferences({ userId }: NotificationPreferencesProps
   }
 
   if (isLoading) {
-    return (
-      <Card className="border-yellow-400/20">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Bell className="h-5 w-5 text-yellow-400" />
-            <CardTitle>Notification Preferences</CardTitle>
-          </div>
-          <CardDescription>
-            Manage how you receive notifications
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2">
-            <Loader2 className="h-5 w-5 animate-spin text-yellow-400" />
-            <p className="text-muted-foreground">Loading preferences...</p>
-          </div>
-        </CardContent>
-      </Card>
-    )
+    return <NotificationPreferencesSkeleton />
   }
 
   if (!preferences) {

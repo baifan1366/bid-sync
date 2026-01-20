@@ -12,11 +12,11 @@ import {
   AlertCircle,
   Calendar,
   Users,
-  Loader2,
   ArrowRight
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
+import { MemberDashboardSkeleton } from './member-dashboard-skeleton'
 
 const MEMBER_SECTIONS_QUERY = `
   query MemberAssignedSections {
@@ -86,15 +86,7 @@ export function MemberDashboardContent() {
   }
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-white dark:bg-black p-4 sm:p-8">
-        <div className="max-w-[1800px] mx-auto">
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-yellow-400" />
-          </div>
-        </div>
-      </div>
-    )
+    return <MemberDashboardSkeleton />
   }
 
   return (
