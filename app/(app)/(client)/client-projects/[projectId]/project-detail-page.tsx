@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
 import { useGraphQLQuery } from "@/hooks/use-graphql"
 import { useUser } from "@/hooks/use-user"
+import { useToast } from "@/components/ui/use-toast"
 import { GET_PROJECT, GET_PROPOSALS_FOR_PROJECT } from "@/lib/graphql/queries"
 import { UPDATE_PROJECT_STATUS } from "@/lib/graphql/mutations"
 import { Project, ProjectStatus, AdditionalInfoRequirement } from "@/types/project"
@@ -20,6 +21,16 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import {
   formatBudget,
   formatDate,
@@ -72,6 +83,7 @@ export function ProjectDetailPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
   const { user } = useUser()
+  const { toast } = useToast()
   const projectId = params.projectId as string
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
@@ -80,6 +92,8 @@ export function ProjectDetailPage() {
   const [isComparisonDialogOpen, setIsComparisonDialogOpen] = useState(false)
   const [selectedProposals, setSelectedProposals] = useState<string[]>([])
   const [showProposals, setShowProposals] = useState(false)
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false)
+  const [showReopenConfirm, setShowReopenConfirm] = useState(false)
 
   const { data, isLoading } = useGraphQLQuery<ProjectResponse>(
     ["project", projectId],
@@ -102,12 +116,7 @@ export function ProjectDetailPage() {
   const handleCloseProject = async () => {
     if (!project) return
     
-    const confirmed = confirm(
-      "Are you sure you want to close this project? This will prevent new proposals from being submitted."
-    )
-    
-    if (!confirmed) return
-
+    setShowCloseConfirm(false)
     setIsUpdatingStatus(true)
     try {
       const response = await fetch('/api/graphql', {
@@ -132,10 +141,17 @@ export function ProjectDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       
-      alert('Project closed successfully')
+      toast({
+        title: "Project closed",
+        description: "Project closed successfully",
+      })
     } catch (error) {
       console.error('Error closing project:', error)
-      alert(error instanceof Error ? error.message : 'Failed to close project')
+      toast({
+        title: "Failed to close project",
+        description: error instanceof Error ? error.message : 'An error occurred',
+        variant: "destructive",
+      })
     } finally {
       setIsUpdatingStatus(false)
     }
@@ -144,12 +160,7 @@ export function ProjectDetailPage() {
   const handleReopenProject = async () => {
     if (!project) return
     
-    const confirmed = confirm(
-      "Are you sure you want to reopen this project? This will allow new proposals to be submitted."
-    )
-    
-    if (!confirmed) return
-
+    setShowReopenConfirm(false)
     setIsUpdatingStatus(true)
     try {
       const response = await fetch('/api/graphql', {
@@ -174,10 +185,17 @@ export function ProjectDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['project', projectId] })
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       
-      alert('Project reopened successfully')
+      toast({
+        title: "Project reopened",
+        description: "Project reopened successfully",
+      })
     } catch (error) {
       console.error('Error reopening project:', error)
-      alert(error instanceof Error ? error.message : 'Failed to reopen project')
+      toast({
+        title: "Failed to reopen project",
+        description: error instanceof Error ? error.message : 'An error occurred',
+        variant: "destructive",
+      })
     } finally {
       setIsUpdatingStatus(false)
     }
@@ -306,7 +324,7 @@ export function ProjectDetailPage() {
                 <>
                   {project.status === 'CLOSED' ? (
                     <Button
-                      onClick={handleReopenProject}
+                      onClick={() => setShowReopenConfirm(true)}
                       disabled={isUpdatingStatus}
                       variant="outline"
                       className="border-yellow-400/40 hover:bg-yellow-400/10"
@@ -315,7 +333,7 @@ export function ProjectDetailPage() {
                     </Button>
                   ) : project.status !== 'AWARDED' && project.status !== 'PENDING_REVIEW' && (
                     <Button
-                      onClick={handleCloseProject}
+                      onClick={() => setShowCloseConfirm(true)}
                       disabled={isUpdatingStatus}
                       variant="outline"
                       className="border-red-600/40 hover:bg-red-600/10 text-red-600 dark:text-red-400"
@@ -756,6 +774,52 @@ export function ProjectDetailPage() {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Close Project Confirmation Dialog */}
+      <AlertDialog open={showCloseConfirm} onOpenChange={setShowCloseConfirm}>
+        <AlertDialogContent className="border-yellow-400/20">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-black dark:text-white">Close Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to close this project? This will prevent new proposals from being submitted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-yellow-400/40 hover:bg-yellow-400/10">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleCloseProject}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              Close Project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reopen Project Confirmation Dialog */}
+      <AlertDialog open={showReopenConfirm} onOpenChange={setShowReopenConfirm}>
+        <AlertDialogContent className="border-yellow-400/20">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-black dark:text-white">Reopen Project</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to reopen this project? This will allow new proposals to be submitted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-yellow-400/40 hover:bg-yellow-400/10">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleReopenProject}
+              className="bg-yellow-400 hover:bg-yellow-500 text-black"
+            >
+              Reopen Project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

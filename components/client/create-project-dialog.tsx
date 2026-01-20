@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Separator } from "@/components/ui/separator"
+import { useToast } from "@/components/ui/use-toast"
 import { Plus, X, GripVertical } from "lucide-react"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 
@@ -22,6 +23,7 @@ interface CreateProjectDialogProps {
 export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogProps) {
   const router = useRouter()
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     title: "",
@@ -152,7 +154,11 @@ export function CreateProjectDialog({ open, onOpenChange }: CreateProjectDialogP
     } catch (error) {
       console.error("Error creating project:", error)
       const errorMessage = error instanceof Error ? error.message : 'Failed to create project'
-      alert(`Failed to create project: ${errorMessage}`)
+      toast({
+        title: "Failed to create project",
+        description: errorMessage,
+        variant: "destructive",
+      })
     } finally {
       setIsSubmitting(false)
     }

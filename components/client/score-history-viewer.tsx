@@ -13,10 +13,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Loader2, History, ArrowRight, FileText, User, Clock } from "lucide-react"
+import { History, ArrowRight, FileText, User, Clock } from "lucide-react"
 import { GET_PROPOSAL_SCORE_HISTORY } from "@/lib/graphql/queries"
 import type { ProposalScoreHistory } from "@/lib/graphql/types"
 import { format } from "date-fns"
+import { ScoreHistoryViewerSkeleton } from "./score-history-viewer-skeleton"
 
 interface ScoreHistoryViewerProps {
   proposalId: string

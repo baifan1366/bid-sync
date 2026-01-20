@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useToast } from "@/components/ui/use-toast"
 import {
   formatBudget,
   formatDate,
@@ -48,6 +49,7 @@ interface OpenProjectsResponse {
 export function LeadDashboardContent() {
   const router = useRouter()
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const [creatingProposalId, setCreatingProposalId] = useState<string | null>(null)
 
   const { data, isLoading, error } = useGraphQLQuery<OpenProjectsResponse>(
@@ -89,7 +91,11 @@ export function LeadDashboardContent() {
       }
     } catch (error) {
       console.error('Error creating proposal:', error)
-      alert(error instanceof Error ? error.message : 'Failed to create proposal')
+      toast({
+        title: "Failed to create proposal",
+        description: error instanceof Error ? error.message : 'An error occurred',
+        variant: "destructive",
+      })
     } finally {
       setCreatingProposalId(null)
     }

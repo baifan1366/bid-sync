@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { useToast } from "@/components/ui/use-toast"
 import { Plus, X, GripVertical, AlertCircle, CheckCircle2 } from "lucide-react"
 import type { ScoringTemplate, ScoringCriterion, CreateScoringCriterionInput } from "@/lib/graphql/types"
 
@@ -77,6 +78,7 @@ export function ScoringTemplateManager({
   onSave,
 }: ScoringTemplateManagerProps) {
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [selectedDefaultTemplate, setSelectedDefaultTemplate] = useState<string | null>(null)
   const [templateName, setTemplateName] = useState("")
@@ -181,12 +183,20 @@ export function ScoringTemplateManager({
     e.preventDefault()
     
     if (!isWeightValid) {
-      alert("Total weight must equal 100%. Please adjust the weights.")
+      toast({
+        title: "Invalid weights",
+        description: "Total weight must equal 100%. Please adjust the weights.",
+        variant: "destructive",
+      })
       return
     }
 
     if (criteria.length === 0) {
-      alert("Please add at least one criterion.")
+      toast({
+        title: "No criteria",
+        description: "Please add at least one criterion.",
+        variant: "destructive",
+      })
       return
     }
 
@@ -294,11 +304,18 @@ export function ScoringTemplateManager({
         onSave()
       }
       
-      alert(`Scoring template ${isUpdate ? 'updated' : 'created'} successfully!`)
+      toast({
+        title: "Success",
+        description: `Scoring template ${isUpdate ? 'updated' : 'created'} successfully!`,
+      })
     } catch (error) {
       console.error(`Error ${existingTemplate ? 'updating' : 'creating'} scoring template:`, error)
       const errorMessage = error instanceof Error ? error.message : `Failed to ${existingTemplate ? 'update' : 'create'} scoring template`
-      alert(errorMessage)
+      toast({
+        title: `Failed to ${isUpdate ? 'update' : 'create'} template`,
+        description: errorMessage,
+        variant: "destructive",
+      })
     } finally {
       setIsSubmitting(false)
     }

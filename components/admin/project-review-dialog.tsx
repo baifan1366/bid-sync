@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useToast } from "@/components/ui/use-toast"
 import { Calendar, DollarSign, FileText, CheckCircle, XCircle } from "lucide-react"
 import { formatBudget, formatDate } from "@/lib/utils"
 
@@ -29,6 +30,7 @@ interface ProjectReviewDialogProps {
 }
 
 export function ProjectReviewDialog({ project, open, onOpenChange }: ProjectReviewDialogProps) {
+  const { toast } = useToast()
   const [newStatus, setNewStatus] = useState(project.status)
   const [reviewNotes, setReviewNotes] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -63,7 +65,11 @@ export function ProjectReviewDialog({ project, open, onOpenChange }: ProjectRevi
 
       if (result.errors) {
         console.error("GraphQL errors:", result.errors)
-        alert(`Failed to update project: ${result.errors[0]?.message || 'Unknown error'}`)
+        toast({
+          title: "Failed to update project",
+          description: result.errors[0]?.message || 'Unknown error',
+          variant: "destructive",
+        })
         return
       }
 
@@ -71,7 +77,11 @@ export function ProjectReviewDialog({ project, open, onOpenChange }: ProjectRevi
       onOpenChange(false)
     } catch (error) {
       console.error("Error updating project:", error)
-      alert(`Failed to update project: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      toast({
+        title: "Failed to update project",
+        description: error instanceof Error ? error.message : 'Unknown error',
+        variant: "destructive",
+      })
     } finally {
       setIsSubmitting(false)
     }
@@ -84,7 +94,11 @@ export function ProjectReviewDialog({ project, open, onOpenChange }: ProjectRevi
 
   const handleReject = () => {
     if (!reviewNotes.trim()) {
-      alert('Please provide a reason for rejection')
+      toast({
+        title: "Rejection reason required",
+        description: "Please provide a reason for rejection",
+        variant: "destructive",
+      })
       return
     }
     setNewStatus('CLOSED')

@@ -3,6 +3,7 @@
 import React, { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
+import { useToast } from "@/components/ui/use-toast"
 import { 
   ProjectSearchBar, 
   ProjectFilterControls, 
@@ -31,6 +32,7 @@ interface ProjectFilter {
 export default function ProjectsDiscoveryPage() {
   const router = useRouter()
   const queryClient = useQueryClient()
+  const { toast } = useToast()
   
   const [projects, setProjects] = useState<Project[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -122,7 +124,11 @@ export default function ProjectsDiscoveryPage() {
       }
     } catch (error) {
       console.error('Error creating proposal:', error)
-      alert(error instanceof Error ? error.message : 'Failed to create proposal')
+      toast({
+        title: "Failed to create proposal",
+        description: error instanceof Error ? error.message : 'An error occurred',
+        variant: "destructive",
+      })
     } finally {
       setCreatingProposalId(null)
     }
