@@ -29,6 +29,7 @@ import {
   AlertCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { CompletionReviewSkeleton } from "./completion-review-skeleton"
 
 export interface Deliverable {
   id: string

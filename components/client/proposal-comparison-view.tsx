@@ -15,6 +15,9 @@ import {
 } from "@/lib/comparison-utils"
 import { formatProposalBudget } from "@/lib/proposal-utils"
 import { cn } from "@/lib/utils"
+import { useGraphQLQuery } from "@/hooks/use-graphql"
+import { GET_PROPOSAL_DETAILS } from "@/lib/graphql/queries"
+import DOMPurify from "dompurify"
 
 interface ProposalComparisonViewProps {
   proposalIds: string[]
@@ -24,13 +27,33 @@ interface ProposalComparisonViewProps {
 export function ProposalComparisonView({ proposalIds, onClose }: ProposalComparisonViewProps) {
   const scrollContainerRef = React.useRef<HTMLDivElement>(null)
   const [proposals, setProposals] = React.useState<ProposalDetail[]>([])
-  const [isLoading, setIsLoading] = React.useState(true)
+  const [loadedCount, setLoadedCount] = React.useState(0)
 
+  // Fetch all proposals - we'll use multiple queries
+  const proposalQueries = proposalIds.map(proposalId => 
+    useGraphQLQuery<{ proposalDetail: ProposalDetail }>(
+      ['proposal-detail', proposalId],
+      GET_PROPOSAL_DETAILS,
+      { proposalId },
+      {
+        enabled: !!proposalId,
+        staleTime: 1 * 60 * 1000,
+      }
+    )
+  )
+
+  // Combine all proposal data
   React.useEffect(() => {
-    // TODO: Fetch proposal details for all proposalIds
-    // For now, using placeholder data
-    setIsLoading(false)
-  }, [proposalIds])
+    const fetchedProposals = proposalQueries
+      .map(query => query.data?.proposalDetail)
+      .filter((p): p is ProposalDetail => p !== undefined)
+    
+    setProposals(fetchedProposals)
+    setLoadedCount(proposalQueries.filter(q => !q.isLoading).length)
+  }, [proposalQueries.map(q => q.data).join(',')])
+
+  const isLoading = proposalQueries.some(q => q.isLoading)
+  const hasError = proposalQueries.some(q => q.error)
 
   // Synchronized scrolling
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -50,17 +73,24 @@ export function ProposalComparisonView({ proposalIds, onClose }: ProposalCompari
     return (
       <div className="fixed inset-0 z-50 bg-white dark:bg-black">
         <div className="flex h-full items-center justify-center">
-          <div className="text-muted-foreground">Loading comparison...</div>
+          <div className="text-center">
+            <div className="text-muted-foreground mb-2">Loading comparison...</div>
+            <div className="text-sm text-muted-foreground">
+              Loaded {loadedCount} of {proposalIds.length} proposals
+            </div>
+          </div>
         </div>
       </div>
     )
   }
 
-  if (proposals.length === 0) {
+  if (hasError || proposals.length === 0) {
     return (
       <div className="fixed inset-0 z-50 bg-white dark:bg-black">
         <div className="flex h-full flex-col items-center justify-center gap-4">
-          <p className="text-muted-foreground">No proposals available for comparison</p>
+          <p className="text-muted-foreground">
+            {hasError ? 'Failed to load proposals for comparison' : 'No proposals available for comparison'}
+          </p>
           <Button onClick={onClose} className="bg-yellow-400 text-black hover:bg-yellow-500">
             Go Back
           </Button>
@@ -370,7 +400,7 @@ function ProposalColumn({ proposal, alignedSections, differences, onScroll, allP
                   {proposalSection ? (
                     <div
                       className="prose prose-sm max-w-none text-sm text-muted-foreground dark:prose-invert"
-                      dangerouslySetInnerHTML={{ __html: proposalSection.content }}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(proposalSection.content) }}
                     />
                   ) : (
                     <p className="text-sm italic text-muted-foreground">

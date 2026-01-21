@@ -81,6 +81,51 @@ export function ProposalSubmissionWizard({
   // Ref for step content container (for focus management)
   const stepContentRef = useRef<HTMLDivElement>(null)
 
+  // Load saved draft on mount
+  useEffect(() => {
+    if (!open || !proposalId) return
+
+    const loadDraft = async () => {
+      try {
+        const response = await fetch('/api/graphql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `
+              query GetSubmissionDraft($proposalId: ID!) {
+                submissionDraft(proposalId: $proposalId) {
+                  id
+                  currentStep
+                  draftData
+                }
+              }
+            `,
+            variables: { proposalId },
+          }),
+        })
+
+        const result = await response.json()
+
+        if (result.errors) {
+          console.error('GraphQL errors:', result.errors)
+          return
+        }
+
+        const draft = result.data?.submissionDraft
+        if (draft && draft.draftData) {
+          // Restore draft data
+          setWizardData(draft.draftData)
+          setCurrentStep(draft.currentStep)
+          setVisitedSteps(new Set(Array.from({ length: draft.currentStep }, (_, i) => i + 1)))
+        }
+      } catch (error) {
+        console.error('Error loading draft:', error)
+      }
+    }
+
+    loadDraft()
+  }, [open, proposalId])
+
   // Auto-save draft on data change (debounced)
   useEffect(() => {
     if (!open) return
@@ -92,20 +137,49 @@ export function ProposalSubmissionWizard({
     return () => clearTimeout(timeoutId)
   }, [wizardData, open])
 
-  // Save draft to backend
+  // Save draft to backend using GraphQL
   const saveDraft = useCallback(async () => {
+    if (!proposalId) return
+
     try {
-      // TODO: Implement actual API call to saveSubmissionDraft mutation
-      console.log("Saving draft:", {
-        proposalId,
-        step: currentStep,
-        data: wizardData,
+      const response = await fetch('/api/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `
+            mutation SaveSubmissionDraft($input: SaveSubmissionDraftInput!) {
+              saveSubmissionDraft(input: $input) {
+                success
+                draftId
+                error
+              }
+            }
+          `,
+          variables: {
+            input: {
+              proposalId,
+              currentStep,
+              draftData: wizardData,
+            },
+          },
+        }),
       })
-      
-      // Simulate API call
-      // await saveSubmissionDraftMutation({ proposalId, step: currentStep, data: wizardData })
+
+      const result = await response.json()
+
+      if (result.errors) {
+        console.error('GraphQL errors:', result.errors)
+        return
+      }
+
+      if (!result.data?.saveSubmissionDraft?.success) {
+        console.error('Failed to save draft:', result.data?.saveSubmissionDraft?.error)
+      }
+
+      // Draft saved successfully (silent save, no UI feedback)
     } catch (error) {
-      console.error("Error saving draft:", error)
+      console.error('Error saving draft:', error)
+      // Silent failure - don't interrupt user experience
     }
   }, [proposalId, currentStep, wizardData])
 
@@ -249,8 +323,29 @@ export function ProposalSubmissionWizard({
           errors: submissionData.errors,
         })
 
-        // If successful, call onComplete after a delay
+        // If successful, delete the draft and call onComplete after a delay
         if (submissionData.success) {
+          // Delete draft
+          try {
+            await fetch('/api/graphql', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                query: `
+                  mutation DeleteSubmissionDraft($proposalId: ID!) {
+                    deleteSubmissionDraft(proposalId: $proposalId) {
+                      success
+                    }
+                  }
+                `,
+                variables: { proposalId },
+              }),
+            })
+          } catch (error) {
+            console.error('Error deleting draft:', error)
+            // Non-critical error, continue
+          }
+
           setTimeout(() => {
             onComplete(submissionData.proposalId)
           }, 3000)

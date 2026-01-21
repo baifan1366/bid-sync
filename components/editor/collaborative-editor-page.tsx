@@ -37,6 +37,7 @@ import { ConflictResolutionDialog } from './conflict-resolution-dialog'
 import { ActiveCollaborators } from '@/components/editor/active-collaborators'
 import { VersionHistorySidebar } from './version-history-sidebar'
 import { TeamManagementPanel } from './team-management-panel'
+import { CollaborativeEditorSkeleton } from './collaborative-editor-skeleton'
 import {
   ArrowLeft,
   Save,
@@ -187,18 +188,6 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
       // Broadcast update to collaborators
       collaboration.broadcastUpdate(content)
     },
-  })
-
-  // Debug: Log editor state
-  console.log('[Editor Debug]', {
-    editor: editor ? 'created' : 'null',
-    editorEditable: editor?.isEditable,
-    canEdit,
-    userRole,
-    userId: user?.id,
-    collaborators: document?.collaborators?.map((c) => ({ id: c.userId, role: c.role })),
-    documentContent: document?.content ? 'has content' : 'empty',
-    editorHTML: editor?.getHTML()?.substring(0, 200),
   })
 
   // Auto-save function

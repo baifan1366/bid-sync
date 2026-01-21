@@ -131,14 +131,6 @@ export function ProposalEditor({
   }
 
   const handleSubmit = async () => {
-    console.log('[ProposalEditor] handleSubmit called')
-    console.log('[ProposalEditor] formData:', {
-      title: formData.title,
-      contentLength: formData.content?.length,
-      budgetEstimate: formData.budgetEstimate,
-      timelineEstimate: formData.timelineEstimate,
-    })
-
     // Validate required fields
     const validationErrors: string[] = []
 
@@ -171,8 +163,6 @@ export function ProposalEditor({
       validationErrors.push(`Missing required fields: ${missingRequired.join(", ")}`)
     }
 
-    console.log('[ProposalEditor] validationErrors:', validationErrors)
-
     if (validationErrors.length > 0) {
       // Show all validation errors
       toast({
@@ -185,9 +175,7 @@ export function ProposalEditor({
 
     setIsSubmitting(true)
     try {
-      console.log('[ProposalEditor] Calling onSubmit...')
       await onSubmit(formData)
-      console.log('[ProposalEditor] onSubmit completed')
     } finally {
       setIsSubmitting(false)
     }

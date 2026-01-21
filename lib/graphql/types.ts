@@ -557,3 +557,46 @@ export interface CriterionUsage {
   count: number
   percentage: number
 }
+
+// Lead Dashboard Types
+export interface LeadDashboardStats {
+  totalProposals: number
+  activeProposals: number
+  submittedProposals: number
+  acceptedProposals: number
+  rejectedProposals: number
+  winRate: number
+  totalBidValue: number
+  averageResponseTime: number
+}
+
+export interface LeadRecentProposal {
+  id: string
+  projectTitle: string
+  status: string
+  submittedAt: string
+  budgetEstimate: number
+}
+
+// Submission Draft Types
+export interface SubmissionDraft {
+  id: string
+  proposalId: string
+  userId: string
+  currentStep: number
+  draftData: Record<string, any>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SaveSubmissionDraftInput {
+  proposalId: string
+  currentStep: number
+  draftData: Record<string, any>
+}
+
+export interface SaveSubmissionDraftResult {
+  success: boolean
+  draftId?: string
+  error?: string
+}

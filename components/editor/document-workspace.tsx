@@ -43,6 +43,7 @@ import {
 } from "lucide-react"
 import { CreateDocumentDialog } from "./create-document-dialog"
 import { RenameDocumentDialog } from "./rename-document-dialog"
+import { DocumentWorkspaceSkeleton } from "./document-workspace-skeleton"
 
 interface Document {
   id: string

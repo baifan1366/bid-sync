@@ -982,3 +982,26 @@ export const REMOVE_LEGAL_HOLD = gql`
     }
   }
 `
+
+// ============================================================================
+// Submission Draft Mutations
+// ============================================================================
+
+export const SAVE_SUBMISSION_DRAFT = gql`
+  mutation SaveSubmissionDraft($input: SaveSubmissionDraftInput!) {
+    saveSubmissionDraft(input: $input) {
+      success
+      draftId
+      error
+    }
+  }
+`
+
+export const DELETE_SUBMISSION_DRAFT = gql`
+  mutation DeleteSubmissionDraft($proposalId: ID!) {
+    deleteSubmissionDraft(proposalId: $proposalId) {
+      success
+      error
+    }
+  }
+`

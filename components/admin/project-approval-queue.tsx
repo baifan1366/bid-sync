@@ -26,6 +26,7 @@ import {
   Loader2
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import { ProjectApprovalQueueSkeleton } from './project-approval-queue-skeleton'
 
 const PENDING_PROJECTS_QUERY = `
   query PendingProjects {

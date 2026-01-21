@@ -13,6 +13,7 @@ import {
   BarChart3
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ScoringAnalyticsSkeleton } from './scoring-analytics-skeleton'
 
 const SCORING_ANALYTICS_QUERY = `
   query ScoringAnalytics($dateFrom: String, $dateTo: String) {

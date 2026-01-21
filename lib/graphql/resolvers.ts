@@ -924,6 +924,42 @@ export const resolvers = {
       };
     },
 
+    userProfile: async (_: any, { userId }: { userId: string }) => {
+      const supabase = await createClient();
+      
+      // Verify user is authenticated
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        throw new GraphQLError('Unauthorized', {
+          extensions: { code: 'UNAUTHORIZED' },
+        });
+      }
+
+      // Get target user info using admin client
+      const adminClient = createAdminClient();
+      const { data: targetUser, error } = await adminClient.auth.admin.getUserById(userId);
+      
+      if (error || !targetUser.user) {
+        throw new GraphQLError('User not found', {
+          extensions: { code: 'NOT_FOUND' },
+        });
+      }
+
+      const u = targetUser.user;
+      const role = u.user_metadata?.role || 'bidding_member';
+      const defaultStatus = role === 'client' ? 'pending_verification' : 'verified';
+      
+      // Return public profile information only
+      return {
+        id: u.id,
+        email: u.email,
+        role: role.toUpperCase(),
+        fullName: u.user_metadata?.full_name || u.user_metadata?.name || 'Anonymous User',
+        createdAt: u.created_at,
+        verificationStatus: (u.user_metadata?.verification_status || defaultStatus).toUpperCase(),
+      };
+    },
+
     allAdmins: async () => {
       const supabase = await createClient();
       
@@ -5121,6 +5157,242 @@ export const resolvers = {
 
       return count || 0;
     },
+
+    // ============================================================================
+    // LEAD DASHBOARD QUERIES
+    // ============================================================================
+
+    leadDashboardStats: async (
+      _: any,
+      { leadId }: { leadId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Authorization: user can only view their own dashboard
+      if (user.id !== leadId) {
+        throw new GraphQLError('Forbidden: You can only view your own dashboard', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      try {
+        // Get all proposals for this lead
+        const { data: proposals, error: proposalsError } = await supabase
+          .from('proposals')
+          .select(`
+            id,
+            status,
+            submitted_at,
+            created_at,
+            proposal_versions!inner(
+              budget_estimate,
+              timeline_estimate
+            )
+          `)
+          .eq('lead_id', leadId);
+
+        if (proposalsError) {
+          console.error('Error fetching proposals:', proposalsError);
+          throw proposalsError;
+        }
+
+        const allProposals = proposals || [];
+        
+        // Calculate statistics
+        const totalProposals = allProposals.length;
+        const activeProposals = allProposals.filter(
+          (p: any) => p.status === 'draft' || p.status === 'submitted' || p.status === 'reviewing'
+        ).length;
+        const submittedProposals = allProposals.filter(
+          (p: any) => p.status === 'submitted' || p.status === 'reviewing' || p.status === 'approved' || p.status === 'rejected'
+        ).length;
+        const acceptedProposals = allProposals.filter(
+          (p: any) => p.status === 'approved'
+        ).length;
+        const rejectedProposals = allProposals.filter(
+          (p: any) => p.status === 'rejected'
+        ).length;
+
+        // Calculate win rate
+        const decidedProposals = acceptedProposals + rejectedProposals;
+        const winRate = decidedProposals > 0 
+          ? Math.round((acceptedProposals / decidedProposals) * 100) 
+          : 0;
+
+        // Calculate total bid value (sum of all budget estimates)
+        let totalBidValue = 0;
+        allProposals.forEach((p: any) => {
+          if (p.proposal_versions && p.proposal_versions.length > 0) {
+            const latestVersion = p.proposal_versions[p.proposal_versions.length - 1];
+            if (latestVersion.budget_estimate) {
+              totalBidValue += latestVersion.budget_estimate;
+            }
+          }
+        });
+
+        // Calculate average response time (hours from creation to submission)
+        const submittedWithDates = allProposals.filter(
+          (p: any) => p.submitted_at && p.created_at
+        );
+        let averageResponseTime = 0;
+        if (submittedWithDates.length > 0) {
+          const totalHours = submittedWithDates.reduce((sum: number, p: any) => {
+            const created = new Date(p.created_at).getTime();
+            const submitted = new Date(p.submitted_at).getTime();
+            const hours = (submitted - created) / (1000 * 60 * 60);
+            return sum + hours;
+          }, 0);
+          averageResponseTime = Math.round(totalHours / submittedWithDates.length);
+        }
+
+        return {
+          totalProposals,
+          activeProposals,
+          submittedProposals,
+          acceptedProposals,
+          rejectedProposals,
+          winRate,
+          totalBidValue,
+          averageResponseTime,
+        };
+      } catch (error: any) {
+        console.error('Failed to get lead dashboard stats:', error);
+        throw new GraphQLError(error.message || 'Failed to get dashboard statistics', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    leadRecentProposals: async (
+      _: any,
+      { leadId, limit = 5 }: { leadId: string; limit?: number }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Authorization: user can only view their own proposals
+      if (user.id !== leadId) {
+        throw new GraphQLError('Forbidden: You can only view your own proposals', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      try {
+        // Get recent proposals with project information
+        const { data: proposals, error: proposalsError } = await supabase
+          .from('proposals')
+          .select(`
+            id,
+            status,
+            submitted_at,
+            created_at,
+            projects!inner(
+              id,
+              title
+            ),
+            proposal_versions!inner(
+              budget_estimate
+            )
+          `)
+          .eq('lead_id', leadId)
+          .order('submitted_at', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .limit(limit);
+
+        if (proposalsError) {
+          console.error('Error fetching recent proposals:', proposalsError);
+          throw proposalsError;
+        }
+
+        const recentProposals = (proposals || []).map((p: any) => {
+          const latestVersion = p.proposal_versions && p.proposal_versions.length > 0
+            ? p.proposal_versions[p.proposal_versions.length - 1]
+            : null;
+
+          return {
+            id: p.id,
+            projectTitle: p.projects?.title || 'Untitled Project',
+            status: p.status,
+            submittedAt: p.submitted_at || p.created_at,
+            budgetEstimate: latestVersion?.budget_estimate || 0,
+          };
+        });
+
+        return recentProposals;
+      } catch (error: any) {
+        console.error('Failed to get recent proposals:', error);
+        throw new GraphQLError(error.message || 'Failed to get recent proposals', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    submissionDraft: async (
+      _: any,
+      { proposalId }: { proposalId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { data: draft, error: draftError } = await supabase
+          .from('submission_drafts')
+          .select('*')
+          .eq('proposal_id', proposalId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (draftError) {
+          console.error('Error fetching draft:', draftError);
+          throw new GraphQLError('Failed to fetch draft', {
+            extensions: { code: 'DATABASE_ERROR', details: draftError },
+          });
+        }
+
+        if (!draft) {
+          return null;
+        }
+
+        return {
+          id: draft.id,
+          proposalId: draft.proposal_id,
+          userId: draft.user_id,
+          currentStep: draft.current_step,
+          draftData: draft.draft_data,
+          createdAt: draft.created_at,
+          updatedAt: draft.updated_at,
+        };
+      } catch (error: any) {
+        console.error('Failed to get submission draft:', error);
+        
+        if (error instanceof GraphQLError) {
+          throw error;
+        }
+        
+        throw new GraphQLError(error.message || 'Failed to get draft', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
   },
 
   // Field resolver for Workspace type
@@ -7317,57 +7589,6 @@ export const resolvers = {
         submittedAt: result.submittedAt,
         errors: result.errors || [],
       };
-    },
-
-    saveSubmissionDraft: async (
-      _: any,
-      { proposalId, step, data }: { proposalId: string; step: number; data: any }
-    ) => {
-      const supabase = await createClient();
-      
-      // Get authenticated user
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        throw new GraphQLError('Not authenticated', {
-          extensions: { code: 'UNAUTHENTICATED' },
-        });
-      }
-
-      // Verify user is the proposal lead
-      const { data: proposal, error: proposalError } = await supabase
-        .from('proposals')
-        .select('lead_id')
-        .eq('id', proposalId)
-        .single();
-
-      if (proposalError || !proposal) {
-        throw new GraphQLError('Proposal not found', {
-          extensions: { code: 'NOT_FOUND' },
-        });
-      }
-
-      if (proposal.lead_id !== user.id) {
-        throw new GraphQLError('Forbidden: Only the proposal lead can save drafts', {
-          extensions: { code: 'FORBIDDEN' },
-        });
-      }
-
-      // Save draft using the service
-      const submissionService = new ProposalSubmissionService();
-      const success = await submissionService.saveSubmissionDraft({
-        proposalId,
-        userId: user.id,
-        currentStep: step,
-        draftData: data,
-      });
-
-      if (!success) {
-        throw new GraphQLError('Failed to save submission draft', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
-        });
-      }
-
-      return true;
     },
 
     // Collaborative Editor Mutations - Document Operations
@@ -10630,6 +10851,128 @@ export const resolvers = {
         });
       }
     },
+
+    // ============================================================================
+    // SUBMISSION DRAFT MUTATIONS
+    // ============================================================================
+
+    saveSubmissionDraft: async (
+      _: any,
+      { input }: { input: { proposalId: string; currentStep: number; draftData: Record<string, any> } }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        // Verify user has access to this proposal
+        const { data: proposal, error: proposalError } = await supabase
+          .from('proposals')
+          .select('id, lead_id')
+          .eq('id', input.proposalId)
+          .single();
+
+        if (proposalError || !proposal) {
+          throw new GraphQLError('Proposal not found', {
+            extensions: { code: 'NOT_FOUND' },
+          });
+        }
+
+        if (proposal.lead_id !== user.id) {
+          throw new GraphQLError('Forbidden: You can only save drafts for your own proposals', {
+            extensions: { code: 'FORBIDDEN' },
+          });
+        }
+
+        // Upsert draft (insert or update)
+        const { data: draft, error: draftError } = await supabase
+          .from('submission_drafts')
+          .upsert({
+            proposal_id: input.proposalId,
+            user_id: user.id,
+            current_step: input.currentStep,
+            draft_data: input.draftData,
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'proposal_id,user_id',
+          })
+          .select('id')
+          .single();
+
+        if (draftError) {
+          console.error('Error saving draft:', draftError);
+          throw new GraphQLError('Failed to save draft', {
+            extensions: { code: 'DATABASE_ERROR', details: draftError },
+          });
+        }
+
+        return {
+          success: true,
+          draftId: draft.id,
+        };
+      } catch (error: any) {
+        console.error('Failed to save submission draft:', error);
+        
+        if (error instanceof GraphQLError) {
+          throw error;
+        }
+        
+        return {
+          success: false,
+          error: error.message || 'Failed to save draft',
+        };
+      }
+    },
+
+    deleteSubmissionDraft: async (
+      _: any,
+      { proposalId }: { proposalId: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { error: deleteError } = await supabase
+          .from('submission_drafts')
+          .delete()
+          .eq('proposal_id', proposalId)
+          .eq('user_id', user.id);
+
+        if (deleteError) {
+          console.error('Error deleting draft:', deleteError);
+          throw new GraphQLError('Failed to delete draft', {
+            extensions: { code: 'DATABASE_ERROR', details: deleteError },
+          });
+        }
+
+        return {
+          success: true,
+        };
+      } catch (error: any) {
+        console.error('Failed to delete submission draft:', error);
+        
+        if (error instanceof GraphQLError) {
+          throw error;
+        }
+        
+        return {
+          success: false,
+          error: error.message || 'Failed to delete draft',
+        };
+      }
+    },
+
     // ============================================================================
     // BIDDING LEADER MANAGEMENT MUTATIONS
     // ============================================================================

@@ -312,7 +312,7 @@ export function ScoringTemplateManager({
       console.error(`Error ${existingTemplate ? 'updating' : 'creating'} scoring template:`, error)
       const errorMessage = error instanceof Error ? error.message : `Failed to ${existingTemplate ? 'update' : 'create'} scoring template`
       toast({
-        title: `Failed to ${isUpdate ? 'update' : 'create'} template`,
+        title: `Failed to ${existingTemplate ? 'update' : 'create'} template`,
         description: errorMessage,
         variant: "destructive",
       })

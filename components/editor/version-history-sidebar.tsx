@@ -100,16 +100,6 @@ export function VersionHistorySidebar({
     refetchOnMount: true,
   })
 
-  // Debug log
-  console.log('[VersionHistorySidebar] Query state:', {
-    isOpen,
-    documentId,
-    isLoading,
-    error: error?.message,
-    versionsCount: data?.documentVersionHistory?.length || 0,
-    data: data
-  })
-
   // Rollback mutation
   const rollbackMutation = useGraphQLMutation<any, any>(ROLLBACK_TO_VERSION, [
     ['versionHistory', documentId],

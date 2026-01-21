@@ -207,25 +207,6 @@ export function WorkspaceContent() {
   // Get document content from workspace_documents (source of truth for collaborative editor)
   const documentContent = workspaceData?.workspaceByProject?.documents?.[0]?.content
 
-  // Debug logging
-  React.useEffect(() => {
-    console.log('Workspace Debug:', {
-      userId: user?.id,
-      userRole: user?.user_metadata?.role,
-      shouldFetch,
-      isLoading,
-      error: error?.message,
-      proposalsCount: proposals.length,
-      proposals: proposals.map((p: ProposalWithProject) => ({ id: p.id, title: p.title, status: p.status })),
-      selectedProposal: selectedProposal ? {
-        id: selectedProposal.id,
-        title: selectedProposal.title,
-        status: selectedProposal.status,
-        isDraft
-      } : null
-    })
-  }, [user, shouldFetch, isLoading, error, proposals, selectedProposal, isDraft])
-
   // Fetch proposal scores for the selected proposal
   const { data: scoresData, isLoading: scoresLoading, refetch: refetchScores } = useGraphQLQuery<{ proposalScores: any[] }>(
     ['proposal-scores', selectedProposalId || 'none'],

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatBudget, formatDate, cn } from "@/lib/utils"
+import { useUser } from "@/hooks/use-user"
 import {
   Briefcase,
   FileText,
@@ -42,6 +43,7 @@ interface RecentProposal {
 
 export function LeadDashboardOverview() {
   const router = useRouter()
+  const { user } = useUser()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [recentProposals, setRecentProposals] = useState<RecentProposal[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -53,12 +55,61 @@ export function LeadDashboardOverview() {
   const loadDashboardData = async () => {
     setIsLoading(true)
     try {
-      // TODO: Replace with actual GraphQL query
-      const response = await fetch('/api/lead/dashboard')
-      const data = await response.json()
-      
-      setStats(data.stats)
-      setRecentProposals(data.recentProposals || [])
+      // Use GraphQL queries instead of REST API
+      const [statsResponse, proposalsResponse] = await Promise.all([
+        fetch('/api/graphql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `
+              query GetLeadDashboardStats($leadId: ID!) {
+                leadDashboardStats(leadId: $leadId) {
+                  totalProposals
+                  activeProposals
+                  submittedProposals
+                  acceptedProposals
+                  rejectedProposals
+                  winRate
+                  totalBidValue
+                  averageResponseTime
+                }
+              }
+            `,
+            variables: { leadId: user?.id },
+          }),
+        }),
+        fetch('/api/graphql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `
+              query GetLeadRecentProposals($leadId: ID!, $limit: Int) {
+                leadRecentProposals(leadId: $leadId, limit: $limit) {
+                  id
+                  projectTitle
+                  status
+                  submittedAt
+                  budgetEstimate
+                }
+              }
+            `,
+            variables: { leadId: user?.id, limit: 5 },
+          }),
+        }),
+      ])
+
+      const statsData = await statsResponse.json()
+      const proposalsData = await proposalsResponse.json()
+
+      if (statsData.errors) {
+        throw new Error(statsData.errors[0]?.message || 'Failed to fetch stats')
+      }
+      if (proposalsData.errors) {
+        throw new Error(proposalsData.errors[0]?.message || 'Failed to fetch proposals')
+      }
+
+      setStats(statsData.data.leadDashboardStats)
+      setRecentProposals(proposalsData.data.leadRecentProposals || [])
     } catch (error) {
       console.error('Error loading dashboard:', error)
     } finally {

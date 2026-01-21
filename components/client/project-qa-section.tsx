@@ -12,6 +12,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { MessageCircle, Send, Loader2, User } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { useUser } from '@/hooks/use-user'
+import { ProjectQASkeleton } from './project-qa-skeleton'
 
 const PROJECT_QUESTIONS_QUERY = `
   query ProjectQuestions($projectId: ID!) {

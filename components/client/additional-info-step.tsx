@@ -18,6 +18,7 @@ import {
 import { AlertCircle, Upload, X, FileIcon } from "lucide-react"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 import { cn } from "@/lib/utils"
+import { createClient } from "@/lib/supabase/client"
 
 interface AdditionalInfoStepProps {
   requirements: AdditionalInfoRequirement[]
@@ -226,13 +227,37 @@ export function AdditionalInfoStep({
     setUploadingFiles(prev => ({ ...prev, [requirementId]: true }))
 
     try {
-      // TODO: Implement actual file upload to storage
-      // For now, create a mock file object
+      const supabase = createClient()
+      
+      // Generate unique file name
+      const timestamp = Date.now()
+      const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
+      const fileName = `${timestamp}_${sanitizedFileName}`
+      const filePath = `additional-info/${fileName}`
+
+      // Upload file to Supabase storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('proposal-documents')
+        .upload(filePath, file, {
+          contentType: file.type,
+          upsert: false,
+        })
+
+      if (uploadError) {
+        throw new Error(uploadError.message)
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('proposal-documents')
+        .getPublicUrl(filePath)
+
       const fileData = {
-        url: URL.createObjectURL(file),
+        url: publicUrl,
         name: file.name,
         type: file.type,
         size: file.size,
+        path: filePath,
       }
 
       setValue(requirementId, fileData, { shouldValidate: true })

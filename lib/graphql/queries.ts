@@ -1094,6 +1094,68 @@ export const GET_ACTIVE_INVITATIONS = gql`
   }
 `
 
+// ============================================================================
+// Lead Dashboard Queries
+// ============================================================================
+
+export const GET_LEAD_DASHBOARD_STATS = gql`
+  query GetLeadDashboardStats($leadId: ID!) {
+    leadDashboardStats(leadId: $leadId) {
+      totalProposals
+      activeProposals
+      submittedProposals
+      acceptedProposals
+      rejectedProposals
+      winRate
+      totalBidValue
+      averageResponseTime
+    }
+  }
+`
+
+export const GET_LEAD_RECENT_PROPOSALS = gql`
+  query GetLeadRecentProposals($leadId: ID!, $limit: Int) {
+    leadRecentProposals(leadId: $leadId, limit: $limit) {
+      id
+      projectTitle
+      status
+      submittedAt
+      budgetEstimate
+    }
+  }
+`
+
+export const GET_SUBMISSION_DRAFT = gql`
+  query GetSubmissionDraft($proposalId: ID!) {
+    submissionDraft(proposalId: $proposalId) {
+      id
+      proposalId
+      userId
+      currentStep
+      draftData
+      createdAt
+      updatedAt
+    }
+  }
+`
+
+// ============================================================================
+// User Profile Queries
+// ============================================================================
+
+export const GET_USER_PROFILE = gql`
+  query GetUserProfile($userId: ID!) {
+    userProfile(userId: $userId) {
+      id
+      email
+      role
+      fullName
+      createdAt
+      verificationStatus
+    }
+  }
+`
+
 export const VALIDATE_INVITATION = gql`
   query ValidateInvitation($codeOrToken: String!) {
     validateInvitation(codeOrToken: $codeOrToken) {

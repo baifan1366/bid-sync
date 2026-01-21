@@ -281,6 +281,29 @@ export const typeDefs = /* GraphQL */ `
     name: String!
   }
 
+  # Lead Dashboard Types
+  type LeadDashboardStats {
+    totalProposals: Int!
+    activeProposals: Int!
+    submittedProposals: Int!
+    acceptedProposals: Int!
+    rejectedProposals: Int!
+    winRate: Int!
+    totalBidValue: Float!
+    averageResponseTime: Int!
+  }
+
+  # Submission Draft Type
+  type SubmissionDraft {
+    id: ID!
+    proposalId: ID!
+    userId: ID!
+    currentStep: Int!
+    draftData: JSON!
+    createdAt: String!
+    updatedAt: String!
+  }
+
   # Proposal Scoring System Types
   type ScoringTemplate {
     id: ID!
@@ -503,6 +526,7 @@ export const typeDefs = /* GraphQL */ `
 
   type Query {
     me: User
+    userProfile(userId: ID!): User
     pendingClientVerifications: [User!]!
     user(id: ID!): User
     
@@ -547,6 +571,7 @@ export const typeDefs = /* GraphQL */ `
     # Proposal submission queries
     getProjectRequirements(projectId: ID!): [AdditionalInfoRequirement!]!
     leadProposals(leadId: ID!): [ProposalWithProject!]!
+    submissionDraft(proposalId: ID!): SubmissionDraft
     
     # Collaborative Editor queries
     workspace(id: ID!): Workspace
@@ -581,6 +606,10 @@ export const typeDefs = /* GraphQL */ `
     
     # Member Dashboard queries
     myAssignedSections: [AssignedSection!]!
+    
+    # Lead Dashboard queries
+    leadDashboardStats(leadId: ID!): LeadDashboardStats!
+    leadRecentProposals(leadId: ID!, limit: Int): [ProposalWithProject!]!
     
     # Admin Proposal Oversight queries
     adminAllProposals(status: String, search: String): [AdminProposal!]!
@@ -1335,6 +1364,7 @@ export const typeDefs = /* GraphQL */ `
     ): Proposal!
     submitProposal(input: SubmitProposalInput!): SubmissionResult!
     saveSubmissionDraft(proposalId: ID!, step: Int!, data: JSON!): Boolean!
+    deleteSubmissionDraft(proposalId: ID!): Boolean!
     
     # Admin management mutations
     inviteAdmin(email: String!): AdminInvitation!

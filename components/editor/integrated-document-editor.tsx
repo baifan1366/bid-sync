@@ -49,6 +49,7 @@ import { VersionHistorySidebar } from './version-history-sidebar'
 import { TeamManagementPanel } from './team-management-panel'
 import { PerformanceMonitor } from './performance-monitor'
 import { ConnectionStatusIndicator } from './connection-status-indicator'
+import { IntegratedDocumentEditorSkeleton } from './integrated-document-editor-skeleton'
 
 const GET_DOCUMENT = gql`
   query GetDocument($id: ID!) {

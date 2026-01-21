@@ -7,6 +7,8 @@ import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Separator } from "@/components/ui/separator"
 import { ProposalDetail } from "@/lib/graphql/types"
 import { formatProposalBudget } from "@/lib/proposal-utils"
 import { ProposalSubmissionWizard } from "./proposal-submission-wizard"
@@ -14,6 +16,8 @@ import { useUser } from "@/hooks/use-user"
 import { useGraphQLQuery } from "@/hooks/use-graphql"
 import { GET_PROPOSAL_DETAILS } from "@/lib/graphql/queries"
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
+import { useRouter } from "next/navigation"
+import DOMPurify from "dompurify"
 
 interface ProposalDetailViewProps {
   proposalId: string
@@ -25,7 +29,10 @@ interface ProposalDetailViewProps {
 export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissionComplete }: ProposalDetailViewProps) {
   const [wizardOpen, setWizardOpen] = React.useState(false)
   const [additionalInfoRequirements, setAdditionalInfoRequirements] = React.useState<AdditionalInfoRequirement[]>([])
+  const [viewVersionDialog, setViewVersionDialog] = React.useState<{ open: boolean; version: any | null }>({ open: false, version: null })
+  const [compareDialog, setCompareDialog] = React.useState<{ open: boolean; versions: any[] }>({ open: false, versions: [] })
   const { user } = useUser()
+  const router = useRouter()
 
   // Fetch proposal detail data using GraphQL
   const { data, isLoading, error, refetch } = useGraphQLQuery<{ proposalDetail: ProposalDetail }>(
@@ -80,6 +87,61 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
 
   // Show submit button only for draft proposals and only to the proposal lead
   const showSubmitButton = isDraftProposal && isProposalLead
+
+  // Helper function to render version content
+  const renderVersionContent = (content: any) => {
+    if (!content) return <p className="text-muted-foreground">No content available</p>
+    
+    if (typeof content === 'string') {
+      return <div className="whitespace-pre-wrap">{content}</div>
+    }
+    
+    if (typeof content === 'object') {
+      return (
+        <div className="space-y-4">
+          {Object.entries(content).map(([key, value]) => (
+            <div key={key}>
+              <h4 className="font-semibold text-black dark:text-white mb-2 capitalize">
+                {key.replace(/_/g, ' ')}
+              </h4>
+              <div className="text-sm text-muted-foreground whitespace-pre-wrap">
+                {typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value)}
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+    
+    return <p className="text-muted-foreground">Unable to display content</p>
+  }
+
+  // Helper function to render diff between two versions
+  const renderDiff = (oldContent: any, newContent: any) => {
+    const oldStr = typeof oldContent === 'string' ? oldContent : JSON.stringify(oldContent, null, 2)
+    const newStr = typeof newContent === 'string' ? newContent : JSON.stringify(newContent, null, 2)
+    
+    if (oldStr === newStr) {
+      return <p className="text-muted-foreground">No changes detected</p>
+    }
+    
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="border-red-400/20 bg-red-400/5 p-4">
+          <Badge className="mb-3 bg-red-500 text-white">Removed</Badge>
+          <div className="text-sm whitespace-pre-wrap text-muted-foreground">
+            {oldStr}
+          </div>
+        </Card>
+        <Card className="border-green-400/20 bg-green-400/5 p-4">
+          <Badge className="mb-3 bg-green-500 text-white">Added</Badge>
+          <div className="text-sm whitespace-pre-wrap text-muted-foreground">
+            {newStr}
+          </div>
+        </Card>
+      </div>
+    )
+  }
 
   if (isLoading) {
     return (
@@ -191,7 +253,11 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
               </TabsContent>
 
               <TabsContent value="history" className="mt-0">
-                <HistoryTab proposal={proposal} />
+                <HistoryTab 
+                  proposal={proposal} 
+                  onViewVersion={(version) => setViewVersionDialog({ open: true, version })}
+                  onCompareVersions={(versions) => setCompareDialog({ open: true, versions })}
+                />
               </TabsContent>
             </div>
           </Tabs>
@@ -209,6 +275,84 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
           onComplete={handleSubmissionComplete}
         />
       )}
+
+      {/* Version View Dialog */}
+      <Dialog open={viewVersionDialog.open} onOpenChange={(open) => setViewVersionDialog({ open, version: null })}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-yellow-400" />
+              Version {viewVersionDialog.version?.version_number}
+            </DialogTitle>
+            <DialogDescription>
+              Created by {viewVersionDialog.version?.created_by_name || 'Unknown'} on{' '}
+              {viewVersionDialog.version && new Date(viewVersionDialog.version.created_at).toLocaleString()}
+            </DialogDescription>
+          </DialogHeader>
+          <Separator className="bg-yellow-400/10" />
+          <div className="mt-4">
+            {viewVersionDialog.version && renderVersionContent(viewVersionDialog.version.content)}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Version Compare Dialog */}
+      <Dialog open={compareDialog.open} onOpenChange={(open) => setCompareDialog({ open, versions: [] })}>
+        <DialogContent className="max-w-6xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <GitCompare className="h-5 w-5 text-yellow-400" />
+              Compare Versions
+            </DialogTitle>
+            <DialogDescription>
+              {compareDialog.versions.length === 2 && (
+                <>
+                  Comparing Version {compareDialog.versions[0]?.version_number} with Version{' '}
+                  {compareDialog.versions[1]?.version_number}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <Separator className="bg-yellow-400/10" />
+          <div className="mt-4 space-y-6">
+            {compareDialog.versions.length === 2 && (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Card className="border-yellow-400/20 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Badge className="bg-blue-400 text-white">
+                        Version {compareDialog.versions[0]?.version_number}
+                      </Badge>
+                      <Badge variant="secondary" className="text-xs">Older</Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground mb-2">
+                      {compareDialog.versions[0]?.created_by_name} •{' '}
+                      {new Date(compareDialog.versions[0]?.created_at).toLocaleString()}
+                    </div>
+                  </Card>
+                  <Card className="border-yellow-400/20 p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Badge className="bg-green-400 text-white">
+                        Version {compareDialog.versions[1]?.version_number}
+                      </Badge>
+                      <Badge variant="secondary" className="text-xs">Newer</Badge>
+                    </div>
+                    <div className="text-xs text-muted-foreground mb-2">
+                      {compareDialog.versions[1]?.created_by_name} •{' '}
+                      {new Date(compareDialog.versions[1]?.created_at).toLocaleString()}
+                    </div>
+                  </Card>
+                </div>
+                <Separator className="bg-yellow-400/10" />
+                <div>
+                  <h4 className="font-semibold text-black dark:text-white mb-4">Changes</h4>
+                  {renderDiff(compareDialog.versions[0]?.content, compareDialog.versions[1]?.content)}
+                </div>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -528,7 +672,7 @@ function SectionsTab({ proposal }: { proposal: ProposalDetail | null }) {
                     {/* Render rich text content */}
                     <div
                       className="text-black dark:text-white"
-                      dangerouslySetInnerHTML={{ __html: section.content }}
+                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.content) }}
                     />
                   </div>
                 </div>
@@ -764,6 +908,8 @@ function DocumentsTab({ proposal }: { proposal: ProposalDetail | null }) {
 
 // Team Tab Component
 function TeamTab({ proposal }: { proposal: ProposalDetail | null }) {
+  const router = useRouter()
+  
   if (!proposal) {
     return (
       <div className="space-y-4">
@@ -819,8 +965,7 @@ function TeamTab({ proposal }: { proposal: ProposalDetail | null }) {
                 <button
                   className="text-lg font-semibold text-black transition-colors hover:text-yellow-400 dark:text-white dark:hover:text-yellow-400"
                   onClick={() => {
-                    // TODO: Navigate to profile
-                    console.log('Navigate to profile:', lead.id)
+                    router.push(`/profile/${lead.id}`)
                   }}
                 >
                   {lead.name}
@@ -886,8 +1031,7 @@ function TeamTab({ proposal }: { proposal: ProposalDetail | null }) {
                     <button
                       className="font-semibold text-black transition-colors hover:text-yellow-400 dark:text-white dark:hover:text-yellow-400"
                       onClick={() => {
-                        // TODO: Navigate to profile
-                        console.log('Navigate to profile:', member.id)
+                        router.push(`/profile/${member.id}`)
                       }}
                     >
                       {member.name}
@@ -948,7 +1092,15 @@ function TeamTab({ proposal }: { proposal: ProposalDetail | null }) {
 }
 
 // History Tab Component
-function HistoryTab({ proposal }: { proposal: ProposalDetail | null }) {
+function HistoryTab({ 
+  proposal, 
+  onViewVersion, 
+  onCompareVersions 
+}: { 
+  proposal: ProposalDetail | null
+  onViewVersion: (version: any) => void
+  onCompareVersions: (versions: any[]) => void
+}) {
   const [selectedVersions, setSelectedVersions] = React.useState<number[]>([])
 
   if (!proposal) {
@@ -1000,14 +1152,22 @@ function HistoryTab({ proposal }: { proposal: ProposalDetail | null }) {
   }
 
   const handleViewVersion = (versionNumber: number) => {
-    // TODO: Implement version viewing
-    console.log('View version:', versionNumber)
+    const version = proposal?.versions.find(v => v.version_number === versionNumber)
+    if (version) {
+      onViewVersion(version)
+    }
   }
 
   const handleCompareVersions = () => {
     if (selectedVersions.length === 2) {
-      // TODO: Implement version comparison
-      console.log('Compare versions:', selectedVersions)
+      const versions = selectedVersions
+        .map(vNum => proposal?.versions.find(v => v.version_number === vNum))
+        .filter(Boolean)
+        .sort((a, b) => a!.version_number - b!.version_number) // Sort older first
+      
+      if (versions.length === 2) {
+        onCompareVersions(versions as any[])
+      }
     }
   }
 
