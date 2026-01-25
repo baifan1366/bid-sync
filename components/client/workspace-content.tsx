@@ -167,10 +167,10 @@ export function WorkspaceContent() {
   const { data, isLoading, error } = useGraphQLQuery<{ leadProposals: ProposalWithProject[] }>(
     ['lead-proposals', user?.id || 'no-user'],
     GET_LEAD_PROPOSALS,
-    { leadId: user?.id || '' },
+    { leadId: user?.id || 'placeholder' }, // Use placeholder instead of empty string
     {
       staleTime: 1 * 60 * 1000,
-      enabled: shouldFetch, // Only run query if user is a bidding lead
+      enabled: shouldFetch && !!user?.id, // Only run query if user is a bidding lead AND user.id exists
     }
   )
 

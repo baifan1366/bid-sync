@@ -1488,6 +1488,13 @@ export const resolvers = {
       _: any,
       { leadId }: { leadId: string }
     ) => {
+      // Validate leadId format early - must be a valid UUID
+      if (!leadId || leadId === 'placeholder' || leadId === 'no-user' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leadId)) {
+        throw new GraphQLError('Invalid leadId provided', {
+          extensions: { code: 'BAD_REQUEST' },
+        });
+      }
+
       const supabase = await createClient();
       
       // Get authenticated user
@@ -1506,6 +1513,7 @@ export const resolvers = {
       }
 
       // Fetch proposals for the lead with project information
+      // Note: Using !inner to ensure we only get proposals with valid projects
       const { data: proposals, error: proposalsError } = await supabase
         .from('proposals')
         .select(`
@@ -1518,14 +1526,13 @@ export const resolvers = {
           additional_info,
           submitted_at,
           created_at,
-          projects (
+          project_id,
+          projects!inner (
             id,
             client_id,
             title,
             description,
             budget,
-            budget_min,
-            budget_max,
             deadline,
             status,
             additional_info_requirements,
@@ -1537,44 +1544,61 @@ export const resolvers = {
         .order('created_at', { ascending: false });
 
       if (proposalsError) {
-        throw new GraphQLError('Error fetching proposals', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        console.error('[leadProposals] Supabase error:', proposalsError);
+        throw handleSupabaseError(proposalsError, 'leadProposals.fetch', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: leadId,
         });
       }
 
       // Transform the data to match the GraphQL schema
-      return (proposals || []).map((proposal: any) => ({
-        id: proposal.id,
-        title: proposal.title,
-        content: proposal.content,
-        status: proposal.status?.toUpperCase() || 'DRAFT',
-        budgetEstimate: proposal.budget_estimate,
-        timelineEstimate: proposal.timeline_estimate,
-        additionalInfo: proposal.additional_info,
-        submissionDate: proposal.submitted_at || proposal.created_at,
-        project: {
-          id: proposal.projects.id,
-          clientId: proposal.projects.client_id,
-          title: proposal.projects.title,
-          description: proposal.projects.description,
-          budget: proposal.projects.budget,
-          budgetMin: proposal.projects.budget_min,
-          budgetMax: proposal.projects.budget_max,
-          deadline: proposal.projects.deadline,
-          status: proposal.projects.status?.toUpperCase() || 'PENDING_REVIEW',
-          additionalInfoRequirements: (proposal.projects.additional_info_requirements || []).map((req: any) => ({
-            id: req.id,
-            fieldName: req.fieldName,
-            fieldType: req.fieldType?.toUpperCase() || 'TEXT',
-            required: req.required ?? false,
-            helpText: req.helpText || null,
-            options: req.options || [],
-            order: req.order ?? 0,
-          })),
-          createdAt: proposal.projects.created_at,
-          updatedAt: proposal.projects.updated_at,
-        },
-      }));
+      return (proposals || []).map((proposal: any) => {
+        // Check if project data is available
+        if (!proposal.projects) {
+          console.error('[leadProposals] Missing project data for proposal:', proposal.id);
+          throw new GraphQLError(`Project data not found for proposal ${proposal.id}`, {
+            extensions: { 
+              code: 'DATA_INTEGRITY_ERROR',
+              proposalId: proposal.id,
+              hint: 'The project may have been deleted or you may not have access to it'
+            },
+          });
+        }
+
+        return {
+          id: proposal.id,
+          title: proposal.title,
+          content: proposal.content,
+          status: proposal.status?.toUpperCase() || 'DRAFT',
+          budgetEstimate: proposal.budget_estimate,
+          timelineEstimate: proposal.timeline_estimate,
+          additionalInfo: proposal.additional_info,
+          submissionDate: proposal.submitted_at || proposal.created_at,
+          project: {
+            id: proposal.projects.id,
+            clientId: proposal.projects.client_id,
+            title: proposal.projects.title,
+            description: proposal.projects.description,
+            budget: proposal.projects.budget,
+            budgetMin: null, // Column doesn't exist in database
+            budgetMax: null, // Column doesn't exist in database
+            deadline: proposal.projects.deadline,
+            status: proposal.projects.status?.toUpperCase() || 'PENDING_REVIEW',
+            additionalInfoRequirements: (proposal.projects.additional_info_requirements || []).map((req: any) => ({
+              id: req.id,
+              fieldName: req.fieldName,
+              fieldType: req.fieldType?.toUpperCase() || 'TEXT',
+              required: req.required ?? false,
+              helpText: req.helpText || null,
+              options: req.options || [],
+              order: req.order ?? 0,
+            })),
+            createdAt: proposal.projects.created_at,
+            updatedAt: proposal.projects.updated_at,
+          },
+        };
+      });
     },
 
     // Collaborative Editor Queries - Document Operations

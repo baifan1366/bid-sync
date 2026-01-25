@@ -75,10 +75,10 @@ export function DocumentsPageContent() {
   }>(
     ['lead-proposals-documents', user?.id || 'no-user'],
     GET_LEAD_PROPOSALS_WITH_WORKSPACES,
-    { leadId: user?.id || '' },
+    { leadId: user?.id || 'placeholder' }, // Use placeholder instead of empty string
     {
       staleTime: 1 * 60 * 1000,
-      enabled: !!user?.id && isBiddingLead,
+      enabled: !!user?.id && isBiddingLead, // Only run query if user.id exists AND user is bidding lead
     }
   )
 
