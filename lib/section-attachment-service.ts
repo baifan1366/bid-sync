@@ -5,7 +5,7 @@
  * Supports file upload, download, and deletion with proper validation.
  */
 
-import { createClient } from '@/lib/supabase/server';
+import { createClient } from '@/lib/supabase/client';
 
 // File type validation
 const ALLOWED_FILE_TYPES = [
@@ -113,7 +113,7 @@ export class SectionAttachmentService {
         };
       }
 
-      const supabase = await createClient();
+      const supabase = createClient();
 
       // Verify user has editor access to the document
       const { data: collaborator } = await supabase
@@ -215,7 +215,7 @@ export class SectionAttachmentService {
     userId: string
   ): Promise<AttachmentsResult> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       // Get all attachments for the section
       const { data: attachments, error } = await supabase
@@ -270,7 +270,7 @@ export class SectionAttachmentService {
     userId: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       // Get attachment details
       const { data: attachment, error: fetchError } = await supabase
@@ -343,7 +343,7 @@ export class SectionAttachmentService {
    */
   static async getAttachmentsCount(sectionId: string): Promise<number> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       const { count, error } = await supabase
         .from('section_attachments')

@@ -5,8 +5,7 @@
  * Supports threaded replies, resolution tracking, and notifications.
  */
 
-import { createClient } from '@/lib/supabase/server';
-import { NotificationService } from '@/lib/notification-service';
+import { createClient } from '@/lib/supabase/client';
 
 export interface SectionComment {
   id: string;
@@ -55,62 +54,39 @@ export interface CommentsResult {
 export class SectionCommentService {
   /**
    * Creates a new comment on a section
+   * Uses API route to handle notifications server-side
    */
   static async createComment(
     input: CreateCommentInput,
     userId: string
   ): Promise<CommentResult> {
     try {
-      const supabase = await createClient();
-
-      // Verify user has access to the document
-      const { data: collaborator } = await supabase
-        .from('document_collaborators')
-        .select('id')
-        .eq('document_id', input.documentId)
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      if (!collaborator) {
-        return {
-          success: false,
-          error: 'You do not have access to this document',
-        };
-      }
-
-      // Create the comment
-      const { data: comment, error } = await supabase
-        .from('section_comments')
-        .insert({
-          section_id: input.sectionId,
-          document_id: input.documentId,
-          user_id: userId,
+      // Call API route to create comment and send notifications
+      const response = await fetch('/api/comments', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          sectionId: input.sectionId,
+          documentId: input.documentId,
           content: input.content,
-          parent_id: input.parentId,
-        })
-        .select(`
-          *,
-          users:user_id (
-            id,
-            raw_user_meta_data
-          )
-        `)
-        .single();
+          parentId: input.parentId,
+        }),
+      });
 
-      if (error || !comment) {
-        console.error('Error creating comment:', error);
+      const data = await response.json();
+
+      if (!response.ok) {
         return {
           success: false,
-          error: 'Failed to create comment',
+          error: data.error || 'Failed to create comment',
         };
       }
-
-      // Notify relevant users (section assignee, document owner, parent comment author)
-      await this.notifyCommentCreated(comment, userId);
 
       return {
         success: true,
-        comment: this.mapComment(comment),
+        comment: data.comment,
       };
     } catch (error) {
       console.error('Unexpected error in createComment:', error);
@@ -129,7 +105,7 @@ export class SectionCommentService {
     userId: string
   ): Promise<CommentsResult> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       // Get all comments for the section
       const { data: comments, error } = await supabase
@@ -199,7 +175,7 @@ export class SectionCommentService {
     userId: string
   ): Promise<CommentResult> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       // Verify user owns the comment
       const { data: existingComment } = await supabase
@@ -260,7 +236,7 @@ export class SectionCommentService {
     userId: string
   ): Promise<CommentResult> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       // Update the comment
       const { data: comment, error } = await supabase
@@ -309,7 +285,7 @@ export class SectionCommentService {
     userId: string
   ): Promise<CommentResult> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       // Update the comment
       const { data: comment, error } = await supabase
@@ -358,7 +334,7 @@ export class SectionCommentService {
     userId: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       // Verify user owns the comment or is document owner
       const { data: comment } = await supabase
@@ -421,7 +397,7 @@ export class SectionCommentService {
    */
   static async getUnresolvedCount(sectionId: string): Promise<number> {
     try {
-      const supabase = await createClient();
+      const supabase = createClient();
 
       const { count, error } = await supabase
         .from('section_comments')
@@ -441,67 +417,8 @@ export class SectionCommentService {
     }
   }
 
-  /**
-   * Notifies relevant users when a comment is created
-   */
-  private static async notifyCommentCreated(
-    comment: any,
-    authorId: string
-  ): Promise<void> {
-    try {
-      const supabase = await createClient();
-
-      // Get section details
-      const { data: section } = await supabase
-        .from('document_sections')
-        .select('title, assigned_to')
-        .eq('id', comment.section_id)
-        .single();
-
-      if (!section) return;
-
-      // Notify section assignee if exists and not the author
-      if (section.assigned_to && section.assigned_to !== authorId) {
-        await NotificationService.create({
-          userId: section.assigned_to,
-          type: 'section_comment',
-          title: 'New comment on your section',
-          body: `A comment was added to "${section.title}"`,
-          data: {
-            sectionId: comment.section_id,
-            commentId: comment.id,
-            documentId: comment.document_id,
-          },
-        });
-      }
-
-      // If it's a reply, notify the parent comment author
-      if (comment.parent_id) {
-        const { data: parentComment } = await supabase
-          .from('section_comments')
-          .select('user_id')
-          .eq('id', comment.parent_id)
-          .single();
-
-        if (parentComment && parentComment.user_id !== authorId) {
-          await NotificationService.create({
-            userId: parentComment.user_id,
-            type: 'comment_reply',
-            title: 'Reply to your comment',
-            body: `Someone replied to your comment on "${section.title}"`,
-            data: {
-              sectionId: comment.section_id,
-              commentId: comment.id,
-              parentCommentId: comment.parent_id,
-              documentId: comment.document_id,
-            },
-          });
-        }
-      }
-    } catch (error) {
-      console.error('Error notifying comment created:', error);
-    }
-  }
+  // Note: Notification logic removed from client service
+  // Should be handled server-side via API routes or database triggers
 
   /**
    * Maps database comment to SectionComment interface
