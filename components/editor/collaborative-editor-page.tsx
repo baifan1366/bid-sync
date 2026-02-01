@@ -38,6 +38,7 @@ import { ActiveCollaborators } from '@/components/editor/active-collaborators'
 import { VersionHistorySidebar } from './version-history-sidebar'
 import { TeamManagementPanel } from './team-management-panel'
 import { CollaborativeEditorSkeleton } from './collaborative-editor-skeleton'
+import { SimpleSectionTabs } from './simple-section-tabs'
 import {
   ArrowLeft,
   Save,
@@ -128,6 +129,7 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
   const [showVersionHistory, setShowVersionHistory] = useState(false)
   const [showTeamManagement, setShowTeamManagement] = useState(false)
   const [showConflictDialog, setShowConflictDialog] = useState(false)
+  const [isLead, setIsLead] = useState(false)
 
   // Fetch document data
   const { data, isLoading, error, refetch } = useGraphQLQuery<{ document: Document }>(
@@ -149,6 +151,105 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
       setDescription(document.description || '')
     }
   }, [document])
+
+  // Check if user is a lead for this document's proposal
+  useEffect(() => {
+    const checkIfLead = async () => {
+      if (!user?.id || !documentId) {
+        console.log('[CollaborativeEditorPage] Missing user or documentId:', { userId: user?.id, documentId })
+        return
+      }
+
+      try {
+        const { createClient } = await import('@/lib/supabase/client')
+        const supabase = createClient()
+        
+        console.log('[CollaborativeEditorPage] Checking lead status for user:', user.id)
+        console.log('[CollaborativeEditorPage] Document ID:', documentId)
+        
+        // Get workspace to find proposal
+        const { data: doc, error: docError } = await supabase
+          .from('workspace_documents')
+          .select('workspace_id, workspaces!inner(project_id)')
+          .eq('id', documentId)
+          .single()
+
+        console.log('[CollaborativeEditorPage] Workspace query result:', { doc, docError })
+
+        if (docError) {
+          console.error('[CollaborativeEditorPage] Workspace query error:', docError)
+          // If workspace query fails, check if user is lead by checking document_sections directly
+          // This is a fallback - if user created sections, they're likely a lead
+          const { data: userSections } = await supabase
+            .from('document_sections')
+            .select('id')
+            .eq('document_id', documentId)
+            .limit(1)
+          
+          if (userSections && userSections.length > 0) {
+            console.log('[CollaborativeEditorPage] ⚠️ Using fallback: sections exist, assuming lead')
+            setIsLead(true)
+          } else {
+            setIsLead(false)
+          }
+          return
+        }
+
+        if (doc) {
+          const workspace = doc.workspaces as any
+          console.log('[CollaborativeEditorPage] Workspace project_id:', workspace.project_id)
+          
+          // Get proposal for this project
+          const { data: proposal, error: proposalError } = await supabase
+            .from('proposals')
+            .select('id, lead_id')
+            .eq('project_id', workspace.project_id)
+            .single()
+
+          console.log('[CollaborativeEditorPage] Proposal query result:', { proposal, proposalError })
+
+          if (proposal) {
+            console.log('[CollaborativeEditorPage] Checking team member for proposal:', proposal.id)
+            console.log('[CollaborativeEditorPage] Proposal lead_id:', proposal.lead_id)
+            console.log('[CollaborativeEditorPage] Current user id:', user.id)
+            
+            // Check if user is lead in proposal_team_members
+            const { data: teamMember, error: teamError } = await supabase
+              .from('proposal_team_members')
+              .select('role')
+              .eq('proposal_id', proposal.id)
+              .eq('user_id', user.id)
+              .single()
+
+            console.log('[CollaborativeEditorPage] Team member query result:', { teamMember, teamError })
+
+            if (teamMember && teamMember.role === 'lead') {
+              console.log('[CollaborativeEditorPage] ✅ User IS a lead - setting isLead=true')
+              setIsLead(true)
+            } else if (proposal.lead_id === user.id) {
+              // Fallback: check if user is the proposal lead_id
+              console.log('[CollaborativeEditorPage] ✅ User is proposal lead_id - setting isLead=true')
+              setIsLead(true)
+            } else {
+              console.log('[CollaborativeEditorPage] ❌ User is NOT a lead - setting isLead=false')
+              setIsLead(false)
+            }
+          } else {
+            console.log('[CollaborativeEditorPage] No proposal found for project')
+            setIsLead(false)
+          }
+        } else {
+          console.log('[CollaborativeEditorPage] No workspace document found')
+          setIsLead(false)
+        }
+      } catch (err) {
+        console.error('[CollaborativeEditorPage] Error checking lead status:', err)
+        setIsLead(false)
+      }
+    }
+
+    checkIfLead()
+  }, [user?.id, documentId])
 
   // Get user's role (case-insensitive comparison)
   const userRole = document?.collaborators.find((c) => c.userId === user?.id)?.role
@@ -618,6 +719,21 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
           </div>
         </div>
       )}
+
+      {/* Section Tabs */}
+      <SimpleSectionTabs
+        documentId={documentId}
+        currentUserId={user?.id || ''}
+        isLead={isLead}
+      >
+        {(sectionId) => (
+          <div className="p-4 bg-yellow-400/5 border-b border-yellow-400/20">
+            <p className="text-sm text-muted-foreground">
+              {sectionId ? `Editing section: ${sectionId}` : 'No section selected'}
+            </p>
+          </div>
+        )}
+      </SimpleSectionTabs>
 
       {/* Editor Content */}
       <div className="flex-1 overflow-auto">

@@ -123,7 +123,6 @@ export function InvitationJoinPage({ token }: InvitationJoinPageProps) {
           variables: {
             input: {
               invitationId,
-              userId: user.id,
             },
           },
         }),

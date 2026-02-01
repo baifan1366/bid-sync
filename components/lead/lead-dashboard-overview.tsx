@@ -49,10 +49,19 @@ export function LeadDashboardOverview() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    loadDashboardData()
-  }, [])
+    // Only load data when user is available
+    if (user?.id) {
+      loadDashboardData()
+    }
+  }, [user?.id])
 
   const loadDashboardData = async () => {
+    // Guard against missing user
+    if (!user?.id) {
+      setIsLoading(false)
+      return
+    }
+
     setIsLoading(true)
     try {
       // Use GraphQL queries instead of REST API
@@ -75,7 +84,7 @@ export function LeadDashboardOverview() {
                 }
               }
             `,
-            variables: { leadId: user?.id },
+            variables: { leadId: user.id },
           }),
         }),
         fetch('/api/graphql', {
@@ -93,7 +102,7 @@ export function LeadDashboardOverview() {
                 }
               }
             `,
-            variables: { leadId: user?.id, limit: 5 },
+            variables: { leadId: user.id, limit: 5 },
           }),
         }),
       ])

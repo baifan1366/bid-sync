@@ -115,42 +115,77 @@ export class VersionControlService {
         }
       }
 
-      // Get next version number
-      const { data: nextVersionNumber, error: versionError } = await adminClient
-        .rpc('get_next_version_number', {
-          p_document_id: validated.documentId
-        })
-
-      if (versionError || nextVersionNumber === null) {
-        console.error('Failed to get next version number:', versionError)
-        return {
-          success: false,
-          error: 'Failed to generate version number',
-        }
-      }
-
       // Generate changes summary if not provided
       const changesSummary = validated.changesSummary || this.generateChangesSummary(validated.content)
 
-      // Create version using admin client to bypass RLS
-      const { data: version, error: createError } = await adminClient
-        .from('document_versions')
-        .insert({
-          document_id: validated.documentId,
-          version_number: nextVersionNumber,
-          content: validated.content,
-          created_by: validated.userId,
-          changes_summary: changesSummary,
-          is_rollback: false,
-        })
-        .select()
-        .single()
+      // Retry logic to handle race conditions
+      let version = null
+      let createError = null
+      let retryCount = 0
+      const maxRetries = 3
 
-      if (createError || !version) {
-        console.error('Failed to create version:', createError)
+      while (retryCount < maxRetries && !version) {
+        try {
+          // Get next version number with locking
+          const { data: nextVersionNumber, error: versionError } = await adminClient
+            .rpc('get_next_version_number', {
+              p_document_id: validated.documentId
+            })
+
+          if (versionError || nextVersionNumber === null) {
+            console.error('Failed to get next version number:', versionError)
+            throw new Error('Failed to generate version number')
+          }
+
+          // Create version using admin client to bypass RLS
+          const result = await adminClient
+            .from('document_versions')
+            .insert({
+              document_id: validated.documentId,
+              version_number: nextVersionNumber,
+              content: validated.content,
+              created_by: validated.userId,
+              changes_summary: changesSummary,
+              is_rollback: false,
+            })
+            .select()
+            .single()
+
+          version = result.data
+          createError = result.error
+
+          if (createError) {
+            // Check if it's a duplicate key error (race condition)
+            if (createError.code === '23505' && createError.message?.includes('document_versions_document_id_version_number_key')) {
+              retryCount++
+              if (retryCount < maxRetries) {
+                console.log(`Version creation race condition detected, retrying (${retryCount}/${maxRetries})...`)
+                // Wait a bit before retrying (exponential backoff)
+                await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, retryCount - 1)))
+                continue
+              }
+            }
+            throw createError
+          }
+
+          // Success - exit loop
+          break
+        } catch (error) {
+          if (retryCount >= maxRetries - 1) {
+            console.error('Failed to create version after retries:', error)
+            return {
+              success: false,
+              error: `Failed to create version: ${error instanceof Error ? error.message : 'Unknown error'}`,
+            }
+          }
+          retryCount++
+        }
+      }
+
+      if (!version) {
         return {
           success: false,
-          error: `Failed to create version: ${createError?.message || 'Unknown error'}`,
+          error: 'Failed to create version after multiple retries',
         }
       }
 
