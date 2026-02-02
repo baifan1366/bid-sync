@@ -932,6 +932,8 @@ export const typeDefs = /* GraphQL */ `
     executiveSummary: String
     additionalInfo: JSON
     submissionDate: String
+    documentId: ID
+    workspaceId: ID
     createdAt: String!
     updatedAt: String!
     project: Project!

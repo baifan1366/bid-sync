@@ -34,6 +34,11 @@ export function PublicMarketplace() {
   const [appliedBudgetFilter, setAppliedBudgetFilter] = useState("all")
   const [filteredProjects, setFilteredProjects] = useState<Project[]>([])
   const [recommendedProjects, setRecommendedProjects] = useState<Project[]>([])
+  const [isMounted, setIsMounted] = useState(false)
+
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
 
   useEffect(() => {
     if (data?.openProjects) {
@@ -146,21 +151,30 @@ export function PublicMarketplace() {
                   <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 block">
                     Budget
                   </label>
-                  <Select value={budgetFilter} onValueChange={setBudgetFilter}>
-                    <SelectTrigger className="h-11 border-gray-300 dark:border-zinc-700 dark:bg-zinc-800">
-                      <DollarSign className="h-4 w-4 mr-2 text-gray-400" />
-                      <SelectValue placeholder="All budgets" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All budgets</SelectItem>
-                      <SelectItem value="under-1k">Under RM 1,000</SelectItem>
-                      <SelectItem value="1k-5k">RM 1,000 - RM 5,000</SelectItem>
-                      <SelectItem value="5k-10k">RM 5,000 - RM 10,000</SelectItem>
-                      <SelectItem value="10k-20k">RM 10,000 - RM 20,000</SelectItem>
-                      <SelectItem value="20k-plus">RM 20,000+</SelectItem>
-                      <SelectItem value="not-specified">Not specified</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {isMounted ? (
+                    <Select value={budgetFilter} onValueChange={setBudgetFilter}>
+                      <SelectTrigger className="h-11 border-gray-300 dark:border-zinc-700 dark:bg-zinc-800">
+                        <DollarSign className="h-4 w-4 mr-2 text-gray-400" />
+                        <SelectValue placeholder="All budgets" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All budgets</SelectItem>
+                        <SelectItem value="under-1k">Under RM 1,000</SelectItem>
+                        <SelectItem value="1k-5k">RM 1,000 - RM 5,000</SelectItem>
+                        <SelectItem value="5k-10k">RM 5,000 - RM 10,000</SelectItem>
+                        <SelectItem value="10k-20k">RM 10,000 - RM 20,000</SelectItem>
+                        <SelectItem value="20k-plus">RM 20,000+</SelectItem>
+                        <SelectItem value="not-specified">Not specified</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="h-11 flex items-center justify-between rounded-md border border-gray-300 dark:border-zinc-700 bg-background dark:bg-zinc-800 px-3 py-2 text-sm">
+                      <div className="flex items-center">
+                        <DollarSign className="h-4 w-4 mr-2 text-gray-400" />
+                        <span className="text-muted-foreground">All budgets</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Search Button */}
