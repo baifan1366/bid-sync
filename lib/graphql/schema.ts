@@ -901,9 +901,11 @@ export const typeDefs = /* GraphQL */ `
   enum ProposalStatus {
     DRAFT
     SUBMITTED
-    UNDER_REVIEW
-    ACCEPTED
+    PENDING_APPROVAL
+    REVIEWING
+    APPROVED
     REJECTED
+    ARCHIVED
   }
 
   type ChatMessage {

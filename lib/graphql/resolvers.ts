@@ -477,7 +477,7 @@ export const resolvers = {
           timelineEstimate: proposal.timeline_estimate || null,
           executiveSummary: proposal.executive_summary || null,
           submissionDate: proposal.submitted_at || proposal.created_at,
-          status: proposal.status.toUpperCase(),
+          status: proposal.status ? proposal.status.toUpperCase() : 'DRAFT',
           complianceScore,
           unreadMessages: unreadCount || 0,
           additionalInfo: [], // Required field - empty array as default
@@ -714,7 +714,7 @@ export const resolvers = {
       return {
         id: proposal.id,
         title: proposal.title || `Proposal for ${proposal.projects.title}`,
-        status: proposal.status.toUpperCase(),
+        status: proposal.status ? proposal.status.toUpperCase() : 'DRAFT',
         submissionDate: proposal.submitted_at || proposal.created_at,
         biddingTeam: {
           lead: lead || { id: '', name: 'Unknown', email: '', avatarUrl: null, role: 'lead', assignedSections: [] },
