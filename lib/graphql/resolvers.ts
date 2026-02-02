@@ -4361,7 +4361,7 @@ export const resolvers = {
                 avatarUrl: userData.user.user_metadata?.avatar_url || null,
               } : null,
               role: member.role.toUpperCase(),
-              joinedAt: member.created_at,
+              joinedAt: member.joined_at,
             };
           }));
 
