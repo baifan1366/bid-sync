@@ -116,16 +116,29 @@ export function EnhancedLeadDashboard() {
       }
 
       const proposalId = result.data?.createProposal?.id
+      const documentId = result.data?.createProposal?.documentId
 
-      if (proposalId) {
+      if (proposalId && documentId) {
         // Invalidate queries
         queryClient.invalidateQueries({ queryKey: ['lead-proposals'] })
         
         // Close detail view if open
         setIsDetailViewOpen(false)
         
-        // Navigate to workspace with the new proposal
-        router.push(`/workspace?proposal=${proposalId}`)
+        // Navigate to editor to start working on the proposal
+        router.push(`/editor/${documentId}`)
+        
+        toast({
+          title: "Proposal created successfully",
+          description: "You can now start working on your proposal",
+        })
+      } else if (proposalId && !documentId) {
+        // Fallback: navigate to proposals list if documentId is missing
+        toast({
+          title: "Proposal created",
+          description: "Redirecting to proposals dashboard...",
+        })
+        router.push('/lead-proposals')
       }
     } catch (error) {
       console.error('Error creating proposal:', error)

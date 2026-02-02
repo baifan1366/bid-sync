@@ -159,12 +159,14 @@ export default function VerificationsPage() {
                       variant="outline"
                       onClick={() => handleReject(user)}
                       disabled={verifyMutation.isPending}
+                      className="border-red-500/20 hover:bg-red-500/10 text-red-500"
                     >
                       Reject
                     </Button>
                     <Button
                       onClick={() => handleApprove(user)}
                       disabled={verifyMutation.isPending}
+                      className="bg-yellow-400 hover:bg-yellow-500 text-black"
                     >
                       Approve
                     </Button>

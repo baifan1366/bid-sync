@@ -219,6 +219,34 @@ export const typeDefs = /* GraphQL */ `
     lockedBy: String
   }
 
+  type SectionComment {
+    id: ID!
+    sectionId: ID!
+    documentId: ID!
+    userId: ID!
+    user: CommentUser
+    content: String!
+    isResolved: Boolean!
+    resolvedBy: ID
+    resolvedAt: String
+    parentId: ID
+    replies: [SectionComment!]
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type CommentUser {
+    id: ID!
+    name: String!
+    email: String!
+  }
+
+  type SectionCommentResult {
+    success: Boolean!
+    comment: SectionComment
+    error: String
+  }
+
   type LockStatus {
     isLocked: Boolean!
     lockedBy: ID
@@ -620,6 +648,10 @@ export const typeDefs = /* GraphQL */ `
     # Proposal Archival queries
     getProposals(includeArchived: Boolean, archivedOnly: Boolean, projectId: ID, status: ProposalStatus): ProposalListResult!
     isProposalArchived(proposalId: ID!): ArchivedCheckResult!
+    
+    # Section Comment queries
+    getSectionComments(sectionId: ID!): [SectionComment!]!
+    getUnresolvedCommentsCount(sectionId: ID!): Int!
     getArchivedCount: ArchivedCountResult!
     
     # Multi-Proposal Management queries
@@ -1042,6 +1074,13 @@ export const typeDefs = /* GraphQL */ `
     deadline: String!
   }
 
+  input CreateSectionCommentInput {
+    sectionId: ID!
+    documentId: ID!
+    content: String!
+    parentId: ID
+  }
+
   type SectionResult {
     success: Boolean!
     section: DocumentSection
@@ -1447,6 +1486,13 @@ export const typeDefs = /* GraphQL */ `
     # Multi-Proposal Management mutations
     saveWorkspaceState(proposalId: ID!, state: JSON!): OperationResult!
     clearWorkspaceState(proposalId: ID!): OperationResult!
+    
+    # Section Comment mutations
+    createSectionComment(input: CreateSectionCommentInput!): SectionCommentResult!
+    updateSectionComment(commentId: ID!, content: String!): SectionCommentResult!
+    deleteSectionComment(commentId: ID!): Boolean!
+    resolveSectionComment(commentId: ID!): SectionCommentResult!
+    reopenSectionComment(commentId: ID!): SectionCommentResult!
     
     # Bidding Leader Management mutations
     generateInvitation(input: GenerateInvitationInput!): TeamInvitation!

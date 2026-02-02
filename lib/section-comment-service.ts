@@ -54,39 +54,69 @@ export interface CommentsResult {
 export class SectionCommentService {
   /**
    * Creates a new comment on a section
-   * Uses API route to handle notifications server-side
+   * Uses GraphQL mutation to handle notifications server-side
    */
   static async createComment(
     input: CreateCommentInput,
     userId: string
   ): Promise<CommentResult> {
     try {
-      // Call API route to create comment and send notifications
-      const response = await fetch('/api/comments', {
+      // Call GraphQL mutation to create comment and send notifications
+      const response = await fetch('/api/graphql', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          sectionId: input.sectionId,
-          documentId: input.documentId,
-          content: input.content,
-          parentId: input.parentId,
+          query: `
+            mutation CreateSectionComment($input: CreateSectionCommentInput!) {
+              createSectionComment(input: $input) {
+                success
+                comment {
+                  id
+                  sectionId
+                  documentId
+                  userId
+                  user {
+                    id
+                    name
+                    email
+                  }
+                  content
+                  isResolved
+                  resolvedBy
+                  resolvedAt
+                  parentId
+                  createdAt
+                  updatedAt
+                }
+                error
+              }
+            }
+          `,
+          variables: {
+            input: {
+              sectionId: input.sectionId,
+              documentId: input.documentId,
+              content: input.content,
+              parentId: input.parentId,
+            },
+          },
         }),
       });
 
-      const data = await response.json();
+      const { data, errors } = await response.json();
 
-      if (!response.ok) {
+      if (errors || !data?.createSectionComment?.success) {
         return {
           success: false,
-          error: data.error || 'Failed to create comment',
+          error: errors?.[0]?.message || data?.createSectionComment?.error || 'Failed to create comment',
         };
       }
 
       return {
         success: true,
-        comment: data.comment,
+        comment: data.createSectionComment.comment,
       };
     } catch (error) {
       console.error('Unexpected error in createComment:', error);

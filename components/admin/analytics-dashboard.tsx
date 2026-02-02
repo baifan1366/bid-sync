@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createGraphQLClient } from '@/lib/graphql/client'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { 
   Users, 
   FileText, 
@@ -14,6 +14,16 @@ import {
 import { Button } from '@/components/ui/button'
 import { ScoringAnalytics } from './scoring-analytics'
 import { AnalyticsDashboardSkeleton } from './analytics-dashboard-skeleton'
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend, 
+  ResponsiveContainer 
+} from 'recharts'
 
 const PLATFORM_ANALYTICS_QUERY = `
   query PlatformAnalytics($dateFrom: String, $dateTo: String) {
@@ -295,23 +305,62 @@ export function AnalyticsDashboard() {
         </div>
       </div>
 
-      {/* User Growth Chart Placeholder */}
+      {/* User Growth Chart */}
       <Card className="border-yellow-400/20">
         <CardHeader>
           <CardTitle>User Growth</CardTitle>
+          <CardDescription>New user registrations over time</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-64 flex items-center justify-center border border-yellow-400/20 rounded-lg">
-            <div className="text-center">
-              <TrendingUp className="h-12 w-12 text-yellow-400 mx-auto mb-2" />
-              <p className="text-muted-foreground">
-                Chart visualization coming soon
-              </p>
-              <p className="text-sm text-muted-foreground mt-1">
-                {analytics?.userGrowth?.length || 0} data points available
-              </p>
+          {analytics?.userGrowth && analytics.userGrowth.length > 0 ? (
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={analytics.userGrowth}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="currentColor" className="opacity-10" />
+                  <XAxis 
+                    dataKey="date" 
+                    stroke="currentColor" 
+                    className="text-xs"
+                    tickFormatter={(value) => {
+                      const date = new Date(value)
+                      return `${date.getMonth() + 1}/${date.getDate()}`
+                    }}
+                  />
+                  <YAxis stroke="currentColor" className="text-xs" />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'hsl(var(--background))',
+                      border: '1px solid hsl(var(--border))',
+                      borderRadius: '0.5rem'
+                    }}
+                    labelFormatter={(value) => {
+                      const date = new Date(value)
+                      return date.toLocaleDateString()
+                    }}
+                  />
+                  <Legend />
+                  <Line 
+                    type="monotone" 
+                    dataKey="value" 
+                    stroke="#FBBF24" 
+                    strokeWidth={2}
+                    name="New Users"
+                    dot={{ fill: '#FBBF24', r: 4 }}
+                    activeDot={{ r: 6 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
-          </div>
+          ) : (
+            <div className="h-64 flex items-center justify-center border border-yellow-400/20 rounded-lg">
+              <div className="text-center">
+                <TrendingUp className="h-12 w-12 text-yellow-400 mx-auto mb-2" />
+                <p className="text-muted-foreground">
+                  No user growth data available
+                </p>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

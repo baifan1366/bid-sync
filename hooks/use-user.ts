@@ -24,6 +24,13 @@ export function useUser() {
       const { data: { session } } = await supabase.auth.refreshSession()
       if (session?.user) {
         setUser(session.user)
+        
+        // Check if user is suspended and log them out
+        if (session.user.user_metadata?.is_suspended) {
+          console.log('[useUser] User is suspended, logging out...')
+          await supabase.auth.signOut()
+          setUser(null)
+        }
       }
     }
 
@@ -31,15 +38,23 @@ export function useUser() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
       setLoading(false)
+      
+      // Check if user is suspended and log them out
+      if (currentUser?.user_metadata?.is_suspended) {
+        console.log('[useUser] User is suspended (auth state change), logging out...')
+        await supabase.auth.signOut()
+        setUser(null)
+      }
     })
 
-    // Refresh session every 5 minutes to get latest metadata
+    // Refresh session every 30 seconds to get latest metadata and check suspension
     const refreshInterval = setInterval(() => {
       refreshSession()
-    }, 5 * 60 * 1000) // 5 minutes
+    }, 30 * 1000) // 30 seconds for faster suspension detection
 
     return () => {
       subscription.unsubscribe()

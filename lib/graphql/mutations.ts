@@ -116,6 +116,8 @@ export const CREATE_PROPOSAL = gql`
       leadId
       title
       status
+      documentId
+      workspaceId
       createdAt
       project {
         id

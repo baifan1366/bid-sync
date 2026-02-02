@@ -183,6 +183,24 @@ const withErrorHandling = <T extends any[], R>(
   };
 };
 
+/**
+ * Checks if a user is suspended and throws an error if they are
+ */
+const checkUserSuspension = (user: any, operation: string): void => {
+  if (user?.user_metadata?.is_suspended) {
+    const reason = user.user_metadata?.suspended_reason || 'Your account has been suspended.';
+    throw createDetailedError(
+      'Account suspended. You cannot perform this action.',
+      'FORBIDDEN',
+      {
+        operation,
+        userId: user.id,
+        hint: `Suspension reason: ${reason}. Please contact support if you believe this is a mistake.`,
+      }
+    );
+  }
+};
+
 // Helper function to map database project to GraphQL schema
 const mapProject = (project: any) => ({
   id: project.id,
@@ -5417,6 +5435,113 @@ export const resolvers = {
         });
       }
     },
+
+    // ============================================================================
+    // Section Comment Queries
+    // ============================================================================
+
+    getSectionComments: async (_: any, { sectionId }: { sectionId: string }) => {
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        // Get all comments for the section
+        const { data: comments, error } = await supabase
+          .from('section_comments')
+          .select(`
+            *,
+            users:user_id (
+              id,
+              raw_user_meta_data
+            )
+          `)
+          .eq('section_id', sectionId)
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          console.error('Error fetching comments:', error);
+          throw new GraphQLError('Failed to fetch comments', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        // Organize comments into threads
+        const commentMap = new Map<string, any>();
+        const rootComments: any[] = [];
+
+        comments?.forEach((comment) => {
+          const mappedComment = mapSectionComment(comment);
+          commentMap.set(mappedComment.id, mappedComment);
+
+          if (!mappedComment.parentId) {
+            rootComments.push(mappedComment);
+          }
+        });
+
+        // Build reply trees
+        comments?.forEach((comment) => {
+          if (comment.parent_id) {
+            const parent = commentMap.get(comment.parent_id);
+            if (parent) {
+              if (!parent.replies) parent.replies = [];
+              const child = commentMap.get(comment.id);
+              if (child) parent.replies.push(child);
+            }
+          }
+        });
+
+        return rootComments;
+      } catch (error: any) {
+        console.error('Error in getSectionComments:', error);
+        if (error instanceof GraphQLError) throw error;
+        throw new GraphQLError(error.message || 'Failed to fetch comments', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    getUnresolvedCommentsCount: async (_: any, { sectionId }: { sectionId: string }) => {
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        const { count, error } = await supabase
+          .from('section_comments')
+          .select('*', { count: 'exact', head: true })
+          .eq('section_id', sectionId)
+          .eq('is_resolved', false);
+
+        if (error) {
+          console.error('Error getting unresolved count:', error);
+          return 0;
+        }
+
+        return count || 0;
+      } catch (error: any) {
+        console.error('Error in getUnresolvedCommentsCount:', error);
+        return 0;
+      }
+    },
   },
 
   // Field resolver for Workspace type
@@ -5618,6 +5743,9 @@ export const resolvers = {
           originalError: authError,
         });
       }
+
+      // Check if user is suspended
+      checkUserSuspension(user, 'sendMessage');
 
       // Validate content is not empty
       if (!input.content.trim()) {
@@ -6253,6 +6381,9 @@ export const resolvers = {
         });
       }
 
+      // Check if user is suspended
+      checkUserSuspension(user, 'createProject');
+
       // Check if user is a client
       const userRole = user.user_metadata?.role;
       if (userRole !== 'client') {
@@ -6389,6 +6520,9 @@ export const resolvers = {
           extensions: { code: 'UNAUTHENTICATED' },
         });
       }
+
+      // Check if user is suspended
+      checkUserSuspension(user, 'updateProject');
 
       // Get the existing project
       const { data: existingProject, error: fetchError } = await supabase
@@ -7241,6 +7375,9 @@ export const resolvers = {
         });
       }
 
+      // Check if user is suspended
+      checkUserSuspension(user, 'createProposal');
+
       // Verify user is a bidding lead
       const userRole = user.user_metadata?.role;
       if (userRole !== 'bidding_lead') {
@@ -7332,6 +7469,8 @@ export const resolvers = {
         submissionDate: null,
         createdAt: result.proposal!.createdAt,
         updatedAt: result.proposal!.createdAt,
+        documentId: result.document?.id || null,
+        workspaceId: result.workspace?.id || null,
         project: {
           id: project.id,
           clientId: project.client_id,
@@ -11903,6 +12042,325 @@ export const resolvers = {
 
       return true;
     },
+
+    // ============================================================================
+    // Section Comment Mutations
+    // ============================================================================
+
+    createSectionComment: async (
+      _: any,
+      { input }: { input: { sectionId: string; documentId: string; content: string; parentId?: string } }
+    ) => {
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        // Verify user has access to the document
+        const { data: collaborator } = await supabase
+          .from('document_collaborators')
+          .select('id')
+          .eq('document_id', input.documentId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (!collaborator) {
+          throw new GraphQLError('You do not have access to this document', {
+            extensions: { code: 'FORBIDDEN' },
+          });
+        }
+
+        // Create the comment
+        const { data: comment, error: createError } = await supabase
+          .from('section_comments')
+          .insert({
+            section_id: input.sectionId,
+            document_id: input.documentId,
+            user_id: user.id,
+            content: input.content,
+            parent_id: input.parentId || null,
+          })
+          .select(`
+            *,
+            users:user_id (
+              id,
+              raw_user_meta_data
+            )
+          `)
+          .single();
+
+        if (createError || !comment) {
+          console.error('Error creating comment:', createError);
+          throw new GraphQLError('Failed to create comment', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        // Send notifications asynchronously
+        sendCommentNotifications(comment, user.id, supabase).catch((error) => {
+          console.error('Error sending comment notifications:', error);
+        });
+
+        return {
+          success: true,
+          comment: mapSectionComment(comment),
+        };
+      } catch (error: any) {
+        console.error('Error in createSectionComment:', error);
+        if (error instanceof GraphQLError) throw error;
+        throw new GraphQLError(error.message || 'Failed to create comment', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    updateSectionComment: async (
+      _: any,
+      { commentId, content }: { commentId: string; content: string }
+    ) => {
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        // Verify user owns the comment
+        const { data: existingComment } = await supabase
+          .from('section_comments')
+          .select('user_id')
+          .eq('id', commentId)
+          .single();
+
+        if (!existingComment || existingComment.user_id !== user.id) {
+          throw new GraphQLError('You can only edit your own comments', {
+            extensions: { code: 'FORBIDDEN' },
+          });
+        }
+
+        // Update the comment
+        const { data: comment, error: updateError } = await supabase
+          .from('section_comments')
+          .update({ content })
+          .eq('id', commentId)
+          .select(`
+            *,
+            users:user_id (
+              id,
+              raw_user_meta_data
+            )
+          `)
+          .single();
+
+        if (updateError || !comment) {
+          console.error('Error updating comment:', updateError);
+          throw new GraphQLError('Failed to update comment', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        return {
+          success: true,
+          comment: mapSectionComment(comment),
+        };
+      } catch (error: any) {
+        console.error('Error in updateSectionComment:', error);
+        if (error instanceof GraphQLError) throw error;
+        throw new GraphQLError(error.message || 'Failed to update comment', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    deleteSectionComment: async (_: any, { commentId }: { commentId: string }) => {
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        // Verify user owns the comment or is document owner
+        const { data: comment } = await supabase
+          .from('section_comments')
+          .select('user_id, document_id')
+          .eq('id', commentId)
+          .single();
+
+        if (!comment) {
+          throw new GraphQLError('Comment not found', {
+            extensions: { code: 'NOT_FOUND' },
+          });
+        }
+
+        // Check if user is comment author or document owner
+        const isAuthor = comment.user_id === user.id;
+        const { data: collaborator } = await supabase
+          .from('document_collaborators')
+          .select('role')
+          .eq('document_id', comment.document_id)
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        const isOwner = collaborator?.role === 'owner';
+
+        if (!isAuthor && !isOwner) {
+          throw new GraphQLError('You can only delete your own comments or you must be the document owner', {
+            extensions: { code: 'FORBIDDEN' },
+          });
+        }
+
+        // Delete the comment
+        const { error: deleteError } = await supabase
+          .from('section_comments')
+          .delete()
+          .eq('id', commentId);
+
+        if (deleteError) {
+          console.error('Error deleting comment:', deleteError);
+          throw new GraphQLError('Failed to delete comment', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        return true;
+      } catch (error: any) {
+        console.error('Error in deleteSectionComment:', error);
+        if (error instanceof GraphQLError) throw error;
+        throw new GraphQLError(error.message || 'Failed to delete comment', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    resolveSectionComment: async (_: any, { commentId }: { commentId: string }) => {
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        // Update the comment
+        const { data: comment, error: updateError } = await supabase
+          .from('section_comments')
+          .update({
+            is_resolved: true,
+            resolved_by: user.id,
+            resolved_at: new Date().toISOString(),
+          })
+          .eq('id', commentId)
+          .select(`
+            *,
+            users:user_id (
+              id,
+              raw_user_meta_data
+            )
+          `)
+          .single();
+
+        if (updateError || !comment) {
+          console.error('Error resolving comment:', updateError);
+          throw new GraphQLError('Failed to resolve comment', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        return {
+          success: true,
+          comment: mapSectionComment(comment),
+        };
+      } catch (error: any) {
+        console.error('Error in resolveSectionComment:', error);
+        if (error instanceof GraphQLError) throw error;
+        throw new GraphQLError(error.message || 'Failed to resolve comment', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
+
+    reopenSectionComment: async (_: any, { commentId }: { commentId: string }) => {
+      const supabase = await createClient();
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      try {
+        // Update the comment
+        const { data: comment, error: updateError } = await supabase
+          .from('section_comments')
+          .update({
+            is_resolved: false,
+            resolved_by: null,
+            resolved_at: null,
+          })
+          .eq('id', commentId)
+          .select(`
+            *,
+            users:user_id (
+              id,
+              raw_user_meta_data
+            )
+          `)
+          .single();
+
+        if (updateError || !comment) {
+          console.error('Error reopening comment:', updateError);
+          throw new GraphQLError('Failed to reopen comment', {
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          });
+        }
+
+        return {
+          success: true,
+          comment: mapSectionComment(comment),
+        };
+      } catch (error: any) {
+        console.error('Error in reopenSectionComment:', error);
+        if (error instanceof GraphQLError) throw error;
+        throw new GraphQLError(error.message || 'Failed to reopen comment', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+    },
   },
 
   // Type resolvers to map database fields to GraphQL schema
@@ -11918,3 +12376,102 @@ export const resolvers = {
     fieldType: (parent: any) => (parent.fieldType || parent.fieldType || '').toUpperCase(),
   },
 };
+
+// ============================================================================
+// Helper Functions for Section Comments
+// ============================================================================
+
+/**
+ * Maps database comment to GraphQL SectionComment type
+ */
+function mapSectionComment(comment: any): any {
+  const user = comment.users;
+  return {
+    id: comment.id,
+    sectionId: comment.section_id,
+    documentId: comment.document_id,
+    userId: comment.user_id,
+    user: user
+      ? {
+          id: user.id,
+          name: user.raw_user_meta_data?.name || 'Unknown User',
+          email: user.raw_user_meta_data?.email || '',
+        }
+      : undefined,
+    content: comment.content,
+    isResolved: comment.is_resolved,
+    resolvedBy: comment.resolved_by,
+    resolvedAt: comment.resolved_at,
+    parentId: comment.parent_id,
+    replies: [],
+    createdAt: comment.created_at,
+    updatedAt: comment.updated_at,
+  };
+}
+
+/**
+ * Sends notifications for new comment
+ */
+async function sendCommentNotifications(
+  comment: any,
+  authorId: string,
+  supabase: any
+): Promise<void> {
+  try {
+    const { NotificationService } = await import('@/lib/notification-service');
+
+    // Get section details
+    const { data: section } = await supabase
+      .from('document_sections')
+      .select('title, assigned_to')
+      .eq('id', comment.section_id)
+      .single();
+
+    if (!section) return;
+
+    // Notify section assignee if exists and not the author
+    if (section.assigned_to && section.assigned_to !== authorId) {
+      await NotificationService.createNotification({
+        userId: section.assigned_to,
+        type: 'document_comment_added',
+        title: 'New comment on your section',
+        body: `A comment was added to "${section.title}"`,
+        data: {
+          sectionId: comment.section_id,
+          commentId: comment.id,
+          documentId: comment.document_id,
+        },
+        sendEmail: true,
+      });
+    }
+
+    // If it's a reply, notify the parent comment author
+    if (comment.parent_id) {
+      const { data: parentComment } = await supabase
+        .from('section_comments')
+        .select('user_id')
+        .eq('id', comment.parent_id)
+        .single();
+
+      if (parentComment && parentComment.user_id !== authorId) {
+        await NotificationService.createNotification({
+          userId: parentComment.user_id,
+          type: 'document_comment_added',
+          title: 'Reply to your comment',
+          body: `Someone replied to your comment on "${section.title}"`,
+          data: {
+            sectionId: comment.section_id,
+            commentId: comment.id,
+            parentCommentId: comment.parent_id,
+            documentId: comment.document_id,
+          },
+          sendEmail: true,
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error sending comment notifications:', error);
+  }
+}
+
+export default resolvers;

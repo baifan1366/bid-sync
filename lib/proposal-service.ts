@@ -20,6 +20,10 @@ export interface CreateProposalResult {
     id: string;
     name: string;
   };
+  document?: {
+    id: string;
+    title: string;
+  };
   error?: string;
   errorCode?: 'DUPLICATE_PROPOSAL' | 'PROJECT_NOT_FOUND' | 'UNAUTHORIZED' | 'WORKSPACE_CREATION_FAILED' | 'UNKNOWN';
 }
@@ -181,6 +185,10 @@ export class ProposalService {
           id: workspace.id,
           name: workspace.name,
         },
+        document: initResult.data ? {
+          id: initResult.data.documentId,
+          title: `Proposal for ${project.title}`,
+        } : undefined,
       };
     } catch (error) {
       console.error('Unexpected error in createProposal:', error);

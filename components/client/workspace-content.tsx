@@ -160,8 +160,10 @@ export function WorkspaceContent() {
   const [editingTitle, setEditingTitle] = React.useState<string>("")
   const [isSavingTitle, setIsSavingTitle] = React.useState(false)
 
-  // Only fetch proposals if user is a bidding lead
-  const shouldFetch = !!user?.id && user?.user_metadata?.role === 'bidding_lead'
+  // Only fetch proposals if user is a bidding lead or member
+  const isBiddingLead = user?.user_metadata?.role === 'bidding_lead'
+  const isBiddingMember = user?.user_metadata?.role === 'bidding_member'
+  const shouldFetch = !!user?.id && isBiddingLead
   
   // Fetch proposals for the current lead
   const { data, isLoading, error } = useGraphQLQuery<{ leadProposals: ProposalWithProject[] }>(
@@ -515,16 +517,39 @@ export function WorkspaceContent() {
     )
   }
 
-  if (!user || user.user_metadata?.role !== 'bidding_lead') {
+  if (!user || (!isBiddingLead && !isBiddingMember)) {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="p-6 border-yellow-400/20">
           <div className="flex items-center gap-3">
             <AlertCircle className="h-5 w-5 text-yellow-400" />
             <p className="text-muted-foreground">
-              This workspace is only available for bidding leads.
+              This workspace is only available for bidding team members.
             </p>
           </div>
+        </Card>
+      </div>
+    )
+  }
+
+  // For members, show a message to access through dashboard
+  if (isBiddingMember) {
+    return (
+      <div className="container mx-auto px-4 py-8 max-w-[1800px]">
+        <Card className="p-12 border-yellow-400/20 text-center">
+          <Users2 className="h-12 w-12 text-yellow-400 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold text-black dark:text-white mb-2">
+            Access Workspace Through Your Assignments
+          </h3>
+          <p className="text-muted-foreground mb-4">
+            As a team member, you can access the workspace through your assigned sections in the Member Dashboard or Editor.
+          </p>
+          <Button
+            onClick={() => router.push('/member-dashboard')}
+            className="bg-yellow-400 hover:bg-yellow-500 text-black"
+          >
+            Go to Dashboard
+          </Button>
         </Card>
       </div>
     )

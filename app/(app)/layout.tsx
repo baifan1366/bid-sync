@@ -9,6 +9,10 @@ import { LayoutErrorBoundary } from "@/components/layout/layout-error-boundary"
 import { Toaster } from "@/components/ui/toaster"
 import { useUser } from "@/hooks/use-user"
 import { Skeleton } from "@/components/ui/skeleton"
+import { createClient } from "@/lib/supabase/client"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { AlertCircle } from "lucide-react"
+import { Button } from "@/components/ui/button"
 
 export default function AppLayout({
   children,
@@ -16,6 +20,8 @@ export default function AppLayout({
   children: React.ReactNode;
 }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [isSuspended, setIsSuspended] = useState(false)
+  const [suspensionReason, setSuspensionReason] = useState<string | null>(null)
   const { user, loading } = useUser()
   const router = useRouter()
 
@@ -25,6 +31,14 @@ export default function AppLayout({
     }
   }, [user, loading, router])
 
+  // Check for suspension status
+  useEffect(() => {
+    if (user?.user_metadata?.is_suspended) {
+      setIsSuspended(true)
+      setSuspensionReason(user.user_metadata?.suspended_reason || "Your account has been suspended.")
+    }
+  }, [user])
+
   const handleMobileMenuToggle = useCallback(() => {
     setIsMobileMenuOpen(prev => !prev)
   }, [])
@@ -32,6 +46,12 @@ export default function AppLayout({
   const handleMobileMenuClose = useCallback(() => {
     setIsMobileMenuOpen(false)
   }, [])
+
+  const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push("/login")
+  }
 
   // Show loading skeleton while fetching user data
   if (loading) {
@@ -41,6 +61,40 @@ export default function AppLayout({
   // Don't render layout if no user (will redirect)
   if (!user) {
     return null
+  }
+
+  // Show suspension message if user is suspended
+  if (isSuspended) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background p-6">
+        <div className="w-full max-w-md space-y-4">
+          <Alert variant="destructive" className="border-red-500 bg-red-50 dark:bg-red-950">
+            <AlertCircle className="h-5 w-5" />
+            <AlertTitle className="text-lg font-semibold">Account Suspended</AlertTitle>
+            <AlertDescription className="mt-2 space-y-2">
+              <p className="text-sm">
+                Your account has been suspended and you can no longer access the platform.
+              </p>
+              {suspensionReason && (
+                <div className="mt-3 rounded-md bg-white dark:bg-black p-3 border border-red-200 dark:border-red-800">
+                  <p className="text-sm font-medium">Reason:</p>
+                  <p className="text-sm mt-1">{suspensionReason}</p>
+                </div>
+              )}
+              <p className="text-sm mt-3">
+                If you believe this is a mistake, please contact support.
+              </p>
+            </AlertDescription>
+          </Alert>
+          <Button 
+            onClick={handleLogout} 
+            className="w-full bg-yellow-400 hover:bg-yellow-500 text-black"
+          >
+            Log Out
+          </Button>
+        </div>
+      </div>
+    )
   }
 
   return (
