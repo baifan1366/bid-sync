@@ -67,6 +67,7 @@ const NOTIFICATION_PREFERENCE_MAP: Record<NotificationType, string> = {
   'project_completed': 'project_updates',
   // Proposal updates
   'proposal_submitted': 'proposal_updates',
+  'proposal_pending_approval': 'proposal_updates',
   'proposal_status_changed': 'proposal_updates',
   'proposal_scored': 'scoring_notifications',
   'proposal_score_updated': 'scoring_notifications',
