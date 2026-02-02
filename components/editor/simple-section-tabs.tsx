@@ -83,22 +83,18 @@ export function SimpleSectionTabs({ documentId, currentUserId, isLead = false, c
           .single()
 
         if (proposal) {
-          // Get team members
-          const { data: members } = await supabase
-            .from('proposal_team_members')
-            .select(`
-              user_id,
-              users:user_id (
-                id,
-                raw_user_meta_data
-              )
-            `)
-            .eq('proposal_id', proposal.id)
+          // Get team members with user info via RPC function
+          const { data: members, error: membersError } = await supabase
+            .rpc('get_proposal_team_with_users', { 
+              p_proposal_id: proposal.id 
+            })
 
-          if (members) {
+          if (membersError) {
+            console.error('[SimpleSectionTabs] Error loading team members:', membersError)
+          } else if (members && members.length > 0) {
             const teamList = members.map((member: any) => ({
               id: member.user_id,
-              name: member.users?.raw_user_meta_data?.name || 'Unknown',
+              name: member.user_name || member.user_email || 'Unknown',
             }))
             
             console.log('[SimpleSectionTabs] Team members loaded:', teamList.length)
