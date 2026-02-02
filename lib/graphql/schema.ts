@@ -321,6 +321,14 @@ export const typeDefs = /* GraphQL */ `
     averageResponseTime: Int!
   }
 
+  type LeadRecentProposal {
+    id: ID!
+    projectTitle: String!
+    status: ProposalStatus!
+    submittedAt: String!
+    budgetEstimate: Float
+  }
+
   # Submission Draft Type
   type SubmissionDraft {
     id: ID!
@@ -637,10 +645,11 @@ export const typeDefs = /* GraphQL */ `
     
     # Lead Dashboard queries
     leadDashboardStats(leadId: ID!): LeadDashboardStats!
-    leadRecentProposals(leadId: ID!, limit: Int): [ProposalWithProject!]!
+    leadRecentProposals(leadId: ID!, limit: Int): [LeadRecentProposal!]!
     
     # Admin Proposal Oversight queries
     adminAllProposals(status: String, search: String): [AdminProposal!]!
+    adminPendingProposals: [AdminProposal!]!
     
     # Admin Template Management queries
     adminAllTemplates: [Template!]!
@@ -1383,6 +1392,10 @@ export const typeDefs = /* GraphQL */ `
     approveProject(projectId: ID!, notes: String): Project!
     rejectProject(projectId: ID!, reason: String!): Project!
     requestProjectChanges(projectId: ID!, changes: String!): Project!
+    
+    # Admin proposal approval mutations
+    adminApproveProposal(proposalId: ID!, notes: String): Proposal!
+    adminRejectProposal(proposalId: ID!, reason: String!): Proposal!
     sendMessage(input: SendMessageInput!): ChatMessage!
     markMessagesAsRead(projectId: ID!, proposalId: ID): Boolean!
     acceptProposal(proposalId: ID!, projectId: ID!): ProposalDecision!

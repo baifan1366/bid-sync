@@ -1,5 +1,5 @@
 // Proposal-related types
-export type ProposalStatus = 'draft' | 'submitted' | 'reviewing' | 'approved' | 'rejected'
+export type ProposalStatus = 'draft' | 'submitted' | 'pending_approval' | 'reviewing' | 'approved' | 'rejected'
 
 export interface Proposal {
   id: string

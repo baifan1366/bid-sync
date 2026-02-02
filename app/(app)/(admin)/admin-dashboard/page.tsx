@@ -1,6 +1,6 @@
 import { requireAdmin } from '@/lib/auth/admin-guards'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Shield, BarChart3, FileText, ClipboardCheck, FileCheck, Settings, ArrowRight } from 'lucide-react'
+import { Shield, BarChart3, FileText, ClipboardCheck, FileCheck, Settings, ArrowRight, CheckCircle } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 
@@ -30,6 +30,13 @@ const adminPages = [
     icon: ClipboardCheck,
     href: "/admin-projects",
     color: "bg-green-500",
+  },
+  {
+    title: "Proposal Approvals",
+    description: "Review and approve pending proposals",
+    icon: CheckCircle,
+    href: "/admin-proposal-approvals",
+    color: "bg-emerald-500",
   },
   {
     title: "Proposals",

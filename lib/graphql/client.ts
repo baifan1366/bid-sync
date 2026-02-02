@@ -89,6 +89,52 @@ export const ADMIN_ALL_PROPOSALS = /* GraphQL */ `
   }
 `;
 
+export const ADMIN_PENDING_PROPOSALS = /* GraphQL */ `
+  query AdminPendingProposals {
+    adminPendingProposals {
+      id
+      title
+      status
+      budgetEstimate
+      timelineEstimate
+      submissionDate
+      project {
+        id
+        title
+      }
+      biddingLead {
+        id
+        fullName
+        email
+      }
+      biddingTeam {
+        id
+        name
+      }
+    }
+  }
+`;
+
+export const ADMIN_APPROVE_PROPOSAL = /* GraphQL */ `
+  mutation AdminApproveProposal($proposalId: ID!, $notes: String) {
+    adminApproveProposal(proposalId: $proposalId, notes: $notes) {
+      id
+      status
+      updatedAt
+    }
+  }
+`;
+
+export const ADMIN_REJECT_PROPOSAL = /* GraphQL */ `
+  mutation AdminRejectProposal($proposalId: ID!, $reason: String!) {
+    adminRejectProposal(proposalId: $proposalId, reason: $reason) {
+      id
+      status
+      updatedAt
+    }
+  }
+`;
+
 export const ADMIN_ALL_TEMPLATES = /* GraphQL */ `
   query AdminAllTemplates {
     adminAllTemplates {

@@ -3134,8 +3134,12 @@ $ LANGUAGE plpgsql SECURITY DEFINER;
 -- MIGRATION 014: ADD PROPOSAL INSERT POLICY
 -- ============================================================
 
+DROP POLICY IF EXISTS "proposals_lead_insert" ON public.proposals;
 CREATE POLICY "proposals_lead_insert" ON public.proposals
-FOR INSERT WITH CHECK (auth.uid() = lead_id AND EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.status = 'open'));
+FOR INSERT WITH CHECK (auth.uid() = lead_id);
+
+COMMENT ON POLICY "proposals_lead_insert" ON public.proposals IS 
+'Allows authenticated bidding leads to create proposals. Project status validation is handled at the application level.';
 
 DROP POLICY IF EXISTS "proposal_write" ON public.proposals;
 CREATE POLICY "proposals_lead_update" ON public.proposals

@@ -3037,6 +3037,88 @@ export const resolvers = {
       return proposalsWithDetails.filter(p => p.project && p.biddingLead);
     },
 
+    adminPendingProposals: async () => {
+      const supabase = await createClient();
+      
+      // Check if user is admin
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      if (user.user_metadata?.role !== 'admin') {
+        throw new GraphQLError('Forbidden: Admin access required', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Use admin client to bypass RLS
+      const adminClient = createAdminClient();
+
+      // Get only pending_approval proposals
+      const { data: proposals, error } = await adminClient
+        .from('proposals')
+        .select(`
+          id,
+          title,
+          status,
+          budget_estimate,
+          timeline_estimate,
+          submitted_at,
+          lead_id,
+          project_id
+        `)
+        .eq('status', 'pending_approval')
+        .order('submitted_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching pending proposals:', error);
+        throw new GraphQLError('Failed to fetch pending proposals', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR', details: error },
+        });
+      }
+
+      // Get related data
+      const proposalsWithDetails = await Promise.all(
+        (proposals || []).map(async (proposal: any) => {
+          // Get project
+          const { data: project } = await adminClient
+            .from('projects')
+            .select('id, title')
+            .eq('id', proposal.project_id)
+            .single();
+
+          // Get bidding lead user info
+          const { data: { user: leadUser } } = await adminClient.auth.admin.getUserById(proposal.lead_id);
+
+          return {
+            id: proposal.id,
+            title: proposal.title || 'Untitled Proposal',
+            status: proposal.status.toUpperCase(),
+            budgetEstimate: proposal.budget_estimate,
+            timelineEstimate: proposal.timeline_estimate,
+            submissionDate: proposal.submitted_at,
+            project: project ? {
+              id: project.id,
+              title: project.title,
+            } : null,
+            biddingLead: leadUser ? {
+              id: leadUser.id,
+              email: leadUser.email,
+              fullName: leadUser.user_metadata?.full_name || 
+                        leadUser.user_metadata?.name || 
+                        null,
+            } : null,
+            biddingTeam: null,
+          };
+        })
+      );
+
+      return proposalsWithDetails.filter(p => p.project && p.biddingLead);
+    },
+
     // ============================================================================
     // ADMIN TEMPLATE MANAGEMENT QUERIES
     // ============================================================================
@@ -5185,10 +5267,8 @@ export const resolvers = {
             status,
             submitted_at,
             created_at,
-            proposal_versions!inner(
-              budget_estimate,
-              timeline_estimate
-            )
+            budget_estimate,
+            timeline_estimate
           `)
           .eq('lead_id', leadId);
 
@@ -5223,11 +5303,8 @@ export const resolvers = {
         // Calculate total bid value (sum of all budget estimates)
         let totalBidValue = 0;
         allProposals.forEach((p: any) => {
-          if (p.proposal_versions && p.proposal_versions.length > 0) {
-            const latestVersion = p.proposal_versions[p.proposal_versions.length - 1];
-            if (latestVersion.budget_estimate) {
-              totalBidValue += latestVersion.budget_estimate;
-            }
+          if (p.budget_estimate) {
+            totalBidValue += p.budget_estimate;
           }
         });
 
@@ -5293,12 +5370,10 @@ export const resolvers = {
             status,
             submitted_at,
             created_at,
+            budget_estimate,
             projects!inner(
               id,
               title
-            ),
-            proposal_versions!inner(
-              budget_estimate
             )
           `)
           .eq('lead_id', leadId)
@@ -5312,16 +5387,12 @@ export const resolvers = {
         }
 
         const recentProposals = (proposals || []).map((p: any) => {
-          const latestVersion = p.proposal_versions && p.proposal_versions.length > 0
-            ? p.proposal_versions[p.proposal_versions.length - 1]
-            : null;
-
           return {
             id: p.id,
             projectTitle: p.projects?.title || 'Untitled Project',
             status: p.status,
             submittedAt: p.submitted_at || p.created_at,
-            budgetEstimate: latestVersion?.budget_estimate || 0,
+            budgetEstimate: p.budget_estimate || 0,
           };
         });
 
@@ -7357,6 +7428,7 @@ export const resolvers = {
         const errorHints: Record<string, string> = {
           'DUPLICATE_PROPOSAL': 'You have already created a proposal for this project',
           'PROJECT_NOT_FOUND': 'The project you are trying to bid on does not exist or has been deleted',
+          'PROJECT_NOT_OPEN': 'This project is not currently accepting proposals. It may be pending review, closed, or already awarded.',
           'UNAUTHORIZED': 'You do not have permission to create a proposal for this project',
           'WORKSPACE_CREATION_FAILED': 'Failed to create the proposal workspace. Please try again.',
           'UNKNOWN': 'An unexpected error occurred. Please try again or contact support.',
@@ -7365,6 +7437,7 @@ export const resolvers = {
         const errorCodeMap: Record<string, string> = {
           'DUPLICATE_PROPOSAL': 'BAD_USER_INPUT',
           'PROJECT_NOT_FOUND': 'NOT_FOUND',
+          'PROJECT_NOT_OPEN': 'BAD_USER_INPUT',
           'UNAUTHORIZED': 'FORBIDDEN',
           'WORKSPACE_CREATION_FAILED': 'INTERNAL_SERVER_ERROR',
           'UNKNOWN': 'INTERNAL_SERVER_ERROR',
@@ -9325,6 +9398,152 @@ export const resolvers = {
         })),
         createdAt: project.created_at,
         updatedAt: project.updated_at,
+      };
+    },
+
+    // ============================================================================
+    // ADMIN PROPOSAL APPROVAL MUTATIONS
+    // ============================================================================
+
+    adminApproveProposal: async (
+      _: any,
+      { proposalId, notes }: { proposalId: string; notes?: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const role = user.user_metadata?.role;
+      if (role !== 'admin') {
+        throw new GraphQLError('Admin access required', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Call the admin_approve_proposal function
+      const { error } = await supabase.rpc('admin_approve_proposal', {
+        p_proposal_id: proposalId,
+        p_admin_id: user.id,
+        p_notes: notes || null,
+      });
+
+      if (error) {
+        console.error('Failed to approve proposal:', error);
+        throw new GraphQLError('Failed to approve proposal', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR', details: error.message },
+        });
+      }
+
+      // Fetch the updated proposal
+      const { data: proposal, error: fetchError } = await supabase
+        .from('proposals')
+        .select('*')
+        .eq('id', proposalId)
+        .single();
+
+      if (fetchError || !proposal) {
+        throw new GraphQLError('Failed to fetch updated proposal', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      // Log activity
+      await logActivity({
+        userId: user.id,
+        action: 'APPROVE_PROPOSAL',
+        resourceType: 'proposal',
+        resourceId: proposalId,
+        metadata: { notes },
+      });
+
+      return {
+        id: proposal.id,
+        projectId: proposal.project_id,
+        leadId: proposal.lead_id,
+        status: proposal.status?.toUpperCase() || 'APPROVED',
+        content: proposal.content,
+        submittedAt: proposal.submitted_at,
+        createdAt: proposal.created_at,
+        updatedAt: proposal.updated_at,
+      };
+    },
+
+    adminRejectProposal: async (
+      _: any,
+      { proposalId, reason }: { proposalId: string; reason: string }
+    ) => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      const role = user.user_metadata?.role;
+      if (role !== 'admin') {
+        throw new GraphQLError('Admin access required', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      if (!reason.trim()) {
+        throw new GraphQLError('Rejection reason is required', {
+          extensions: { code: 'BAD_USER_INPUT' },
+        });
+      }
+
+      // Call the admin_reject_proposal function
+      const { error } = await supabase.rpc('admin_reject_proposal', {
+        p_proposal_id: proposalId,
+        p_admin_id: user.id,
+        p_reason: reason,
+      });
+
+      if (error) {
+        console.error('Failed to reject proposal:', error);
+        throw new GraphQLError('Failed to reject proposal', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR', details: error.message },
+        });
+      }
+
+      // Fetch the updated proposal
+      const { data: proposal, error: fetchError } = await supabase
+        .from('proposals')
+        .select('*')
+        .eq('id', proposalId)
+        .single();
+
+      if (fetchError || !proposal) {
+        throw new GraphQLError('Failed to fetch updated proposal', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      // Log activity
+      await logActivity({
+        userId: user.id,
+        action: 'REJECT_PROPOSAL',
+        resourceType: 'proposal',
+        resourceId: proposalId,
+        metadata: { reason },
+      });
+
+      return {
+        id: proposal.id,
+        projectId: proposal.project_id,
+        leadId: proposal.lead_id,
+        status: proposal.status?.toUpperCase() || 'REJECTED',
+        content: proposal.content,
+        submittedAt: proposal.submitted_at,
+        createdAt: proposal.created_at,
+        updatedAt: proposal.updated_at,
       };
     },
 

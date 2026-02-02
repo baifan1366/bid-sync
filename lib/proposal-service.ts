@@ -97,6 +97,15 @@ export class ProposalService {
         };
       }
 
+      // Check if project is open for bidding
+      if (project.status !== 'open') {
+        return {
+          success: false,
+          error: `Project is not open for bidding. Current status: ${project.status}`,
+          errorCode: 'PROJECT_NOT_OPEN',
+        };
+      }
+
       // Note: Multiple proposals per project are allowed
       // A bidding leader can create multiple proposals for the same project
       // (e.g., different approaches, different team compositions)
@@ -437,12 +446,13 @@ export class ProposalService {
         };
       }
 
-      // Requirements 13.2 & 13.3: Update status to submitted and record timestamp
+      // Requirements 13.2 & 13.3: Update status to pending_approval and record timestamp
+      // Proposals now require admin approval before clients can see them
       const submittedAt = new Date().toISOString();
       const { data: updatedProposal, error: updateError } = await supabase
         .from('proposals')
         .update({
-          status: 'submitted',
+          status: 'pending_approval',
           submitted_at: submittedAt,
           updated_at: submittedAt,
         })
@@ -459,7 +469,8 @@ export class ProposalService {
         };
       }
 
-      // Requirement 13.4: Send notifications to all stakeholders
+      // Requirement 13.4: Send notifications to stakeholders
+      // Note: Client notification is now sent when admin approves the proposal
       const project = proposal.projects as any;
       const notificationResults = await this.sendSubmissionNotifications(
         proposalId,
@@ -490,9 +501,10 @@ export class ProposalService {
   }
 
   /**
-   * Sends submission notifications to all stakeholders
+   * Sends submission notifications to stakeholders
    * 
-   * Requirement 13.4: Notify client, team members, and admins
+   * Requirement 13.4: Notify team members and admins
+   * Note: Client is NOT notified at submission - only when admin approves
    * 
    * @private
    */
@@ -508,26 +520,7 @@ export class ProposalService {
     const supabase = await createClient();
 
     try {
-      // Notify the client
-      const clientNotification = await NotificationService.createNotification({
-        userId: clientId,
-        type: 'proposal_submitted',
-        title: `New Proposal Submitted for ${projectTitle}`,
-        body: `A bidding team has submitted a proposal for your project "${projectTitle}". Please review it at your earliest convenience.`,
-        data: {
-          proposalId,
-          projectId,
-          projectTitle,
-          leadId,
-        },
-        sendEmail: true,
-      });
-
-      results.push({
-        success: clientNotification.success,
-        recipient: 'client',
-        error: clientNotification.error,
-      });
+      // DO NOT notify the client at submission - they will be notified when admin approves
 
       // Notify all team members
       const { data: proposals } = await supabase
@@ -569,7 +562,7 @@ export class ProposalService {
         }
       }
 
-      // Requirement 10.2, 10.3, 10.5: Notify all admins (in-app only)
+      // Requirement 10.2, 10.3, 10.5: Notify all admins for approval (in-app + email)
       const { data: admins } = await supabase
         .from('users')
         .select('id')
@@ -579,9 +572,9 @@ export class ProposalService {
         for (const admin of admins) {
           const adminNotification = await NotificationService.createNotification({
             userId: admin.id,
-            type: 'proposal_submitted',
-            title: `New Proposal Submitted: ${projectTitle}`,
-            body: `A proposal has been submitted for project "${projectTitle}". Review required.`,
+            type: 'proposal_pending_approval',
+            title: `⏳ Proposal Pending Approval: ${projectTitle}`,
+            body: `A proposal has been submitted for project "${projectTitle}" and requires your approval before the client can see it.`,
             data: {
               proposalId,
               projectId,
@@ -589,7 +582,7 @@ export class ProposalService {
               leadId,
               clientId, // Requirement 10.3: Include relevant entity IDs
             },
-            sendEmail: false, // Requirement 10.5: In-app only for admin proposal notifications
+            sendEmail: true, // Email admins for approval requests
           });
 
           results.push({
@@ -605,7 +598,7 @@ export class ProposalService {
         userId: leadId,
         type: 'proposal_submitted',
         title: `Proposal Successfully Submitted: ${projectTitle}`,
-        body: `Your proposal for "${projectTitle}" has been successfully submitted and is now under review. You will be notified of any status changes.`,
+        body: `Your proposal for "${projectTitle}" has been successfully submitted and is pending admin approval. You will be notified once it's approved and visible to the client.`,
         data: {
           proposalId,
           projectId,
