@@ -94,14 +94,10 @@ export class VersionService {
 
       // Verify user is lead or team member
       const isLead = proposal.lead_id === userId;
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('id')
-        .eq('project_id', proposal.project_id)
-        .eq('user_id', userId)
-        .maybeSingle();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(proposal.project_id, userId);
 
-      if (!isLead && !teamMember) {
+      if (!isLead && !isMember) {
         return {
           success: false,
           error: 'Unauthorized to create version',
@@ -460,14 +456,10 @@ export class VersionService {
 
       // Verify user has permission
       const isLead = proposal.lead_id === userId;
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('id')
-        .eq('project_id', proposal.project_id)
-        .eq('user_id', userId)
-        .maybeSingle();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(proposal.project_id, userId);
 
-      if (!isLead && !teamMember) {
+      if (!isLead && !isMember) {
         return {
           success: false,
           error: 'Unauthorized to restore version',

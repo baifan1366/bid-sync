@@ -530,33 +530,42 @@ export class ProposalService {
       });
 
       // Notify all team members
-      const { data: teamMembers } = await supabase
-        .from('bid_team_members')
-        .select('user_id')
-        .eq('project_id', projectId)
-        .neq('user_id', leadId); // Exclude lead (they know they submitted)
+      const { data: proposals } = await supabase
+        .from('proposals')
+        .select('id')
+        .eq('project_id', projectId);
 
-      if (teamMembers && teamMembers.length > 0) {
-        for (const member of teamMembers) {
-          const memberNotification = await NotificationService.createNotification({
-            userId: member.user_id,
-            type: 'proposal_submitted',
-            title: `Proposal Submitted for ${projectTitle}`,
-            body: `Your team's proposal for "${projectTitle}" has been successfully submitted. You will be notified of any updates.`,
-            data: {
-              proposalId,
-              projectId,
-              projectTitle,
-              leadId,
-            },
-            sendEmail: true,
-          });
+      if (proposals && proposals.length > 0) {
+        const proposalIds = proposals.map(p => p.id);
+        
+        const { data: teamMembers } = await supabase
+          .from('proposal_team_members')
+          .select('user_id')
+          .in('proposal_id', proposalIds)
+          .neq('user_id', leadId); // Exclude lead (they know they submitted)
 
-          results.push({
-            success: memberNotification.success,
-            recipient: `team_member_${member.user_id}`,
-            error: memberNotification.error,
-          });
+        if (teamMembers && teamMembers.length > 0) {
+          for (const member of teamMembers) {
+            const memberNotification = await NotificationService.createNotification({
+              userId: member.user_id,
+              type: 'proposal_submitted',
+              title: `Proposal Submitted for ${projectTitle}`,
+              body: `Your team's proposal for "${projectTitle}" has been successfully submitted. You will be notified of any updates.`,
+              data: {
+                proposalId,
+                projectId,
+                projectTitle,
+                leadId,
+              },
+              sendEmail: true,
+            });
+
+            results.push({
+              success: memberNotification.success,
+              recipient: `team_member_${member.user_id}`,
+              error: memberNotification.error,
+            });
+          }
         }
       }
 

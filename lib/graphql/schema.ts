@@ -1338,7 +1338,7 @@ export const typeDefs = /* GraphQL */ `
   }
 
   input RemoveTeamMemberInput {
-    projectId: ID!
+    proposalId: ID!
     userId: ID!
   }
 

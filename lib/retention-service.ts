@@ -244,32 +244,41 @@ export class RetentionService {
         };
       }
 
-      // Get all team members
-      const { data: teamMembers, error: teamError } = await supabase
-        .from('bid_team_members')
-        .select('user_id')
+      // Get all team members for proposals in this project
+      const { data: proposals } = await supabase
+        .from('proposals')
+        .select('id')
         .eq('project_id', archive.project_id);
-
-      if (teamError) {
-        console.error('Error fetching team members:', teamError);
-      }
 
       // Collect all stakeholder IDs (client + team members)
       const stakeholderIds = new Set<string>();
       stakeholderIds.add(project.client_id);
-      
-      if (teamMembers) {
-        teamMembers.forEach((member) => stakeholderIds.add(member.user_id));
+
+      if (proposals && proposals.length > 0) {
+        const proposalIds = proposals.map(p => p.id);
+        
+        const { data: teamMembers, error: teamError } = await supabase
+          .from('proposal_team_members')
+          .select('user_id')
+          .in('proposal_id', proposalIds);
+
+        if (teamError) {
+          console.error('Error fetching team members:', teamError);
+        }
+        
+        if (teamMembers) {
+          teamMembers.forEach((member) => stakeholderIds.add(member.user_id));
+        }
       }
 
-      // Create notifications for each stakeholder
+      // Format deletion date
       const deletionDate = archive.scheduled_deletion_at 
         ? new Date(archive.scheduled_deletion_at).toLocaleDateString()
         : 'soon';
 
+      // Send notifications to all stakeholders
       const notificationPromises = Array.from(stakeholderIds).map(async (userId) => {
         try {
-          // Create in-app notification
           const { error: notifError } = await supabase
             .from('notifications')
             .insert({

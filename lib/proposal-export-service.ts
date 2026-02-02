@@ -167,10 +167,24 @@ export class ProposalExportService {
       }
 
       // Check if user is the lead or a team member
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
+      const { data: proposals } = await supabase
+        .from('proposals')
         .select('id')
-        .eq('project_id', proposal.project_id)
+        .eq('project_id', proposal.project_id);
+
+      if (!proposals || proposals.length === 0) {
+        return {
+          success: false,
+          error: 'Access denied: You are not a member of this proposal team',
+        };
+      }
+
+      const proposalIds = proposals.map(p => p.id);
+
+      const { data: teamMember } = await supabase
+        .from('proposal_team_members')
+        .select('id')
+        .in('proposal_id', proposalIds)
         .eq('user_id', validated.userId)
         .maybeSingle();
 
@@ -467,14 +481,26 @@ export class ProposalExportService {
   private static async fetchTeamMembers(projectId: string): Promise<TeamMemberData[]> {
     const supabase = await createClient();
 
+    // Get all proposals for this project
+    const { data: proposals } = await supabase
+      .from('proposals')
+      .select('id')
+      .eq('project_id', projectId);
+
+    if (!proposals || proposals.length === 0) {
+      return [];
+    }
+
+    const proposalIds = proposals.map(p => p.id);
+
     const { data: members } = await supabase
-      .from('bid_team_members')
+      .from('proposal_team_members')
       .select(`
         user_id,
         role,
-        created_at
+        joined_at
       `)
-      .eq('project_id', projectId);
+      .in('proposal_id', proposalIds);
 
     if (!members || members.length === 0) {
       return [];
@@ -542,7 +568,7 @@ export class ProposalExportService {
       role: member.role,
       sectionsAssigned: sectionStats[member.user_id]?.assigned || 0,
       sectionsCompleted: sectionStats[member.user_id]?.completed || 0,
-      joinedAt: member.created_at,
+      joinedAt: member.joined_at,
     }));
   }
 

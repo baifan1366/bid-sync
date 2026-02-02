@@ -125,14 +125,10 @@ export class DeliverableService {
       }
 
       // Verify user is authorized (team member)
-      const { data: teamMember, error: authError } = await supabase
-        .from('bid_team_members')
-        .select('user_id')
-        .eq('project_id', input.projectId)
-        .eq('user_id', userId)
-        .maybeSingle();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(input.projectId, userId);
 
-      if (authError || !teamMember) {
+      if (!isMember) {
         await LoggingService.logAuthorizationFailure(
           'uploadDeliverable',
           userId,
@@ -436,14 +432,10 @@ export class DeliverableService {
       }
 
       // Verify user is authorized (must be uploader or team member)
-      const { data: teamMember, error: authError } = await supabase
-        .from('bid_team_members')
-        .select('user_id')
-        .eq('project_id', deliverable.project_id)
-        .eq('user_id', userId)
-        .maybeSingle();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(deliverable.project_id, userId);
 
-      if (authError || !teamMember) {
+      if (!isMember) {
         await LoggingService.logAuthorizationFailure(
           'deleteDeliverable',
           userId,

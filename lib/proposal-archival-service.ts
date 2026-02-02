@@ -134,10 +134,24 @@ export class ProposalArchivalService {
       }
 
       // Check if user is the lead or a team member
+      const { data: proposals } = await supabase
+        .from('proposals')
+        .select('id')
+        .eq('project_id', proposal.project_id);
+
+      if (!proposals || proposals.length === 0) {
+        return {
+          success: false,
+          error: 'Only the proposal lead can archive proposals',
+        };
+      }
+
+      const proposalIds = proposals.map(p => p.id);
+
       const { data: teamMember } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('id, role')
-        .eq('project_id', proposal.project_id)
+        .in('proposal_id', proposalIds)
         .eq('user_id', validated.userId)
         .maybeSingle();
 

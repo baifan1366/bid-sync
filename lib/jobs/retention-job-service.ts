@@ -135,10 +135,59 @@ export class RetentionJobService {
         return { success: false, notificationsSent: 0, error: 'Project not found' };
       }
 
-      const { data: teamMembers } = await supabase
-        .from('bid_team_members')
-        .select('user_id')
+      // Get all proposals for this project
+      const { data: proposals } = await supabase
+        .from('proposals')
+        .select('id')
         .eq('project_id', archive.project_id);
+
+      if (!proposals || proposals.length === 0) {
+        // Only notify client if no proposals
+        const stakeholderIds = new Set<string>();
+        stakeholderIds.add(project.client_id);
+        
+        const deletionDate = archive.scheduled_deletion_at 
+          ? new Date(archive.scheduled_deletion_at).toLocaleDateString()
+          : 'soon';
+
+        const notificationPromises = Array.from(stakeholderIds).map(async (userId) => {
+          try {
+            const { error: notifError } = await supabase
+              .from('notifications')
+              .insert({
+                user_id: userId,
+                type: 'archive_deletion_scheduled',
+                title: 'Archive Scheduled for Deletion',
+                message: `The archive for project "${project.title}" (${archive.archive_identifier}) is scheduled for deletion on ${deletionDate}. If you need to retain this data, please contact support to apply a legal hold.`,
+                metadata: {
+                  projectId: archive.project_id,
+                  archiveId: archiveId,
+                  archiveIdentifier: archive.archive_identifier,
+                  scheduledDeletionAt: archive.scheduled_deletion_at,
+                },
+              });
+
+            return { success: !notifError };
+          } catch (error) {
+            console.error('Error sending notification:', error);
+            return { success: false };
+          }
+        });
+
+        const results = await Promise.allSettled(notificationPromises);
+        const successCount = results.filter(
+          (r) => r.status === 'fulfilled' && r.value.success
+        ).length;
+
+        return { success: true, notificationsSent: successCount };
+      }
+
+      const proposalIds = proposals.map(p => p.id);
+
+      const { data: teamMembers } = await supabase
+        .from('proposal_team_members')
+        .select('user_id')
+        .in('proposal_id', proposalIds);
 
       const stakeholderIds = new Set<string>();
       stakeholderIds.add(project.client_id);

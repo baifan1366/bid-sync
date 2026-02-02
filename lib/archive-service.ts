@@ -916,16 +916,25 @@ export class ArchiveService {
         return true;
       }
 
-      // Check if user is a team member
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('user_id')
-        .eq('project_id', projectId)
-        .eq('user_id', userId)
-        .maybeSingle();
+      // Check if user is a team member of any proposal for this project
+      const { data: proposals } = await supabase
+        .from('proposals')
+        .select('id')
+        .eq('project_id', projectId);
 
-      if (teamMember) {
-        return true;
+      if (proposals && proposals.length > 0) {
+        const proposalIds = proposals.map(p => p.id);
+        
+        const { data: teamMember } = await supabase
+          .from('proposal_team_members')
+          .select('user_id')
+          .in('proposal_id', proposalIds)
+          .eq('user_id', userId)
+          .maybeSingle();
+
+        if (teamMember) {
+          return true;
+        }
       }
 
       return false;

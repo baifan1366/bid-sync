@@ -107,31 +107,46 @@ export function SectionBasedEditorClient({ documentId }: SectionBasedEditorClien
         .single()
 
       if (proposal) {
-        // Get team members
-        const { data: members } = await supabase
-          .from('proposal_team_members')
-          .select(`
-            user_id,
-            role,
-            users:user_id (
-              id,
-              raw_user_meta_data
-            )
-          `)
-          .eq('proposal_id', proposal.id)
+        // Get team members via GraphQL using getTeamMembers
+        // Note: getTeamMembers now works with proposals (not projects)
+        const response = await fetch('/api/graphql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: `
+              query GetTeamMembers($projectId: ID) {
+                getTeamMembers(projectId: $projectId) {
+                  userId
+                  user {
+                    id
+                    email
+                    fullName
+                  }
+                  role
+                }
+              }
+            `,
+            variables: { projectId: workspace.project_id },
+          }),
+        })
 
-        if (members) {
-          const teamMembersList = members.map((member: any) => ({
-            id: member.user_id,
-            name: member.users?.raw_user_meta_data?.name || 'Unknown',
-            email: member.users?.raw_user_meta_data?.email || '',
+        const result = await response.json()
+
+        if (result.data?.getTeamMembers) {
+          const teamMembersList = result.data.getTeamMembers.map((member: any) => ({
+            id: member.userId,
+            name: member.user?.fullName || member.user?.email?.split('@')[0] || 'Unknown',
+            email: member.user?.email || '',
+            role: member.role,
           }))
 
           setTeamMembers(teamMembersList)
 
           // Check if current user is lead
-          const currentMember = members.find((m: any) => m.user_id === user?.id)
-          setIsLead(currentMember?.role === 'lead')
+          const currentMember = result.data.getTeamMembers.find(
+            (m: any) => m.userId === user?.id
+          )
+          setIsLead(currentMember?.role?.toLowerCase() === 'lead')
         }
       }
     } catch (err) {

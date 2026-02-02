@@ -155,11 +155,28 @@ export class AnalyticsService {
   static async getTeamMetrics(projectId: string): Promise<TeamMetrics> {
     const supabase = await createClient();
 
-    // Get all team members for the project
-    const { data: teamMembers, error: teamError } = await supabase
-      .from('bid_team_members')
-      .select('user_id, role, created_at')
+    // Get all proposals for this project
+    const { data: proposals } = await supabase
+      .from('proposals')
+      .select('id')
       .eq('project_id', projectId);
+
+    if (!proposals || proposals.length === 0) {
+      return {
+        totalMembers: 0,
+        activeMembers: 0,
+        averageContribution: 0,
+        topContributors: [],
+      };
+    }
+
+    const proposalIds = proposals.map(p => p.id);
+
+    // Get all team members for the proposals
+    const { data: teamMembers, error: teamError } = await supabase
+      .from('proposal_team_members')
+      .select('user_id, role, joined_at')
+      .in('proposal_id', proposalIds);
 
     if (teamError) {
       console.error('Error fetching team members:', teamError);
@@ -174,7 +191,7 @@ export class AnalyticsService {
         return {
           user_id: member.user_id,
           role: member.role,
-          created_at: member.created_at,
+          created_at: member.joined_at,
           user: userData?.user ? {
             id: userData.user.id,
             email: userData.user.email,
@@ -187,22 +204,6 @@ export class AnalyticsService {
     if (!teamMembersWithUsers || teamMembersWithUsers.length === 0) {
       return {
         totalMembers: 0,
-        activeMembers: 0,
-        averageContribution: 0,
-        topContributors: [],
-      };
-    }
-
-    // Get proposal for this project
-    const { data: proposal } = await supabase
-      .from('proposals')
-      .select('id')
-      .eq('project_id', projectId)
-      .single();
-
-    if (!proposal) {
-      return {
-        totalMembers: teamMembersWithUsers.length,
         activeMembers: 0,
         averageContribution: 0,
         topContributors: [],

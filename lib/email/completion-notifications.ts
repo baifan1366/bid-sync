@@ -186,11 +186,26 @@ export async function sendTeamCompletionNotifications(
   try {
     const supabase = await createClient();
 
-    // Get all team members for this project
-    const { data: teamMembers, error: teamError } = await supabase
-      .from('bid_team_members')
-      .select('user_id, users!inner(email, full_name)')
+    // Get all proposals for this project
+    const { data: proposals } = await supabase
+      .from('proposals')
+      .select('id')
       .eq('project_id', params.projectId);
+
+    if (!proposals || proposals.length === 0) {
+      return {
+        success: true,
+        notificationsSent: 0,
+      };
+    }
+
+    const proposalIds = proposals.map(p => p.id);
+
+    // Get all team members for these proposals
+    const { data: teamMembers, error: teamError } = await supabase
+      .from('proposal_team_members')
+      .select('user_id, users!inner(email, full_name)')
+      .in('proposal_id', proposalIds);
 
     if (teamError) {
       console.error('Error fetching team members:', teamError);

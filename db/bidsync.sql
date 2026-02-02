@@ -73,37 +73,10 @@ FROM auth.users WHERE email = 'client@example.com' LIMIT 1;
 
 
 -- ============================================================
--- 4. BID TEAMS (DEPRECATED - Use proposal_team_members instead)
+-- 4. PROPOSAL TEAM MEMBERS
 -- ============================================================
-CREATE TABLE public.bid_team_members (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL CHECK (role IN ('lead', 'member')),
-    created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX idx_bid_team_project ON public.bid_team_members(project_id);
-CREATE INDEX idx_bid_team_user ON public.bid_team_members(user_id);
-
-COMMENT ON TABLE public.bid_team_members IS 'DEPRECATED: Use proposal_team_members instead. Kept for legacy support.';
-
--- Seed team (lead + member) - for backward compatibility
-INSERT INTO public.bid_team_members (project_id, user_id, role)
-SELECT p.id, u.id, 'lead'
-FROM projects p, auth.users u
-WHERE u.email = 'lead@example.com'
-LIMIT 1;
-
-INSERT INTO public.bid_team_members (project_id, user_id, role)
-SELECT p.id, u.id, 'member'
-FROM projects p, auth.users u
-WHERE u.email = 'member@example.com'
-LIMIT 1;
-
-
--- ============================================================
--- 4B. PROPOSAL TEAM MEMBERS (NEW - Correct Architecture)
+-- NOTE: Team members belong to proposals, not projects.
+-- This is the correct architecture for team management.
 -- ============================================================
 CREATE TABLE public.proposal_team_members (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -300,7 +273,7 @@ ALTER TABLE public.proposals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.proposal_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bid_team_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.proposal_team_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.checklist_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 
@@ -322,7 +295,7 @@ CREATE POLICY "proposal_read" ON public.proposals
 FOR SELECT USING (
     auth.uid() = lead_id
     OR EXISTS (
-        SELECT 1 FROM bid_team_members m WHERE m.user_id = auth.uid() AND m.project_id = project_id
+        SELECT 1 FROM proposal_team_members m WHERE m.user_id = auth.uid() AND m.proposal_id = id
     )
     OR EXISTS (
         SELECT 1 FROM projects p WHERE p.id = project_id AND p.client_id = auth.uid()
@@ -339,7 +312,7 @@ CREATE POLICY "versions_read" ON public.proposal_versions
 FOR SELECT USING (
     EXISTS (SELECT 1 FROM proposals p WHERE p.id = proposal_id AND (
         auth.uid() = p.lead_id OR
-        EXISTS (SELECT 1 FROM bid_team_members m WHERE m.user_id = auth.uid() AND m.project_id = p.project_id)
+        EXISTS (SELECT 1 FROM proposal_team_members m WHERE m.user_id = auth.uid() AND m.proposal_id = p.id)
     ))
 );
 
@@ -347,7 +320,7 @@ CREATE POLICY "versions_write" ON public.proposal_versions
 FOR INSERT WITH CHECK (
     EXISTS (SELECT 1 FROM proposals p WHERE p.id = proposal_id AND (
         auth.uid() = p.lead_id OR
-        EXISTS (SELECT 1 FROM bid_team_members m WHERE m.user_id = auth.uid() AND m.project_id = p.project_id)
+        EXISTS (SELECT 1 FROM proposal_team_members m WHERE m.user_id = auth.uid() AND m.proposal_id = p.id)
     ))
 );
 
@@ -357,8 +330,8 @@ CREATE POLICY "comments_read" ON public.comments
 FOR SELECT USING (
     visibility = 'public'
     OR EXISTS (
-        SELECT 1 FROM proposals p, bid_team_members m
-        WHERE p.id = proposal_id AND m.project_id = p.project_id AND m.user_id = auth.uid()
+        SELECT 1 FROM proposal_team_members m
+        WHERE m.proposal_id = proposal_id AND m.user_id = auth.uid()
     )
 );
 
@@ -460,30 +433,6 @@ WITH CHECK (
     )
 );
 
--- LEGACY: Bidding leads can view invitations for their projects
-CREATE POLICY "team_invitations_lead_select" ON public.team_invitations
-FOR SELECT
-USING (
-    project_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = team_invitations.project_id
-        AND btm.user_id = auth.uid()
-        AND btm.role = 'lead'
-    )
-);
-
--- LEGACY: Bidding leads can create invitations for their projects
-CREATE POLICY "team_invitations_lead_insert" ON public.team_invitations
-FOR INSERT
-WITH CHECK (
-    project_id IS NOT NULL AND EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = team_invitations.project_id
-        AND btm.user_id = auth.uid()
-        AND btm.role = 'lead'
-    )
-);
-
 -- Anyone can view invitations by code or token (for validation)
 CREATE POLICY "team_invitations_public_select_by_code_token" ON public.team_invitations
 FOR SELECT
@@ -563,13 +512,13 @@ CREATE POLICY "chat_messages_client_insert" ON public.chat_messages
 FOR INSERT WITH CHECK (sender_id = auth.uid() AND project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid()));
 
 CREATE POLICY "chat_messages_team_select" ON public.chat_messages
-FOR SELECT USING (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid()));
+FOR SELECT USING (proposal_id IN (SELECT id FROM public.proposal_team_members WHERE user_id = auth.uid()));
 
 CREATE POLICY "chat_messages_team_insert" ON public.chat_messages
-FOR INSERT WITH CHECK (sender_id = auth.uid() AND proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid()));
+FOR INSERT WITH CHECK (sender_id = auth.uid() AND proposal_id IN (SELECT proposal_id FROM public.proposal_team_members WHERE user_id = auth.uid()));
 
 CREATE POLICY "chat_messages_mark_read" ON public.chat_messages
-FOR UPDATE USING ((project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid())) OR (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid())));
+FOR UPDATE USING ((project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid())) OR (proposal_id IN (SELECT proposal_id FROM public.proposal_team_members WHERE user_id = auth.uid())));
 
 -- RLS Policies for Proposal Decisions
 CREATE POLICY "proposal_decisions_client_select" ON public.proposal_decisions
@@ -579,7 +528,7 @@ CREATE POLICY "proposal_decisions_client_insert" ON public.proposal_decisions
 FOR INSERT WITH CHECK (decided_by = auth.uid() AND project_id IN (SELECT id FROM public.projects WHERE client_id = auth.uid()));
 
 CREATE POLICY "proposal_decisions_team_select" ON public.proposal_decisions
-FOR SELECT USING (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid()));
+FOR SELECT USING (proposal_id IN (SELECT proposal_id FROM public.proposal_team_members WHERE user_id = auth.uid()));
 
 -- ============================================================
 -- MIGRATION 003: ADMIN MANAGEMENT
@@ -1728,8 +1677,8 @@ CREATE INDEX IF NOT EXISTS idx_notification_queue_old_notifications ON public.no
 CREATE INDEX IF NOT EXISTS idx_notification_queue_email_pending ON public.notification_queue(sent_via_email, created_at) WHERE sent_via_email = false;
 
 -- Additional indexes for bidding leader features
-CREATE INDEX IF NOT EXISTS idx_bid_team_members_project_role ON public.bid_team_members(project_id, role);
-CREATE INDEX IF NOT EXISTS idx_bid_team_members_user_role ON public.bid_team_members(user_id, role);
+CREATE INDEX IF NOT EXISTS idx_proposal_team_members_proposal_role ON public.proposal_team_members(proposal_id, role);
+CREATE INDEX IF NOT EXISTS idx_proposal_team_members_user_role ON public.proposal_team_members(user_id, role);
 CREATE INDEX IF NOT EXISTS idx_proposals_lead_status ON public.proposals(lead_id, status);
 CREATE INDEX IF NOT EXISTS idx_proposals_project_status ON public.proposals(project_id, status);
 CREATE INDEX IF NOT EXISTS idx_proposals_submitted ON public.proposals(submitted_at DESC) WHERE submitted_at IS NOT NULL;
@@ -1815,9 +1764,8 @@ BEGIN
     
     SELECT COUNT(DISTINCT user_id)
     INTO v_team_size
-    FROM public.bid_team_members btm
-    JOIN public.proposals p ON p.project_id = btm.project_id
-    WHERE p.id = p_proposal_id;
+    FROM public.proposal_team_members
+    WHERE proposal_id = p_proposal_id;
     
     SELECT COUNT(*)
     INTO v_sections_count

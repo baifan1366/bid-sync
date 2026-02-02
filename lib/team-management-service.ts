@@ -24,17 +24,17 @@ const JoinTeamInputSchema = z.object({
 })
 
 const RemoveTeamMemberInputSchema = z.object({
-  projectId: z.string().uuid('Invalid project ID'),
+  proposalId: z.string().uuid('Invalid proposal ID'),
   userId: z.string().uuid('Invalid user ID'),
   removedBy: z.string().uuid('Invalid remover ID'),
 })
 
 const GetTeamMembersInputSchema = z.object({
-  projectId: z.string().uuid('Invalid project ID'),
+  proposalId: z.string().uuid('Invalid proposal ID'),
 })
 
 const GetTeamStatisticsInputSchema = z.object({
-  projectId: z.string().uuid('Invalid project ID'),
+  proposalId: z.string().uuid('Invalid proposal ID'),
 })
 
 /**
@@ -47,17 +47,17 @@ export interface JoinTeamInput {
 }
 
 export interface RemoveTeamMemberInput {
-  projectId: string
+  proposalId: string
   userId: string
   removedBy: string
 }
 
 export interface GetTeamMembersInput {
-  projectId: string
+  proposalId: string
 }
 
 export interface GetTeamStatisticsInput {
-  projectId: string
+  proposalId: string
 }
 
 export interface TeamMember {
@@ -183,11 +183,19 @@ export class TeamManagementService {
         }
       }
 
-      // Check if user is already a team member
+      // Ensure invitation has proposal_id (new correct approach)
+      if (!invitation.proposal_id) {
+        return {
+          success: false,
+          error: 'Invalid invitation: missing proposal information',
+        }
+      }
+
+      // Check if user is already a team member of this proposal
       const { data: existingMember, error: memberCheckError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('id')
-        .eq('project_id', invitation.project_id)
+        .eq('proposal_id', invitation.proposal_id)
         .eq('user_id', validated.userId)
         .maybeSingle()
 
@@ -206,13 +214,13 @@ export class TeamManagementService {
         }
       }
 
-      // Add user to team with 'member' role
+      // Add user to proposal team with 'member' role
       // Use admin client to bypass RLS for team member insertion
       const adminClient = createAdminClient()
       const { data: teamMember, error: createError } = await adminClient
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .insert({
-          project_id: invitation.project_id,
+          proposal_id: invitation.proposal_id,
           user_id: validated.userId,
           role: 'member',
         })
@@ -238,27 +246,34 @@ export class TeamManagementService {
           .eq('id', validated.invitationId)
       }
 
+      // Get proposal details to get project_id
+      const { data: proposal } = await supabase
+        .from('proposals')
+        .select('project_id')
+        .eq('id', invitation.proposal_id)
+        .single()
+
       // Transform database response to TeamMember type
       const result: TeamMember = {
         id: teamMember.id,
-        projectId: teamMember.project_id,
+        projectId: proposal?.project_id || '',
         userId: teamMember.user_id,
         role: teamMember.role as 'lead' | 'member',
-        joinedAt: teamMember.created_at,
+        joinedAt: teamMember.joined_at,
       }
 
       // Get project details for notifications
       const { data: project } = await supabase
         .from('projects')
         .select('title, client_id')
-        .eq('id', invitation.project_id)
+        .eq('id', proposal?.project_id)
         .single()
 
-      // Get bidding lead(s) for this project
+      // Get bidding lead(s) for this proposal
       const { data: leads } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('user_id')
-        .eq('project_id', invitation.project_id)
+        .eq('proposal_id', invitation.proposal_id)
         .eq('role', 'lead')
 
       // Get new member's user details
@@ -277,7 +292,8 @@ export class TeamManagementService {
             title: 'New Team Member Joined',
             body: `${newMemberUser?.name || newMemberUser?.email || 'A new member'} has joined your team for ${project?.title || 'the project'}`,
             data: {
-              projectId: invitation.project_id,
+              projectId: proposal?.project_id,
+              proposalId: invitation.proposal_id,
               teamMemberId: teamMember.id,
               newMemberUserId: validated.userId,
               newMemberName: newMemberUser?.name,
@@ -298,7 +314,8 @@ export class TeamManagementService {
         title: 'Welcome to the Team!',
         body: `You have successfully joined the team for ${project?.title || 'the project'}`,
         data: {
-          projectId: invitation.project_id,
+          projectId: proposal?.project_id,
+          proposalId: invitation.proposal_id,
           teamMemberId: teamMember.id,
           projectTitle: project?.title,
           role: 'member',
@@ -346,11 +363,25 @@ export class TeamManagementService {
 
       const supabase = await createClient()
 
-      // Check if remover is a bidding lead for this project
+      // Get proposal details to get project_id
+      const { data: proposal, error: proposalError } = await supabase
+        .from('proposals')
+        .select('project_id, lead_id')
+        .eq('id', validated.proposalId)
+        .single()
+
+      if (proposalError || !proposal) {
+        return {
+          success: false,
+          error: 'Proposal not found',
+        }
+      }
+
+      // Check if remover is a bidding lead for this proposal
       const { data: removerMember, error: removerError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('role')
-        .eq('project_id', validated.projectId)
+        .eq('proposal_id', validated.proposalId)
         .eq('user_id', validated.removedBy)
         .eq('role', 'lead')
         .maybeSingle()
@@ -358,15 +389,15 @@ export class TeamManagementService {
       if (removerError || !removerMember) {
         return {
           success: false,
-          error: 'Only bidding leads can remove team members',
+          error: 'Only proposal leads can remove team members',
         }
       }
 
       // Check if user to remove exists in the team
       const { data: memberToRemove, error: memberError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('id, role')
-        .eq('project_id', validated.projectId)
+        .eq('proposal_id', validated.proposalId)
         .eq('user_id', validated.userId)
         .maybeSingle()
 
@@ -380,9 +411,9 @@ export class TeamManagementService {
       // Prevent removing the last lead
       if (memberToRemove.role === 'lead') {
         const { data: leadCount, error: countError } = await supabase
-          .from('bid_team_members')
+          .from('proposal_team_members')
           .select('id', { count: 'exact', head: true })
-          .eq('project_id', validated.projectId)
+          .eq('proposal_id', validated.proposalId)
           .eq('role', 'lead')
 
         if (countError) {
@@ -401,56 +432,38 @@ export class TeamManagementService {
         }
       }
 
-      // Get all proposals for this project
-      const { data: proposals, error: proposalsError } = await supabase
-        .from('proposals')
-        .select('id')
-        .eq('project_id', validated.projectId)
-
-      if (proposalsError) {
-        console.error('Failed to get proposals:', proposalsError)
-        return {
-          success: false,
-          error: 'Failed to retrieve proposals',
-        }
-      }
-
       // Reassign all sections assigned to this user to unassigned status
-      if (proposals && proposals.length > 0) {
-        const proposalIds = proposals.map((p) => p.id)
+      // Get workspace documents for this proposal
+      const { data: workspaces, error: workspacesError } = await supabase
+        .from('workspaces')
+        .select('id')
+        .eq('project_id', proposal.project_id)
 
-        // Get workspace documents for these proposals
-        const { data: workspaces, error: workspacesError } = await supabase
-          .from('workspaces')
+      if (!workspacesError && workspaces && workspaces.length > 0) {
+        const workspaceIds = workspaces.map((w) => w.id)
+
+        // Get workspace documents
+        const { data: documents, error: documentsError } = await supabase
+          .from('workspace_documents')
           .select('id')
-          .eq('project_id', validated.projectId)
+          .in('workspace_id', workspaceIds)
 
-        if (!workspacesError && workspaces && workspaces.length > 0) {
-          const workspaceIds = workspaces.map((w) => w.id)
+        if (!documentsError && documents && documents.length > 0) {
+          const documentIds = documents.map((d) => d.id)
 
-          // Get workspace documents
-          const { data: documents, error: documentsError } = await supabase
-            .from('workspace_documents')
-            .select('id')
-            .in('workspace_id', workspaceIds)
+          // Update sections assigned to this user
+          const { error: updateError } = await supabase
+            .from('document_sections')
+            .update({
+              assigned_to: null,
+              status: 'not_started',
+            })
+            .in('document_id', documentIds)
+            .eq('assigned_to', validated.userId)
 
-          if (!documentsError && documents && documents.length > 0) {
-            const documentIds = documents.map((d) => d.id)
-
-            // Update sections assigned to this user
-            const { error: updateError } = await supabase
-              .from('document_sections')
-              .update({
-                assigned_to: null,
-                status: 'not_started',
-              })
-              .in('document_id', documentIds)
-              .eq('assigned_to', validated.userId)
-
-            if (updateError) {
-              console.error('Failed to reassign sections:', updateError)
-              // Continue with removal even if reassignment fails
-            }
+          if (updateError) {
+            console.error('Failed to reassign sections:', updateError)
+            // Continue with removal even if reassignment fails
           }
         }
       }
@@ -459,12 +472,12 @@ export class TeamManagementService {
       const { data: project } = await supabase
         .from('projects')
         .select('title')
-        .eq('id', validated.projectId)
+        .eq('id', proposal.project_id)
         .single()
 
       // Remove the team member
       const { error: deleteError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .delete()
         .eq('id', memberToRemove.id)
 
@@ -483,7 +496,8 @@ export class TeamManagementService {
         title: 'Removed from Team',
         body: `You have been removed from the team for ${project?.title || 'the project'}`,
         data: {
-          projectId: validated.projectId,
+          proposalId: validated.proposalId,
+          projectId: proposal.project_id,
           projectTitle: project?.title,
           removedBy: validated.removedBy,
         },
@@ -512,7 +526,7 @@ export class TeamManagementService {
   }
 
   /**
-   * Get all team members for a project
+   * Get all team members for a proposal
    * Includes user details, assigned sections, and contribution statistics
    * 
    * Requirements: 5.1, 5.2
@@ -529,18 +543,32 @@ export class TeamManagementService {
 
       const supabase = await createClient()
 
+      // Get proposal to get project_id
+      const { data: proposal, error: proposalError } = await supabase
+        .from('proposals')
+        .select('project_id')
+        .eq('id', validated.proposalId)
+        .single()
+
+      if (proposalError || !proposal) {
+        return {
+          success: false,
+          error: 'Proposal not found',
+        }
+      }
+
       // Get all team members with user details
       const { data: members, error: membersError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select(`
           id,
-          project_id,
+          proposal_id,
           user_id,
           role,
-          created_at
+          joined_at
         `)
-        .eq('project_id', validated.projectId)
-        .order('created_at', { ascending: true })
+        .eq('proposal_id', validated.proposalId)
+        .order('joined_at', { ascending: true })
 
       if (membersError) {
         console.error('Failed to get team members:', membersError)
@@ -568,7 +596,7 @@ export class TeamManagementService {
       const { data: workspaces, error: workspacesError } = await supabase
         .from('workspaces')
         .select('id')
-        .eq('project_id', validated.projectId)
+        .eq('project_id', proposal.project_id)
 
       let sectionsData: any[] = []
       if (!workspacesError && workspaces && workspaces.length > 0) {
@@ -618,10 +646,10 @@ export class TeamManagementService {
 
         return {
           id: member.id,
-          projectId: member.project_id,
+          projectId: proposal.project_id,
           userId: member.user_id,
           role: member.role as 'lead' | 'member',
-          joinedAt: member.created_at,
+          joinedAt: member.joined_at,
           user: user
             ? {
                 email: user.email,
@@ -658,7 +686,7 @@ export class TeamManagementService {
   }
 
   /**
-   * Get team statistics for a project
+   * Get team statistics for a proposal
    * Calculates aggregate metrics including member counts and contribution stats
    * 
    * Requirements: 5.5
@@ -675,11 +703,25 @@ export class TeamManagementService {
 
       const supabase = await createClient()
 
+      // Get proposal to get project_id
+      const { data: proposal, error: proposalError } = await supabase
+        .from('proposals')
+        .select('project_id')
+        .eq('id', validated.proposalId)
+        .single()
+
+      if (proposalError || !proposal) {
+        return {
+          success: false,
+          error: 'Proposal not found',
+        }
+      }
+
       // Get all team members
       const { data: members, error: membersError } = await supabase
-        .from('bid_team_members')
+        .from('proposal_team_members')
         .select('id, user_id, role')
-        .eq('project_id', validated.projectId)
+        .eq('proposal_id', validated.proposalId)
 
       if (membersError) {
         console.error('Failed to get team members:', membersError)
@@ -712,7 +754,7 @@ export class TeamManagementService {
       const { data: workspaces, error: workspacesError } = await supabase
         .from('workspaces')
         .select('id')
-        .eq('project_id', validated.projectId)
+        .eq('project_id', proposal.project_id)
 
       let totalSectionsAssigned = 0
       let totalSectionsCompleted = 0

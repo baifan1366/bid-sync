@@ -16,6 +16,7 @@ import { SectionLockManager } from '@/lib/section-lock-service';
 import { ProgressTrackerService } from '@/lib/progress-tracker-service';
 import { SectionManagementService } from '@/lib/section-management-service';
 import { ProposalService } from '@/lib/proposal-service';
+import { RetentionService } from '@/lib/retention-service';
 import { sanitizeSearchInput } from '@/lib/validation-utils';
 
 // ============================================================
@@ -425,21 +426,13 @@ export const resolvers = {
       // Build proposal summaries
       const adminClient = createAdminClient();
       const proposalSummaries = await Promise.all((proposals || []).map(async (proposal: any) => {
-        // Get team members for this proposal - prefer proposal_team_members (new), fallback to bid_team_members (legacy)
+        // Get team members for this proposal from proposal_team_members
         const { data: proposalTeamMembers } = await supabase
           .from('proposal_team_members')
           .select('user_id, role')
           .eq('proposal_id', proposal.id);
         
-        const { data: bidTeamMembers } = await supabase
-          .from('bid_team_members')
-          .select('user_id, role')
-          .eq('project_id', proposal.project_id);
-        
-        // Use proposal_team_members if available, otherwise use bid_team_members
-        const teamMembers = (proposalTeamMembers && proposalTeamMembers.length > 0) 
-          ? proposalTeamMembers 
-          : bidTeamMembers;
+        const teamMembers = proposalTeamMembers || [];
         
         // Get lead info - first check proposal's lead_id, then look in team members
         const leadMember = teamMembers?.find((m: any) => m.role === 'lead');
@@ -577,16 +570,8 @@ export const resolvers = {
         .eq('proposal_id', proposalId)
         .eq('user_id', user.id)
         .maybeSingle();
-      
-      // Fallback to bid_team_members (legacy)
-      const { data: bidTeamMember } = await supabase
-        .from('bid_team_members')
-        .select('*')
-        .eq('project_id', proposal.project_id)
-        .eq('user_id', user.id)
-        .maybeSingle();
 
-      if (!isClient && !isLead && !proposalTeamMember && !bidTeamMember) {
+      if (!isClient && !isLead && !proposalTeamMember) {
         throw createDetailedError('Forbidden: You do not have access to this proposal', 'FORBIDDEN', {
           operation: 'proposalDetail.authorization',
           userId: user.id,
@@ -595,21 +580,13 @@ export const resolvers = {
         });
       }
 
-      // Fetch team members - prefer proposal_team_members, fallback to bid_team_members
+      // Fetch team members from proposal_team_members
       const { data: proposalTeamMembers } = await supabase
         .from('proposal_team_members')
         .select('*')
         .eq('proposal_id', proposalId);
 
-      const { data: bidTeamMembers } = await supabase
-        .from('bid_team_members')
-        .select('*')
-        .eq('project_id', proposal.project_id);
-
-      // Use proposal_team_members if available, otherwise use bid_team_members
-      const teamMembersData = (proposalTeamMembers && proposalTeamMembers.length > 0) 
-        ? proposalTeamMembers 
-        : bidTeamMembers;
+      const teamMembersData = proposalTeamMembers || [];
 
       const adminClient = createAdminClient();
       
@@ -1475,14 +1452,10 @@ export const resolvers = {
       const isClient = project.client_id === user.id;
       
       // Check if user is a team member with a proposal for this project
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('*')
-        .eq('project_id', projectId)
-        .eq('user_id', user.id)
-        .single();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(projectId, user.id);
 
-      if (!isClient && !teamMember) {
+      if (!isClient && !isMember) {
         throw new GraphQLError('Forbidden: You do not have access to this project', {
           extensions: { code: 'FORBIDDEN' },
         });
@@ -1713,15 +1686,11 @@ export const resolvers = {
           workspace = result.data;
           error = result.error;
         } else {
-          // Fallback to bid_team_members (legacy)
-          const { data: bidTeamMember } = await supabase
-            .from('bid_team_members')
-            .select('*')
-            .eq('project_id', projectId)
-            .eq('user_id', user.id)
-            .maybeSingle();
+          // Check if user is a team member via proposal_team_members
+          const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+          const { isMember, proposalId } = await checkProjectTeamMembership(projectId, user.id);
 
-          if (bidTeamMember) {
+          if (isMember && proposalId) {
             const result = await supabase
               .from('workspaces')
               .select('*')
@@ -3029,27 +2998,18 @@ export const resolvers = {
           // Get bidding lead user info
           const { data: { user: leadUser } } = await adminClient.auth.admin.getUserById(proposal.lead_id);
 
-          // Try to find bidding team through bid_team_members table
+          // Get bidding team info from proposal_team_members
           let biddingTeam = null;
           const { data: teamMember } = await adminClient
-            .from('bid_team_members')
-            .select('bidding_team_id, bidding_teams(id, name)')
+            .from('proposal_team_members')
+            .select('user_id')
+            .eq('proposal_id', proposal.id)
             .eq('user_id', proposal.lead_id)
-            .eq('project_id', proposal.project_id)
-            .single();
+            .eq('role', 'lead')
+            .maybeSingle();
           
-          if (teamMember && teamMember.bidding_teams) {
-            const team = Array.isArray(teamMember.bidding_teams) 
-              ? teamMember.bidding_teams[0] 
-              : teamMember.bidding_teams;
-            
-            if (team) {
-              biddingTeam = {
-                id: team.id,
-                name: team.name,
-              };
-            }
-          }
+          // Note: bidding_teams table relationship removed as it's not in the new architecture
+          // If you need team names, they should be stored in proposals or user metadata
 
           return {
             id: proposal.id,
@@ -3154,14 +3114,10 @@ export const resolvers = {
 
       // Check if user is client or has a proposal for this project
       const isClient = project.client_id === user.id;
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('*')
-        .eq('project_id', projectId)
-        .eq('user_id', user.id)
-        .single();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(projectId, user.id);
 
-      if (!isClient && !teamMember) {
+      if (!isClient && !isMember) {
         throw new GraphQLError('You do not have access to this project', {
           extensions: { code: 'FORBIDDEN' },
         });
@@ -3490,14 +3446,10 @@ export const resolvers = {
 
       // Check if user is client or has a proposal for this project
       const isClient = project.client_id === user.id;
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('*')
-        .eq('project_id', projectId)
-        .eq('user_id', user.id)
-        .single();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(projectId, user.id);
 
-      if (!isClient && !teamMember) {
+      if (!isClient && !isMember) {
         throw new GraphQLError('You do not have access to this project', {
           extensions: { code: 'FORBIDDEN' },
         });
@@ -3525,12 +3477,11 @@ export const resolvers = {
           // Get lead info
           const { data: leadUser } = await adminClient.auth.admin.getUserById(proposal.lead_id);
           
-          // Get team size
+          // Get team size from proposal_team_members
           const { count: teamSize } = await supabase
-            .from('bid_team_members')
+            .from('proposal_team_members')
             .select('*', { count: 'exact', head: true })
-            .eq('project_id', projectId)
-            .eq('user_id', proposal.lead_id);
+            .eq('proposal_id', proposal.id);
 
           // Get unread message count (only for client)
           let unreadCount = 0;
@@ -3710,12 +3661,11 @@ export const resolvers = {
           // Get lead info
           const { data: leadUser } = await adminClient.auth.admin.getUserById(proposal.lead_id);
           
-          // Get team size
+          // Get team size from proposal_team_members
           const { count: teamSize } = await supabase
-            .from('bid_team_members')
+            .from('proposal_team_members')
             .select('*', { count: 'exact', head: true })
-            .eq('project_id', projectId)
-            .eq('user_id', proposal.lead_id);
+            .eq('proposal_id', proposal.id);
 
           // Get unread message count
           const { count: unreadCount } = await supabase
@@ -4286,35 +4236,23 @@ export const resolvers = {
           });
         }
 
-        // Then, get projects where user is a team member
-        const { data: teamMemberships } = await supabase
-          .from('bid_team_members')
-          .select('project_id')
+        // Then, get projects where user is a team member via proposal_team_members
+        const { data: memberProposals } = await supabase
+          .from('proposal_team_members')
+          .select('proposal_id, proposals!inner(id, project_id, lead_id, status, projects!inner(id, title, client_id))')
           .eq('user_id', user.id);
 
-        const teamProjectIds = teamMemberships?.map(m => m.project_id) || [];
-
-        // Get proposals for those projects
-        let memberProposals: any[] = [];
-        if (teamProjectIds.length > 0) {
-          const { data: memberProps } = await supabase
-            .from('proposals')
-            .select(`
-              id,
-              project_id,
-              lead_id,
-              status,
-              projects!inner(id, title, client_id)
-            `)
-            .in('project_id', teamProjectIds)
-            .order('created_at', { ascending: false });
-          
-          memberProposals = memberProps || [];
-        }
+        const memberProposalsData = memberProposals?.map((m: any) => ({
+          id: m.proposals.id,
+          project_id: m.proposals.project_id,
+          lead_id: m.proposals.lead_id,
+          status: m.proposals.status,
+          projects: m.proposals.projects,
+        })) || [];
 
         // Combine and deduplicate proposals
         const proposalMap = new Map();
-        [...(leadProposals || []), ...memberProposals].forEach(p => {
+        [...(leadProposals || []), ...memberProposalsData].forEach(p => {
           proposalMap.set(p.id, p);
         });
         const proposals = Array.from(proposalMap.values());
@@ -4322,11 +4260,11 @@ export const resolvers = {
         // For each proposal, get team members
         const adminClient = createAdminClient();
         const proposalsWithTeams = await Promise.all((proposals || []).map(async (proposal: any) => {
-          // Get team members from bid_team_members (legacy) or proposal_team_members (new)
+          // Get team members from proposal_team_members (correct table)
           const { data: teamMembers } = await supabase
-            .from('bid_team_members')
-            .select('user_id, role, created_at')
-            .eq('project_id', proposal.project_id);
+            .from('proposal_team_members')
+            .select('user_id, role, joined_at')
+            .eq('proposal_id', proposal.id);
 
           // Get user details for each member
           const membersWithDetails = await Promise.all((teamMembers || []).map(async (member: any) => {
@@ -4383,10 +4321,24 @@ export const resolvers = {
       }
 
       try {
+        // First, get the proposal for this project
+        const supabase = await createClient();
+        const { data: proposal, error: proposalError } = await supabase
+          .from('proposals')
+          .select('id')
+          .eq('project_id', projectId)
+          .maybeSingle();
+
+        if (proposalError || !proposal) {
+          throw new GraphQLError('No proposal found for this project', {
+            extensions: { code: 'NOT_FOUND' },
+          });
+        }
+
         const { TeamManagementService } = await import('@/lib/team-management-service');
         const service = new TeamManagementService();
         
-        const result = await service.getTeamMembers({ projectId });
+        const result = await service.getTeamMembers({ proposalId: proposal.id });
 
         if (!result.success || !result.data) {
           throw new GraphQLError(result.error || 'Failed to get team members', {
@@ -6056,10 +6008,19 @@ export const resolvers = {
       // Send notifications to team members (fire and forget)
       (async () => {
         try {
+          // Get all proposals for this project
+          const { data: proposals } = await supabase
+            .from('proposals')
+            .select('id')
+            .eq('project_id', projectId);
+
+          const proposalIds = proposals?.map(p => p.id) || [];
+
+          // Get team members from proposal_team_members
           const { data: teamMembers } = await supabase
-            .from('bid_team_members')
+            .from('proposal_team_members')
             .select('user_id')
-            .eq('project_id', projectId)
+            .in('proposal_id', proposalIds)
             .neq('user_id', proposal.lead_id);
 
           if (teamMembers && teamMembers.length > 0) {
@@ -7567,61 +7528,68 @@ export const resolvers = {
         });
       }
 
+      // Fetch workspace and document IDs for this proposal
+      let workspaceId = null;
+      let documentId = null;
+      
+      const { data: workspace } = await supabase
+        .from('workspaces')
+        .select('id')
+        .eq('project_id', proposal.project_id)
+        .eq('lead_id', user.id)
+        .single();
+
+      if (workspace) {
+        workspaceId = workspace.id;
+        
+        // Get the first document in this workspace
+        const { data: document } = await supabase
+          .from('workspace_documents')
+          .select('id')
+          .eq('workspace_id', workspace.id)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .single();
+
+        if (document) {
+          documentId = document.id;
+        }
+      }
+
       // Sync content to workspace_documents if content was updated
       // This ensures collaborative editor shows the latest content from workspace page
-      if (content !== undefined) {
+      if (content !== undefined && workspaceId && documentId) {
         try {
-          // Find the workspace for this proposal's project
-          const { data: workspace } = await supabase
-            .from('workspaces')
-            .select('id')
-            .eq('project_id', proposal.project_id)
-            .eq('lead_id', user.id)
-            .single();
+          // Parse content if it's a JSON string, otherwise wrap it in TipTap format
+          let documentContent: any;
+          try {
+            documentContent = typeof content === 'string' ? JSON.parse(content) : content;
+          } catch {
+            // If content is plain text, wrap it in TipTap document format
+            documentContent = {
+              type: 'doc',
+              content: [
+                {
+                  type: 'paragraph',
+                  content: content ? [{ type: 'text', text: content }] : []
+                }
+              ]
+            };
+          }
 
-          if (workspace) {
-            // Find the main document in this workspace
-            const { data: document } = await supabase
-              .from('workspace_documents')
-              .select('id')
-              .eq('workspace_id', workspace.id)
-              .order('created_at', { ascending: true })
-              .limit(1)
-              .single();
+          const { error: docUpdateError } = await adminClient
+            .from('workspace_documents')
+            .update({
+              content: documentContent,
+              last_edited_by: user.id,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', documentId);
 
-            if (document) {
-              // Parse content if it's a JSON string, otherwise wrap it in TipTap format
-              let documentContent: any;
-              try {
-                documentContent = typeof content === 'string' ? JSON.parse(content) : content;
-              } catch {
-                // If content is plain text, wrap it in TipTap document format
-                documentContent = {
-                  type: 'doc',
-                  content: [
-                    {
-                      type: 'paragraph',
-                      content: content ? [{ type: 'text', text: content }] : []
-                    }
-                  ]
-                };
-              }
-
-              const { error: docUpdateError } = await adminClient
-                .from('workspace_documents')
-                .update({
-                  content: documentContent,
-                  last_edited_by: user.id,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', document.id);
-
-              if (docUpdateError) {
-                console.error('[updateProposal] Failed to sync content to workspace document:', docUpdateError);
-              } else {
-                console.log('[updateProposal] Successfully synced content to workspace document:', document.id);
-              }
-            }
+          if (docUpdateError) {
+            console.error('[updateProposal] Failed to sync content to workspace document:', docUpdateError);
+          } else {
+            console.log('[updateProposal] Successfully synced content to workspace document:', documentId);
           }
         } catch (syncError) {
           console.error('[updateProposal] Error syncing content to workspace document:', syncError);
@@ -7659,6 +7627,8 @@ export const resolvers = {
         executiveSummary: updatedProposal.executive_summary,
         additionalInfo: updatedProposal.additional_info,
         submissionDate: updatedProposal.submitted_at,
+        documentId: documentId,
+        workspaceId: workspaceId,
         createdAt: updatedProposal.created_at,
         updatedAt: updatedProposal.updated_at,
         project: project ? {
@@ -10740,12 +10710,11 @@ export const resolvers = {
           // Get lead info
           const { data: leadUser } = await adminClient.auth.admin.getUserById(proposal.lead_id);
           
-          // Get team size
+          // Get team size from proposal_team_members
           const { count: teamSize } = await supabase
-            .from('bid_team_members')
+            .from('proposal_team_members')
             .select('*', { count: 'exact', head: true })
-            .eq('project_id', projectId)
-            .eq('user_id', proposal.lead_id);
+            .eq('proposal_id', proposal.id);
 
           // Get unread message count
           const { count: unreadCount } = await supabase
@@ -11258,7 +11227,7 @@ export const resolvers = {
 
     removeTeamMember: async (
       _: any,
-      { input }: { input: { projectId: string; userId: string } }
+      { input }: { input: { proposalId: string; userId: string } }
     ) => {
       const supabase = await createClient();
       
@@ -11274,7 +11243,7 @@ export const resolvers = {
         const service = new TeamManagementService();
         
         const result = await service.removeTeamMember({
-          projectId: input.projectId,
+          proposalId: input.proposalId,
           userId: input.userId,
           removedBy: user.id,
         });
@@ -11814,7 +11783,6 @@ export const resolvers = {
         });
       }
 
-      const { RetentionService } = await import('@/lib/retention-service');
       const result = await RetentionService.applyLegalHold(archiveId, reason, user.id);
 
       if (!result.success || !result.archive) {
@@ -11895,7 +11863,6 @@ export const resolvers = {
         });
       }
 
-      const { RetentionService } = await import('@/lib/retention-service');
       const result = await RetentionService.removeLegalHold(archiveId, user.id);
 
       if (!result.success || !result.archive) {

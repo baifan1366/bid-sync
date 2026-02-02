@@ -172,11 +172,11 @@ export class MultiProposalService {
       // Get additional data for each proposal
       const dashboardItems = await Promise.all(
         proposals.map(async (proposal: any) => {
-          // Get team size
+          // Get team size for this proposal
           const { count: teamSize } = await supabase
-            .from('bid_team_members')
+            .from('proposal_team_members')
             .select('*', { count: 'exact', head: true })
-            .eq('project_id', proposal.project_id);
+            .eq('proposal_id', proposal.id);
 
           // Get unread messages count
           const { count: unreadCount } = await supabase
@@ -540,13 +540,21 @@ export class MultiProposalService {
       const projectIds = [...new Set(proposals?.map((p) => p.project_id) || [])];
       let totalTeamMembers = 0;
 
-      for (const projectId of projectIds) {
-        const { count } = await supabase
-          .from('bid_team_members')
-          .select('*', { count: 'exact', head: true })
-          .eq('project_id', projectId);
+      // Get all proposals for these projects
+      const { data: allProposals } = await supabase
+        .from('proposals')
+        .select('id')
+        .in('project_id', projectIds);
 
-        totalTeamMembers += count || 0;
+      if (allProposals && allProposals.length > 0) {
+        const allProposalIds = allProposals.map(p => p.id);
+        
+        const { count } = await supabase
+          .from('proposal_team_members')
+          .select('*', { count: 'exact', head: true })
+          .in('proposal_id', allProposalIds);
+
+        totalTeamMembers = count || 0;
       }
 
       const averageTeamSize =

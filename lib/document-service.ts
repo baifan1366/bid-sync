@@ -156,14 +156,10 @@ export class DocumentService {
 
       // Check if user is workspace lead or team member
       const isLead = workspace.lead_id === input.createdBy;
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('id')
-        .eq('project_id', workspace.project_id)
-        .eq('user_id', input.createdBy)
-        .maybeSingle();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(workspace.project_id, input.createdBy);
 
-      if (!isLead && !teamMember) {
+      if (!isLead && !isMember) {
         return {
           success: false,
           error: 'You do not have permission to create documents in this workspace',
@@ -266,14 +262,10 @@ export class DocumentService {
         .maybeSingle();
 
       // Check if user is a team member for the project
-      const { data: teamMember } = await adminClient
-        .from('bid_team_members')
-        .select('id')
-        .eq('project_id', workspace.project_id)
-        .eq('user_id', userId)
-        .maybeSingle();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(workspace.project_id, userId);
 
-      if (!isWorkspaceLead && !isCreator && !collaborator && !teamMember) {
+      if (!isWorkspaceLead && !isCreator && !collaborator && !isMember) {
         return {
           success: false,
           error: 'You do not have access to this document',
@@ -326,14 +318,11 @@ export class DocumentService {
 
       // Check if user is workspace lead or team member
       const isLead = workspace.lead_id === userId;
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('id')
-        .eq('project_id', workspace.project_id)
-        .eq('user_id', userId)
-        .maybeSingle();
+      // Check if user is lead or team member
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(workspace.project_id, userId);
 
-      if (!isLead && !teamMember) {
+      if (!isLead && !isMember) {
         return {
           success: false,
           error: 'You do not have access to this workspace',
@@ -702,14 +691,10 @@ export class DocumentService {
       }
 
       // Check if user is lead or team member
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('id')
-        .eq('project_id', proposal.project_id)
-        .eq('user_id', userId)
-        .maybeSingle();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(proposal.project_id, userId);
 
-      if (proposal.lead_id !== userId && !teamMember) {
+      if (proposal.lead_id !== userId && !isMember) {
         return {
           success: false,
           error: 'Unauthorized to upload documents to this proposal',
@@ -897,14 +882,10 @@ export class DocumentService {
 
       // Check if user is lead or team member
       const proposal = document.proposals as any;
-      const { data: teamMember } = await supabase
-        .from('bid_team_members')
-        .select('id')
-        .eq('project_id', proposal.project_id)
-        .eq('user_id', userId)
-        .maybeSingle();
+      const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
+      const { isMember } = await checkProjectTeamMembership(proposal.project_id, userId);
 
-      if (proposal.lead_id !== userId && !teamMember) {
+      if (proposal.lead_id !== userId && !isMember) {
         return {
           success: false,
           error: 'Unauthorized to delete this document',
