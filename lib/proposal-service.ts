@@ -25,7 +25,7 @@ export interface CreateProposalResult {
     title: string;
   };
   error?: string;
-  errorCode?: 'DUPLICATE_PROPOSAL' | 'PROJECT_NOT_FOUND' | 'UNAUTHORIZED' | 'WORKSPACE_CREATION_FAILED' | 'UNKNOWN';
+  errorCode?: 'DUPLICATE_PROPOSAL' | 'PROJECT_NOT_FOUND' | 'PROJECT_NOT_OPEN' | 'UNAUTHORIZED' | 'WORKSPACE_CREATION_FAILED' | 'UNKNOWN';
 }
 
 export interface ProposalInitializationData {
