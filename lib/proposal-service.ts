@@ -362,14 +362,16 @@ export class ProposalService {
     try {
       const supabase = await createClient();
 
-      const { data: workspace, error } = await supabase
+      const { data: workspaces, error } = await supabase
         .from('workspaces')
         .select('*')
         .eq('project_id', projectId)
         .eq('lead_id', leadId)
-        .single();
+        .limit(1);
 
-      if (error) {
+      const workspace = workspaces?.[0];
+
+      if (error || !workspace) {
         console.error('Error fetching workspace:', error);
         return null;
       }

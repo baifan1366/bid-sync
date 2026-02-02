@@ -294,12 +294,14 @@ export class DeadlineReminderService {
       const supabase = await createClient();
 
       // Get the awarded proposal for this project
-      const { data: proposal, error: proposalError } = await supabase
+      const { data: proposals, error: proposalError } = await supabase
         .from('proposals')
         .select('id, lead_id')
         .eq('project_id', projectId)
         .eq('status', 'approved')
-        .single();
+        .limit(1);
+
+      const proposal = proposals?.[0];
 
       if (proposalError || !proposal) {
         // No awarded proposal found, skip team notifications

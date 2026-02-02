@@ -28,6 +28,54 @@ export function MemberDashboardSkeleton() {
           ))}
         </div>
 
+        {/* Team Info Skeleton */}
+        <Card className="border-yellow-400/20">
+          <CardContent className="p-6">
+            <Skeleton className="h-6 w-32 mb-6" />
+            <div className="space-y-6">
+              {[1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="border border-yellow-400/20 rounded-lg p-4 space-y-4"
+                >
+                  <div className="space-y-2">
+                    <Skeleton className="h-5 w-64" />
+                    <Skeleton className="h-4 w-48" />
+                    <Skeleton className="h-6 w-20" />
+                  </div>
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-24" />
+                    <div className="flex items-center gap-3 p-3 bg-yellow-400/5 rounded-lg">
+                      <Skeleton className="h-10 w-10 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-32" />
+                        <Skeleton className="h-3 w-48" />
+                      </div>
+                      <Skeleton className="h-6 w-16" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-32" />
+                    {[1, 2].map((j) => (
+                      <div
+                        key={j}
+                        className="flex items-center gap-3 p-3 rounded-lg border border-yellow-400/10"
+                      >
+                        <Skeleton className="h-9 w-9 rounded-full" />
+                        <div className="flex-1 space-y-2">
+                          <Skeleton className="h-4 w-28" />
+                          <Skeleton className="h-3 w-40" />
+                        </div>
+                        <Skeleton className="h-5 w-16" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Assigned Sections Skeleton */}
         <Card className="border-yellow-400/20">
           <CardContent className="p-6">

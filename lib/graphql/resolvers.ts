@@ -1656,12 +1656,14 @@ export const resolvers = {
       }
 
       // First try to find workspace for this user (lead)
-      let { data: workspace, error } = await supabase
+      let { data: workspaces, error } = await supabase
         .from('workspaces')
         .select('*')
         .eq('project_id', projectId)
         .eq('lead_id', user.id)
-        .single();
+        .limit(1);
+
+      let workspace = workspaces?.[0];
 
       // If not found as lead, check if user is a team member on any proposal for this project
       if (error || !workspace) {
@@ -2924,6 +2926,106 @@ export const resolvers = {
       }));
     },
 
+    myTeams: async () => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Get all proposals where user is a team member
+      const { data: teamMemberships, error } = await supabase
+        .from('proposal_team_members')
+        .select(`
+          id,
+          proposal_id,
+          role,
+          joined_at,
+          proposals!inner (
+            id,
+            title,
+            project_id,
+            lead_id,
+            projects!inner (
+              id,
+              title
+            )
+          )
+        `)
+        .eq('user_id', user.id)
+        .order('joined_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching team memberships:', error);
+        throw new GraphQLError('Failed to fetch team memberships', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      if (!teamMemberships || teamMemberships.length === 0) {
+        return [];
+      }
+
+      // For each proposal, get the lead info and all team members
+      const teams = await Promise.all(
+        teamMemberships.map(async (membership: any) => {
+          const proposalId = membership.proposals.id;
+          const leadId = membership.proposals.lead_id;
+
+          // Get lead info
+          const { data: leadProfile } = await supabase
+            .from('profiles')
+            .select('id, full_name, email')
+            .eq('id', leadId)
+            .single();
+
+          // Get all team members for this proposal
+          const { data: allMembers } = await supabase
+            .from('proposal_team_members')
+            .select(`
+              id,
+              user_id,
+              role,
+              joined_at,
+              profiles!inner (
+                id,
+                full_name,
+                email
+              )
+            `)
+            .eq('proposal_id', proposalId)
+            .order('joined_at', { ascending: true });
+
+          return {
+            proposalId: proposalId,
+            proposalTitle: membership.proposals.title,
+            projectId: membership.proposals.project_id,
+            projectTitle: membership.proposals.projects.title,
+            role: membership.role,
+            joinedAt: membership.joined_at,
+            lead: {
+              id: leadId,
+              name: leadProfile?.full_name || 'Unknown',
+              email: leadProfile?.email || '',
+            },
+            members: (allMembers || []).map((m: any) => ({
+              id: m.id,
+              userId: m.user_id,
+              userName: m.profiles.full_name || 'Unknown',
+              email: m.profiles.email || '',
+              role: m.role,
+              joinedAt: m.joined_at,
+            })),
+          };
+        })
+      );
+
+      return teams;
+    },
+
     // ============================================================================
     // ADMIN PROPOSAL OVERSIGHT QUERIES
     // ============================================================================
@@ -3206,12 +3308,15 @@ export const resolvers = {
       }
 
       // Get template for project
-      const { data: template, error: templateError } = await supabase
+      const { data: templates, error: templateError } = await supabase
         .from('scoring_templates')
         .select('*')
         .eq('project_id', projectId)
         .eq('is_default', false)
-        .single();
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const template = templates?.[0];
 
       if (templateError || !template) {
         return null;
@@ -3675,12 +3780,15 @@ export const resolvers = {
       }
 
       // Get scoring template for project
-      const { data: template, error: templateError } = await supabase
+      const { data: templates, error: templateError } = await supabase
         .from('scoring_templates')
         .select('*')
         .eq('project_id', projectId)
         .eq('is_default', false)
-        .single();
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const template = templates?.[0];
 
       if (templateError || !template) {
         throw new GraphQLError('No scoring template found for this project', {
@@ -7605,12 +7713,14 @@ export const resolvers = {
       let workspaceId = null;
       let documentId = null;
       
-      const { data: workspace } = await supabase
+      const { data: workspaces } = await supabase
         .from('workspaces')
         .select('id')
         .eq('project_id', proposal.project_id)
         .eq('lead_id', user.id)
-        .single();
+        .limit(1);
+
+      const workspace = workspaces?.[0];
 
       if (workspace) {
         workspaceId = workspace.id;

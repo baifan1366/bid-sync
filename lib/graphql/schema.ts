@@ -309,6 +309,33 @@ export const typeDefs = /* GraphQL */ `
     name: String!
   }
 
+  # Team Info Types (for Member Dashboard)
+  type TeamInfo {
+    proposalId: ID!
+    proposalTitle: String
+    projectId: ID!
+    projectTitle: String!
+    role: String!
+    joinedAt: String!
+    lead: TeamLead!
+    members: [TeamMember!]!
+  }
+
+  type TeamLead {
+    id: ID!
+    name: String!
+    email: String!
+  }
+
+  type TeamMember {
+    id: ID!
+    userId: ID!
+    userName: String!
+    email: String!
+    role: String!
+    joinedAt: String!
+  }
+
   # Lead Dashboard Types
   type LeadDashboardStats {
     totalProposals: Int!
@@ -642,6 +669,7 @@ export const typeDefs = /* GraphQL */ `
     
     # Member Dashboard queries
     myAssignedSections: [AssignedSection!]!
+    myTeams: [TeamInfo!]!
     
     # Lead Dashboard queries
     leadDashboardStats(leadId: ID!): LeadDashboardStats!

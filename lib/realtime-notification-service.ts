@@ -92,24 +92,46 @@ export class RealtimeNotificationService {
     const channelName = `notifications:${userId}`
     const channel = supabase.channel(channelName)
 
-    // Requirement 3.2: Listen for new notifications
+    // Requirement 3.2: Listen for new notifications using postgres_changes
     if (handlers.onNewNotification) {
       channel.on(
-        'broadcast',
-        { event: 'new_notification' },
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notification_queue',
+          filter: `user_id=eq.${userId}`
+        },
         (payload) => {
-          handlers.onNewNotification?.(payload.payload as NewNotificationPayload)
+          handlers.onNewNotification?.({
+            notification: payload.new as any
+          })
         }
       )
     }
 
-    // Listen for notification read events
+    // Listen for notification read events (UPDATE with read=true)
     if (handlers.onNotificationRead) {
       channel.on(
-        'broadcast',
-        { event: 'notification_read' },
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'notification_queue',
+          filter: `user_id=eq.${userId}`
+        },
         (payload) => {
-          handlers.onNotificationRead?.(payload.payload as NotificationReadPayload)
+          const newRecord = payload.new as any
+          const oldRecord = payload.old as any
+          
+          // Only trigger if read status changed to true
+          if (newRecord.read === true && oldRecord.read === false) {
+            handlers.onNotificationRead?.({
+              notificationId: newRecord.id,
+              userId: newRecord.user_id,
+              readAt: newRecord.read_at || new Date().toISOString()
+            })
+          }
         }
       )
     }
@@ -117,10 +139,19 @@ export class RealtimeNotificationService {
     // Listen for notification deleted events
     if (handlers.onNotificationDeleted) {
       channel.on(
-        'broadcast',
-        { event: 'notification_deleted' },
+        'postgres_changes',
+        {
+          event: 'DELETE',
+          schema: 'public',
+          table: 'notification_queue',
+          filter: `user_id=eq.${userId}`
+        },
         (payload) => {
-          handlers.onNotificationDeleted?.(payload.payload as NotificationDeletedPayload)
+          const oldRecord = payload.old as any
+          handlers.onNotificationDeleted?.({
+            notificationId: oldRecord.id,
+            userId: oldRecord.user_id
+          })
         }
       )
     }
@@ -173,9 +204,12 @@ export class RealtimeNotificationService {
   }
 
   /**
+   * @deprecated No longer needed - postgres_changes automatically broadcasts database changes
+   * 
    * Broadcast new notification to user's active sessions
    * 
-   * Requirement 3.2: Push notification immediately to active sessions
+   * With postgres_changes, database INSERTs automatically trigger events.
+   * This method is kept for backward compatibility but does nothing.
    * 
    * @param userId - User ID
    * @param notification - Notification object
@@ -185,25 +219,18 @@ export class RealtimeNotificationService {
     userId: string,
     notification: Notification
   ): Promise<RealtimeChannelSendResponse> {
-    const channel = this.channels.get(userId)
-    
-    if (!channel) {
-      throw new Error('Notification channel not found. Subscribe first.')
-    }
-
-    const payload: NewNotificationPayload = {
-      notification,
-    }
-
-    return channel.send({
-      type: 'broadcast',
-      event: 'new_notification',
-      payload,
-    })
+    // No-op: postgres_changes handles this automatically
+    console.warn('broadcastNewNotification is deprecated - postgres_changes handles this automatically')
+    return { status: 'ok' } as RealtimeChannelSendResponse
   }
 
   /**
+   * @deprecated No longer needed - postgres_changes automatically broadcasts database changes
+   * 
    * Broadcast notification read event
+   * 
+   * With postgres_changes, database UPDATEs automatically trigger events.
+   * This method is kept for backward compatibility but does nothing.
    * 
    * @param userId - User ID
    * @param notificationId - Notification ID that was read
@@ -213,27 +240,18 @@ export class RealtimeNotificationService {
     userId: string,
     notificationId: string
   ): Promise<RealtimeChannelSendResponse> {
-    const channel = this.channels.get(userId)
-    
-    if (!channel) {
-      throw new Error('Notification channel not found. Subscribe first.')
-    }
-
-    const payload: NotificationReadPayload = {
-      notificationId,
-      userId,
-      readAt: new Date().toISOString(),
-    }
-
-    return channel.send({
-      type: 'broadcast',
-      event: 'notification_read',
-      payload,
-    })
+    // No-op: postgres_changes handles this automatically
+    console.warn('broadcastNotificationRead is deprecated - postgres_changes handles this automatically')
+    return { status: 'ok' } as RealtimeChannelSendResponse
   }
 
   /**
+   * @deprecated No longer needed - postgres_changes automatically broadcasts database changes
+   * 
    * Broadcast notification deleted event
+   * 
+   * With postgres_changes, database DELETEs automatically trigger events.
+   * This method is kept for backward compatibility but does nothing.
    * 
    * @param userId - User ID
    * @param notificationId - Notification ID that was deleted
@@ -243,22 +261,9 @@ export class RealtimeNotificationService {
     userId: string,
     notificationId: string
   ): Promise<RealtimeChannelSendResponse> {
-    const channel = this.channels.get(userId)
-    
-    if (!channel) {
-      throw new Error('Notification channel not found. Subscribe first.')
-    }
-
-    const payload: NotificationDeletedPayload = {
-      notificationId,
-      userId,
-    }
-
-    return channel.send({
-      type: 'broadcast',
-      event: 'notification_deleted',
-      payload,
-    })
+    // No-op: postgres_changes handles this automatically
+    console.warn('broadcastNotificationDeleted is deprecated - postgres_changes handles this automatically')
+    return { status: 'ok' } as RealtimeChannelSendResponse
   }
 
   /**
