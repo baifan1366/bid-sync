@@ -2890,7 +2890,7 @@ export const resolvers = {
         .from('document_sections')
         .select(`
           *,
-          document:documents (
+          document:workspace_documents (
             id,
             title,
             workspace:workspaces (
@@ -2904,8 +2904,9 @@ export const resolvers = {
         .order('deadline', { ascending: true, nullsFirst: false });
 
       if (error) {
+        console.error('[myAssignedSections] Error:', error);
         throw new GraphQLError('Failed to fetch assigned sections', {
-          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          extensions: { code: 'INTERNAL_SERVER_ERROR', details: error.message },
         });
       }
 
