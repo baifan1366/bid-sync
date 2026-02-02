@@ -4369,7 +4369,7 @@ export const resolvers = {
             proposalId: proposal.id,
             projectId: proposal.project_id,
             projectTitle: proposal.projects.title,
-            proposalStatus: proposal.status.toUpperCase(),
+            proposalStatus: proposal.status ? proposal.status.toUpperCase() : 'DRAFT',
             teamMembers: membersWithDetails,
           };
         }));
