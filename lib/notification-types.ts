@@ -17,6 +17,7 @@ export type NotificationType =
   | 'project_completed'
   // Proposal related
   | 'proposal_submitted'
+  | 'proposal_pending_approval'
   | 'proposal_status_changed'
   | 'proposal_scored'
   | 'proposal_score_updated'
