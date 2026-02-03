@@ -64,25 +64,60 @@ export function ChatSection({
 
       if (error) throw error
 
-      // Fetch sender info for each message
+      // Fetch sender info for each message using GraphQL
       const messagesWithSenders = await Promise.all(
         (data || []).map(async (msg: any) => {
-          // Get sender info from auth.users using admin client
-          const { data: { user: senderData } } = await supabase.auth.admin.getUserById(msg.sender_id)
-          
-          const senderName = senderData?.user_metadata?.full_name || 
-                            senderData?.user_metadata?.name || 
-                            senderData?.email?.split('@')[0] || 
-                            'User'
-          
-          return {
-            id: msg.id,
-            content: msg.content,
-            senderName: msg.sender_id === user?.id ? "You" : senderName,
-            senderAvatar: senderData?.user_metadata?.avatar_url || null,
-            senderRole: "bidding_member" as const,
-            senderId: msg.sender_id,
-            timestamp: msg.created_at,
+          try {
+            // Use GraphQL to get user info with proper role
+            const response = await fetch('/api/graphql', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                query: `
+                  query GetUserInfo($userId: ID!) {
+                    userProfile(userId: $userId) {
+                      id
+                      email
+                      role
+                      fullName
+                    }
+                  }
+                `,
+                variables: { userId: msg.sender_id }
+              })
+            })
+            
+            const result = await response.json()
+            const senderData = result.data?.userProfile
+            
+            const senderName = senderData?.fullName || 
+                              senderData?.email?.split('@')[0] || 
+                              'User'
+            
+            const senderRole = senderData?.role || 'bidding_member'
+            
+            return {
+              id: msg.id,
+              content: msg.content,
+              senderName: msg.sender_id === user?.id ? "You" : senderName,
+              senderAvatar: null,
+              senderRole: senderRole as "client" | "bidding_lead" | "bidding_member",
+              senderId: msg.sender_id,
+              timestamp: msg.created_at,
+            }
+          } catch (err) {
+            console.error('Error fetching sender info:', err)
+            return {
+              id: msg.id,
+              content: msg.content,
+              senderName: msg.sender_id === user?.id ? "You" : "User",
+              senderAvatar: null,
+              senderRole: "bidding_member" as const,
+              senderId: msg.sender_id,
+              timestamp: msg.created_at,
+            }
           }
         })
       )
@@ -102,33 +137,59 @@ export function ChatSection({
   // Handle new messages from realtime
   const handleNewMessage = useCallback(
     async (newMessage: any) => {
-      // Fetch sender info for the new message using admin client
-      const { data: { user: senderData } } = await supabase.auth.admin.getUserById(newMessage.sender_id)
+      try {
+        // Use GraphQL to get user info with proper role
+        const response = await fetch('/api/graphql', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            query: `
+              query GetUserInfo($userId: ID!) {
+                userProfile(userId: $userId) {
+                  id
+                  email
+                  role
+                  fullName
+                }
+              }
+            `,
+            variables: { userId: newMessage.sender_id }
+          })
+        })
+        
+        const result = await response.json()
+        const senderData = result.data?.userProfile
 
-      const senderName = senderData?.user_metadata?.full_name || 
-                        senderData?.user_metadata?.name || 
-                        senderData?.email?.split('@')[0] || 
-                        'User'
+        const senderName = senderData?.fullName || 
+                          senderData?.email?.split('@')[0] || 
+                          'User'
+        
+        const senderRole = senderData?.role || 'bidding_member'
 
-      const formattedMessage: Message = {
-        id: newMessage.id,
-        content: newMessage.content,
-        senderName: newMessage.sender_id === user?.id ? "You" : senderName,
-        senderAvatar: senderData?.user_metadata?.avatar_url || null,
-        senderRole: "bidding_member",
-        senderId: newMessage.sender_id,
-        timestamp: newMessage.created_at,
-      }
-
-      setMessages((prev) => {
-        // Avoid duplicates (message might already be added via optimistic update)
-        if (prev.some((m) => m.id === formattedMessage.id)) {
-          return prev
+        const formattedMessage: Message = {
+          id: newMessage.id,
+          content: newMessage.content,
+          senderName: newMessage.sender_id === user?.id ? "You" : senderName,
+          senderAvatar: null,
+          senderRole: senderRole as "client" | "bidding_lead" | "bidding_member",
+          senderId: newMessage.sender_id,
+          timestamp: newMessage.created_at,
         }
-        return [...prev, formattedMessage]
-      })
+
+        setMessages((prev) => {
+          // Avoid duplicates (message might already be added via optimistic update)
+          if (prev.some((m) => m.id === formattedMessage.id)) {
+            return prev
+          }
+          return [...prev, formattedMessage]
+        })
+      } catch (err) {
+        console.error('Error handling new message:', err)
+      }
     },
-    [user?.id, supabase]
+    [user?.id]
   )
 
   // Set up realtime subscription
