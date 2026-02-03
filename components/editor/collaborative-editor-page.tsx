@@ -299,6 +299,25 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
           
           proposal = result.data
           proposalError = result.error
+          
+          // If proposal not found by proposal_id, try fallback
+          if (!proposal && !proposalError) {
+            console.warn('[CollaborativeEditorPage] ⚠️ Proposal not found by proposal_id, trying fallback...')
+            const fallbackResult = await supabase
+              .from('proposals')
+              .select('id, lead_id, status')
+              .eq('project_id', workspace.project_id)
+              .eq('lead_id', workspace.lead_id)
+              .maybeSingle()
+            
+            proposal = fallbackResult.data
+            proposalError = fallbackResult.error
+            
+            if (proposal) {
+              console.log('[CollaborativeEditorPage] ✅ Found proposal via fallback:', proposal.id)
+              console.log('[CollaborativeEditorPage] Workspace proposal_id needs to be updated')
+            }
+          }
         } else {
           // Fallback: lookup by project_id + lead_id (for legacy workspaces)
           console.log('[CollaborativeEditorPage] Using project_id + lead_id fallback')
@@ -483,6 +502,24 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
           
           proposal = result.data
           proposalError = result.error
+          
+          // If proposal not found by proposal_id, try fallback
+          if (!proposal && !proposalError) {
+            console.warn('[CollaborativeEditorPage] ⚠️ Proposal not found by proposal_id for team members, trying fallback...')
+            const fallbackResult = await supabase
+              .from('proposals')
+              .select('id')
+              .eq('project_id', workspace.project_id)
+              .eq('lead_id', workspace.lead_id)
+              .maybeSingle()
+            
+            proposal = fallbackResult.data
+            proposalError = fallbackResult.error
+            
+            if (proposal) {
+              console.log('[CollaborativeEditorPage] ✅ Found proposal via fallback for team members:', proposal.id)
+            }
+          }
         } else {
           // Fallback: lookup by project_id + lead_id (for legacy workspaces)
           console.log('[CollaborativeEditorPage] Loading team members using project_id + lead_id fallback')

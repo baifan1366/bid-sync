@@ -3046,6 +3046,77 @@ export const resolvers = {
       return validTeams;
     },
 
+    myMemberProposals: async () => {
+      const supabase = await createClient();
+      
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Get proposal IDs where user is a team member
+      const { data: membershipRecords, error: membershipError } = await supabase
+        .from('proposal_team_members')
+        .select('proposal_id')
+        .eq('user_id', user.id);
+
+      if (membershipError) {
+        console.error('Error fetching member proposals:', membershipError);
+        throw new GraphQLError('Failed to fetch member proposals', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      if (!membershipRecords || membershipRecords.length === 0) {
+        return [];
+      }
+
+      const proposalIds = membershipRecords.map(m => m.proposal_id);
+
+      // Use admin client to fetch proposals (bypasses RLS, safe because we verified membership)
+      const adminClient = createAdminClient();
+      const { data: proposalsData, error: proposalsError } = await adminClient
+        .from('proposals')
+        .select(`
+          id,
+          title,
+          status,
+          project_id,
+          projects!inner(
+            id,
+            title,
+            description,
+            deadline,
+            status,
+            additional_info_requirements
+          )
+        `)
+        .in('id', proposalIds);
+
+      if (proposalsError) {
+        console.error('Error fetching proposals:', proposalsError);
+        throw new GraphQLError('Failed to fetch proposals', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      return (proposalsData || []).map((p: any) => ({
+        id: p.id,
+        title: p.title,
+        status: p.status,
+        project: {
+          id: p.projects.id,
+          title: p.projects.title,
+          description: p.projects.description,
+          deadline: p.projects.deadline,
+          status: p.projects.status,
+          additionalInfoRequirements: p.projects.additional_info_requirements || [],
+        },
+      }));
+    },
+
     // ============================================================================
     // ADMIN PROPOSAL OVERSIGHT QUERIES
     // ============================================================================

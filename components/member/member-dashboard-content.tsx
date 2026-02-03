@@ -17,7 +17,6 @@ import {
 import { useRouter } from 'next/navigation'
 import { formatDistanceToNow } from 'date-fns'
 import { MemberDashboardSkeleton } from './member-dashboard-skeleton'
-import { TeamInfoCard } from './team-info-card'
 
 const MEMBER_SECTIONS_QUERY = `
   query MemberAssignedSections {
@@ -163,9 +162,6 @@ export function MemberDashboardContent() {
             </CardContent>
           </Card>
         </div>
-
-        {/* Team Information */}
-        <TeamInfoCard />
 
         {/* Assigned Sections */}
         <Card className="border-yellow-400/20">

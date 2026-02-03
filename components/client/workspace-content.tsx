@@ -104,6 +104,32 @@ const GET_LEAD_PROPOSALS = gql`
   }
 `
 
+const GET_MEMBER_PROPOSALS = gql`
+  query GetMemberProposals {
+    myMemberProposals {
+      id
+      title
+      status
+      project {
+        id
+        title
+        description
+        deadline
+        status
+        additionalInfoRequirements {
+          id
+          fieldName
+          fieldType
+          required
+          helpText
+          options
+          order
+        }
+      }
+    }
+  }
+`
+
 const GET_WORKSPACE_DOCUMENT = gql`
   query GetWorkspaceByProject($projectId: ID!) {
     workspaceByProject(projectId: $projectId) {
@@ -163,20 +189,37 @@ export function WorkspaceContent() {
   // Only fetch proposals if user is a bidding lead or member
   const isBiddingLead = user?.user_metadata?.role === 'bidding_lead'
   const isBiddingMember = user?.user_metadata?.role === 'bidding_member'
-  const shouldFetch = !!user?.id && isBiddingLead
   
   // Fetch proposals for the current lead
-  const { data, isLoading, error } = useGraphQLQuery<{ leadProposals: ProposalWithProject[] }>(
+  const { data: leadData, isLoading: leadLoading, error: leadError } = useGraphQLQuery<{ leadProposals: ProposalWithProject[] }>(
     ['lead-proposals', user?.id || 'no-user'],
     GET_LEAD_PROPOSALS,
-    { leadId: user?.id || 'placeholder' }, // Use placeholder instead of empty string
+    { leadId: user?.id || 'placeholder' },
     {
       staleTime: 1 * 60 * 1000,
-      enabled: shouldFetch && !!user?.id, // Only run query if user is a bidding lead AND user.id exists
+      enabled: !!user?.id && isBiddingLead,
     }
   )
 
-  const proposals = shouldFetch ? (data?.leadProposals || []) : []
+  // Fetch proposals for members (proposals they're part of)
+  const { data: memberData, isLoading: memberLoading, error: memberError } = useGraphQLQuery<{ myMemberProposals: ProposalWithProject[] }>(
+    ['member-proposals', user?.id || 'no-user'],
+    GET_MEMBER_PROPOSALS,
+    {},
+    {
+      staleTime: 1 * 60 * 1000,
+      enabled: !!user?.id && isBiddingMember,
+    }
+  )
+
+  const proposals = isBiddingLead 
+    ? (leadData?.leadProposals || []) 
+    : isBiddingMember 
+    ? (memberData?.myMemberProposals || [])
+    : []
+  
+  const isLoading = isBiddingLead ? leadLoading : isBiddingMember ? memberLoading : false
+  const error = isBiddingLead ? leadError : isBiddingMember ? memberError : null
 
   // Get selected proposal
   const selectedProposal = React.useMemo(() => {
@@ -487,7 +530,7 @@ export function WorkspaceContent() {
     return <WorkspaceSkeleton />
   }
 
-  if (error && shouldFetch) {
+  if (error && (isBiddingLead || isBiddingMember)) {
     return (
       <div className="container mx-auto px-4 py-8">
         <Card className="p-6 border-yellow-400/20 bg-yellow-50 dark:bg-yellow-950/10">
@@ -527,29 +570,6 @@ export function WorkspaceContent() {
               This workspace is only available for bidding team members.
             </p>
           </div>
-        </Card>
-      </div>
-    )
-  }
-
-  // For members, show a message to access through dashboard
-  if (isBiddingMember) {
-    return (
-      <div className="container mx-auto px-4 py-8 max-w-[1800px]">
-        <Card className="p-12 border-yellow-400/20 text-center">
-          <Users2 className="h-12 w-12 text-yellow-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-black dark:text-white mb-2">
-            Access Workspace Through Your Assignments
-          </h3>
-          <p className="text-muted-foreground mb-4">
-            As a team member, you can access the workspace through your assigned sections in the Member Dashboard or Editor.
-          </p>
-          <Button
-            onClick={() => router.push('/member-dashboard')}
-            className="bg-yellow-400 hover:bg-yellow-500 text-black"
-          >
-            Go to Dashboard
-          </Button>
         </Card>
       </div>
     )

@@ -107,6 +107,12 @@ const roleNavigation: Record<UserRole, NavItem[]> = {
       matchPaths: ["/member-dashboard"]
     },
     { 
+      label: "Team", 
+      href: "/team", 
+      icon: Users,
+      matchPaths: ["/team"]
+    },
+    { 
       label: "Workspace", 
       href: "/workspace", 
       icon: Briefcase,

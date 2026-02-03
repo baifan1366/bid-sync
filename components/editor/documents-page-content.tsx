@@ -47,6 +47,21 @@ const GET_LEAD_PROPOSALS_WITH_WORKSPACES = gql`
   }
 `
 
+const GET_MEMBER_PROPOSALS_WITH_WORKSPACES = gql`
+  query GetMemberProposalsWithWorkspaces {
+    myMemberProposals {
+      id
+      title
+      status
+      project {
+        id
+        title
+        deadline
+      }
+    }
+  }
+`
+
 const GET_WORKSPACE_BY_PROJECT = gql`
   query GetWorkspaceByProject($projectId: ID!) {
     workspaceByProject(projectId: $projectId) {
@@ -72,19 +87,38 @@ export function DocumentsPageContent() {
   const canAccessDocuments = isBiddingLead || isBiddingMember
 
   // Fetch proposals for the current lead
-  const { data: proposalsData, isLoading: proposalsLoading } = useGraphQLQuery<{ 
+  const { data: leadData, isLoading: leadLoading } = useGraphQLQuery<{ 
     leadProposals: ProposalWithWorkspace[] 
   }>(
     ['lead-proposals-documents', user?.id || 'no-user'],
     GET_LEAD_PROPOSALS_WITH_WORKSPACES,
-    { leadId: user?.id || 'placeholder' }, // Use placeholder instead of empty string
+    { leadId: user?.id || 'placeholder' },
     {
       staleTime: 1 * 60 * 1000,
-      enabled: !!user?.id && isBiddingLead, // Only run query if user.id exists AND user is bidding lead
+      enabled: !!user?.id && isBiddingLead,
     }
   )
 
-  const proposals = proposalsData?.leadProposals || []
+  // Fetch proposals for members
+  const { data: memberData, isLoading: memberLoading } = useGraphQLQuery<{ 
+    myMemberProposals: ProposalWithWorkspace[] 
+  }>(
+    ['member-proposals-documents', user?.id || 'no-user'],
+    GET_MEMBER_PROPOSALS_WITH_WORKSPACES,
+    {},
+    {
+      staleTime: 1 * 60 * 1000,
+      enabled: !!user?.id && isBiddingMember,
+    }
+  )
+
+  const proposals = isBiddingLead 
+    ? (leadData?.leadProposals || []) 
+    : isBiddingMember 
+    ? (memberData?.myMemberProposals || [])
+    : []
+  
+  const proposalsLoading = isBiddingLead ? leadLoading : isBiddingMember ? memberLoading : false
 
   if (userLoading || proposalsLoading) {
     return (
@@ -130,36 +164,15 @@ export function DocumentsPageContent() {
     return <DocumentWorkspace workspaceId={workspaceId} />
   }
 
-  // For members, redirect to member dashboard (they should access documents through their assignments)
-  if (isBiddingMember) {
-    return (
-      <div className="container mx-auto px-4 py-8 max-w-[1800px]">
-        <Card className="p-12 border-yellow-400/20 text-center">
-          <FileText className="h-12 w-12 text-yellow-400 mx-auto mb-4" />
-          <h3 className="text-lg font-semibold text-black dark:text-white mb-2">
-            Access Documents Through Your Dashboard
-          </h3>
-          <p className="text-muted-foreground mb-4">
-            As a team member, you can access documents through your assigned sections in the Member Dashboard.
-          </p>
-          <Button
-            onClick={() => router.push('/member-dashboard')}
-            className="bg-yellow-400 hover:bg-yellow-500 text-black"
-          >
-            Go to Dashboard
-          </Button>
-        </Card>
-      </div>
-    )
-  }
-
-  // Show list of proposals with their documents (for leads only)
+  // Show list of proposals with their documents
   return (
     <div className="container mx-auto px-4 py-8 max-w-[1800px]">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-black dark:text-white mb-2">Documents</h1>
         <p className="text-muted-foreground">
-          Manage your collaborative proposal documents
+          {isBiddingMember 
+            ? "Access documents for proposals you're part of" 
+            : "Manage your collaborative proposal documents"}
         </p>
       </div>
 

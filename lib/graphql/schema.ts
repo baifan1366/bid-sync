@@ -336,6 +336,23 @@ export const typeDefs = /* GraphQL */ `
     joinedAt: String!
   }
 
+  # Member Proposal Types (for Workspace/Documents access)
+  type MemberProposal {
+    id: ID!
+    title: String
+    status: String!
+    project: MemberProposalProject!
+  }
+
+  type MemberProposalProject {
+    id: ID!
+    title: String!
+    description: String
+    deadline: String
+    status: String!
+    additionalInfoRequirements: [AdditionalInfoRequirement!]!
+  }
+
   # Lead Dashboard Types
   type LeadDashboardStats {
     totalProposals: Int!
@@ -670,6 +687,7 @@ export const typeDefs = /* GraphQL */ `
     # Member Dashboard queries
     myAssignedSections: [AssignedSection!]!
     myTeams: [TeamInfo!]!
+    myMemberProposals: [MemberProposal!]!
     
     # Lead Dashboard queries
     leadDashboardStats(leadId: ID!): LeadDashboardStats!
