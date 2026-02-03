@@ -49,6 +49,8 @@ export interface DocumentVersion {
   isRollback: boolean
   rolledBackFrom?: string
   createdAt: string
+  sectionsSnapshot?: any[]
+  attachmentsSnapshot?: any[]
 }
 
 export interface DocumentCollaborator {

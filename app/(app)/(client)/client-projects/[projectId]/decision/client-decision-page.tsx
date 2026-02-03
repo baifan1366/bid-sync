@@ -9,22 +9,25 @@ import { ProposalsControls } from "@/components/client/proposals-controls"
 import { ProposalsList } from "@/components/client/proposals-list"
 import { ConnectionStatus } from "@/components/client/connection-status"
 import { ProjectRequirementsDisplay } from "@/components/client/project-requirements-display"
+import { AcceptProposalDialog } from "@/components/client/accept-proposal-dialog"
+import { RejectProposalDialog } from "@/components/client/reject-proposal-dialog"
 import { useUser } from "@/hooks/use-user"
-import { useGraphQLQuery } from "@/hooks/use-graphql"
+import { useGraphQLQuery, useGraphQLMutation } from "@/hooks/use-graphql"
 import { useRealtimeProposals } from "@/hooks/use-realtime-proposals"
 import { useToast } from "@/components/ui/use-toast"
 import { gql } from "graphql-request"
+import { UPDATE_PROPOSAL_STATUS } from "@/lib/graphql/mutations"
 import { ProjectWithProposals } from "@/lib/graphql/types"
+
+// Import skeleton components
+import { WorkspaceSkeleton } from "@/components/client/workspace-skeleton"
+import { ProposalDetailSkeleton } from "@/components/client/proposal-detail-skeleton"
 
 // Lazy load heavy components
 const ProposalDetailView = dynamic(
   () => import("@/components/client/proposal-detail-view").then(mod => ({ default: mod.ProposalDetailView })),
   {
-    loading: () => (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading proposal details...</div>
-      </div>
-    ),
+    loading: () => <ProposalDetailSkeleton />,
     ssr: false,
   }
 )
@@ -32,11 +35,7 @@ const ProposalDetailView = dynamic(
 const ProposalComparisonView = dynamic(
   () => import("@/components/client/proposal-comparison-view").then(mod => ({ default: mod.ProposalComparisonView })),
   {
-    loading: () => (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading comparison view...</div>
-      </div>
-    ),
+    loading: () => <WorkspaceSkeleton />,
     ssr: false,
   }
 )
@@ -45,8 +44,18 @@ const ChatSection = dynamic(
   () => import("@/components/client/chat-section").then(mod => ({ default: mod.ChatSection })),
   {
     loading: () => (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-muted-foreground">Loading chat...</div>
+      <div className="h-full flex items-center justify-center p-4">
+        <div className="w-full space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex gap-3 animate-pulse">
+              <div className="h-10 w-10 rounded-full bg-yellow-400/20 shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="h-4 w-24 bg-yellow-400/20 rounded" />
+                <div className="h-4 w-full bg-yellow-400/20 rounded" />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     ),
     ssr: false,
@@ -140,6 +149,17 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
     urlViewMode || 'list'
   )
   const [selectedProposals, setSelectedProposals] = React.useState<string[]>([])
+  
+  // Dialog states
+  const [acceptDialogOpen, setAcceptDialogOpen] = React.useState(false)
+  const [rejectDialogOpen, setRejectDialogOpen] = React.useState(false)
+  const [selectedProposalForAction, setSelectedProposalForAction] = React.useState<string | null>(null)
+
+  // Mutation for updating proposal status
+  const updateStatusMutation = useGraphQLMutation(
+    UPDATE_PROPOSAL_STATUS,
+    [['project-with-proposals', projectId]]
+  )
 
   // Fetch project data with proposals
   const { data, isLoading, error, refetch } = useGraphQLQuery<{ projectWithProposals: ProjectWithProposals }>(
@@ -272,13 +292,49 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
     }
   }
 
+  // Handle accept proposal
+  const handleAcceptProposal = (proposalId: string) => {
+    setSelectedProposalForAction(proposalId)
+    setAcceptDialogOpen(true)
+  }
+
+  // Handle reject proposal
+  const handleRejectProposal = (proposalId: string) => {
+    setSelectedProposalForAction(proposalId)
+    setRejectDialogOpen(true)
+  }
+
+  // Handle mark under review
+  const handleMarkUnderReview = async (proposalId: string) => {
+    try {
+      await updateStatusMutation.mutateAsync({
+        proposalId,
+        status: 'under_review',
+      })
+      
+      toast({
+        title: "Status Updated",
+        description: "Proposal marked as under review",
+      })
+      refetch()
+    } catch (error) {
+      console.error('Error updating proposal status:', error)
+      toast({
+        title: "Error",
+        description: "Failed to update proposal status",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Get selected proposal data for dialogs
+  const selectedProposalData = selectedProposalForAction
+    ? projectData?.proposals.find(p => p.id === selectedProposalForAction)
+    : null
+
   // Loading state
   if (userLoading || isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="text-muted-foreground">Loading project...</div>
-      </div>
-    )
+    return <WorkspaceSkeleton />
   }
 
   // Error state
@@ -402,6 +458,10 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
                 filterStatus={filterStatus}
                 sortBy={sortBy}
                 sortOrder={sortOrder}
+                onAccept={handleAcceptProposal}
+                onReject={handleRejectProposal}
+                onMarkUnderReview={handleMarkUnderReview}
+                showQuickActions={true}
               />
             </section>
           </main>
@@ -429,6 +489,39 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
           </div>
         </aside>
       </div>
+
+      {/* Accept Proposal Dialog */}
+      {selectedProposalData && (
+        <AcceptProposalDialog
+          open={acceptDialogOpen}
+          onOpenChange={setAcceptDialogOpen}
+          proposalId={selectedProposalData.id}
+          projectId={projectId}
+          proposalTitle={selectedProposalData.title || 'Untitled Proposal'}
+          biddingTeamName={selectedProposalData.biddingTeamName}
+          budgetEstimate={selectedProposalData.budgetEstimate}
+          onSuccess={() => {
+            refetch()
+            setSelectedProposalForAction(null)
+          }}
+        />
+      )}
+
+      {/* Reject Proposal Dialog */}
+      {selectedProposalData && (
+        <RejectProposalDialog
+          open={rejectDialogOpen}
+          onOpenChange={setRejectDialogOpen}
+          proposalId={selectedProposalData.id}
+          projectId={projectId}
+          proposalTitle={selectedProposalData.title || 'Untitled Proposal'}
+          biddingTeamName={selectedProposalData.biddingTeamName}
+          onSuccess={() => {
+            refetch()
+            setSelectedProposalForAction(null)
+          }}
+        />
+      )}
     </div>
   )
 }

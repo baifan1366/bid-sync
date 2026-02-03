@@ -5,8 +5,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatBudget(budget?: number | null): string {
-  if (!budget) return 'Not specified'
+export function formatBudget(budget?: number | null, allowZero = false): string {
+  if (budget === null || budget === undefined) return 'Not specified'
+  if (budget === 0 && !allowZero) return 'Not specified'
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'MYR',

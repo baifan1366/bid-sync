@@ -49,6 +49,7 @@ interface SectionTabsEditorProps {
   sections: DocumentSection[]
   currentUserId: string
   isLead: boolean
+  canUpload?: boolean // Whether user can upload attachments
   onSectionUpdate: (sectionId: string, content: any) => Promise<void>
   onSectionAdd: (title: string) => Promise<void>
   onSectionDelete: (sectionId: string) => Promise<void>
@@ -76,6 +77,7 @@ export function SectionTabsEditor({
   sections,
   currentUserId,
   isLead,
+  canUpload = true, // Default to true, RLS will control actual permissions
   onSectionUpdate,
   onSectionAdd,
   onSectionDelete,
@@ -376,6 +378,7 @@ export function SectionTabsEditor({
                       documentId={documentId}
                       currentUserId={currentUserId}
                       isLead={isLead}
+                      canUpload={canUpload}
                       onClose={() => setShowAttachments(false)}
                     />
                   </div>

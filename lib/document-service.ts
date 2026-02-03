@@ -465,7 +465,13 @@ export class DocumentService {
 
       // Create a version history entry
       try {
-        console.log('[updateDocument] Creating version history entry...');
+        console.log('[updateDocument] 📝 Creating version history entry...');
+        console.log('[updateDocument] Version creation input:', {
+          documentId: input.documentId,
+          userId: input.userId,
+          contentLength: JSON.stringify(input.content).length
+        });
+        
         const { VersionControlService } = await import('@/lib/version-control-service');
         const versionService = new VersionControlService();
         const versionResult = await versionService.createVersion({
@@ -473,14 +479,22 @@ export class DocumentService {
           content: input.content,
           userId: input.userId,
         });
-        console.log('[updateDocument] Version creation result:', {
+        
+        console.log('[updateDocument] 📊 Version creation result:', {
           success: versionResult.success,
           error: versionResult.error,
-          versionId: versionResult.data?.id
+          versionId: versionResult.data?.id,
+          versionNumber: versionResult.data?.versionNumber
         });
+        
+        if (!versionResult.success) {
+          console.error('[updateDocument] ⚠️ Version creation failed but continuing:', versionResult.error);
+        } else {
+          console.log('[updateDocument] ✅ Version created successfully!');
+        }
       } catch (versionError) {
         // Log version creation error but don't fail the document update
-        console.error('[updateDocument] Failed to create version history entry:', versionError);
+        console.error('[updateDocument] ❌ Exception during version creation:', versionError);
       }
 
       return {

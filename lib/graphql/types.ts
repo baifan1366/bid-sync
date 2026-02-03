@@ -48,11 +48,13 @@ export interface Proposal {
 
 export interface ProposalVersion {
   id: string
-  proposal_id: string
-  version_number: number
+  versionNumber: number
   content: any // JSONB
-  created_by: string
-  created_at: string
+  sectionsSnapshot?: any // JSONB
+  documentsSnapshot?: any // JSONB
+  createdBy: string
+  createdByName?: string
+  createdAt: string
 }
 
 export interface Document {
@@ -184,6 +186,22 @@ export interface ProposalSection {
   title: string
   content: string
   order: number
+  versions?: DocumentVersion[]
+  documents?: ProposalDocument[]
+}
+
+export interface DocumentVersion {
+  id: string
+  versionNumber: number
+  content: any
+  createdBy: string
+  createdByName: string
+  changesSummary: string
+  isRollback: boolean
+  rolledBackFrom?: string | null
+  createdAt: string
+  sectionsSnapshot?: any[]
+  attachmentsSnapshot?: any[]
 }
 
 export interface ProposalDocument {
@@ -195,6 +213,7 @@ export interface ProposalDocument {
   url: string
   uploadedAt: string
   uploadedBy: string
+  uploaderName?: string
 }
 
 export interface ComplianceItem {

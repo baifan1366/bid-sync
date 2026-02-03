@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { createGraphQLClient, ADMIN_PENDING_PROPOSALS, ADMIN_APPROVE_PROPOSAL, ADMIN_REJECT_PROPOSAL } from '@/lib/graphql/client'
+import { createGraphQLClient } from '@/lib/graphql/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -22,30 +22,73 @@ import {
   Clock, 
   DollarSign, 
   Calendar,
-  FileText,
-  Loader2,
-  User,
-  Briefcase
+  Loader2
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ProposalApprovalQueueSkeleton } from './proposal-approval-queue-skeleton'
 
+const PENDING_PROPOSALS_QUERY = `
+  query AdminPendingProposals {
+    adminPendingProposals {
+      id
+      title
+      status
+      budgetEstimate
+      timelineEstimate
+      submissionDate
+      project {
+        id
+        title
+      }
+      biddingLead {
+        id
+        fullName
+        email
+      }
+      biddingTeam {
+        id
+        name
+      }
+    }
+  }
+`
+
+const APPROVE_PROPOSAL_MUTATION = `
+  mutation ApproveProposal($proposalId: ID!, $notes: String) {
+    approveProposal(proposalId: $proposalId, notes: $notes) {
+      success
+      message
+      error
+    }
+  }
+`
+
+const REJECT_PROPOSAL_MUTATION = `
+  mutation RejectProposalSubmission($proposalId: ID!, $reason: String!) {
+    rejectProposalSubmission(proposalId: $proposalId, reason: $reason) {
+      success
+      message
+      error
+    }
+  }
+`
+
 interface Proposal {
   id: string
   title: string
-  status: string
   budgetEstimate: number | null
   timelineEstimate: string | null
   submissionDate: string
+  status: string
+  biddingLead: {
+    id: string
+    email: string
+    fullName: string | null
+  } | null
   project: {
     id: string
     title: string
-  }
-  biddingLead: {
-    id: string
-    fullName: string | null
-    email: string
-  }
+  } | null
   biddingTeam: {
     id: string
     name: string
@@ -60,26 +103,33 @@ export function ProposalApprovalQueue() {
   const [notes, setNotes] = useState('')
 
   const { data, isLoading } = useQuery({
-    queryKey: ['adminPendingProposals'],
+    queryKey: ['pendingProposals'],
     queryFn: async () => {
       const client = createGraphQLClient()
-      return await client.request<{ adminPendingProposals: Proposal[] }>(ADMIN_PENDING_PROPOSALS)
+      return await client.request<{ adminPendingProposals: Proposal[] }>(PENDING_PROPOSALS_QUERY)
     }
   })
 
   const approveMutation = useMutation({
-    mutationFn: async ({ proposalId, notes }: { proposalId: string; notes?: string }) => {
+    mutationFn: async ({ proposalId, notes }: { proposalId: string; notes: string }) => {
       const client = createGraphQLClient()
-      return await client.request(ADMIN_APPROVE_PROPOSAL, { proposalId, notes })
+      return await client.request(APPROVE_PROPOSAL_MUTATION, { proposalId, notes })
     },
-    onSuccess: () => {
-      toast({
-        title: 'Proposal approved',
-        description: 'The proposal has been approved and is now visible to the client.',
-      })
-      queryClient.invalidateQueries({ queryKey: ['adminPendingProposals'] })
-      queryClient.invalidateQueries({ queryKey: ['admin-proposals'] })
-      handleCloseDialog()
+    onSuccess: (data: any) => {
+      if (data.approveProposal.success) {
+        toast({
+          title: 'Proposal approved',
+          description: 'The proposal has been approved and is now visible to the client.',
+        })
+        queryClient.invalidateQueries({ queryKey: ['pendingProposals'] })
+        handleCloseDialog()
+      } else {
+        toast({
+          title: 'Approval failed',
+          description: data.approveProposal.error || 'Failed to approve proposal',
+          variant: 'destructive',
+        })
+      }
     },
     onError: (error: any) => {
       toast({
@@ -93,16 +143,23 @@ export function ProposalApprovalQueue() {
   const rejectMutation = useMutation({
     mutationFn: async ({ proposalId, reason }: { proposalId: string; reason: string }) => {
       const client = createGraphQLClient()
-      return await client.request(ADMIN_REJECT_PROPOSAL, { proposalId, reason })
+      return await client.request(REJECT_PROPOSAL_MUTATION, { proposalId, reason })
     },
-    onSuccess: () => {
-      toast({
-        title: 'Proposal rejected',
-        description: 'The lead has been notified of the rejection.',
-      })
-      queryClient.invalidateQueries({ queryKey: ['adminPendingProposals'] })
-      queryClient.invalidateQueries({ queryKey: ['admin-proposals'] })
-      handleCloseDialog()
+    onSuccess: (data: any) => {
+      if (data.rejectProposalSubmission.success) {
+        toast({
+          title: 'Proposal rejected',
+          description: 'The lead has been notified of the rejection.',
+        })
+        queryClient.invalidateQueries({ queryKey: ['pendingProposals'] })
+        handleCloseDialog()
+      } else {
+        toast({
+          title: 'Rejection failed',
+          description: data.rejectProposalSubmission.error || 'Failed to reject proposal',
+          variant: 'destructive',
+        })
+      }
     },
     onError: (error: any) => {
       toast({
@@ -135,7 +192,7 @@ export function ProposalApprovalQueue() {
     if (!selectedProposal) return
 
     if (actionType === 'approve') {
-      approveMutation.mutate({ proposalId: selectedProposal.id, notes: notes || undefined })
+      approveMutation.mutate({ proposalId: selectedProposal.id, notes })
     } else if (actionType === 'reject') {
       if (!notes.trim()) {
         toast({
@@ -180,27 +237,23 @@ export function ProposalApprovalQueue() {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <CardTitle className="text-xl mb-2">{proposal.title}</CardTitle>
-                  <div className="flex flex-col gap-2 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-2">
-                      <Briefcase className="h-4 w-4 text-yellow-400" />
-                      <span>Project: {proposal.project.title}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4 text-yellow-400" />
-                      <span>By {proposal.biddingLead.fullName || proposal.biddingLead.email}</span>
-                      <span>•</span>
-                      <span>{formatDistanceToNow(new Date(proposal.submissionDate), { addSuffix: true })}</span>
-                    </div>
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <span>By {proposal.biddingLead?.fullName || proposal.biddingLead?.email || 'Unknown'}</span>
+                    <span>•</span>
+                    <span>{formatDistanceToNow(new Date(proposal.submissionDate), { addSuffix: true })}</span>
+                  </div>
+                  <div className="text-sm text-muted-foreground mt-1">
+                    Project: {proposal.project?.title || 'Unknown Project'}
                   </div>
                 </div>
                 <Badge className="bg-yellow-400 text-black">
                   <Clock className="h-3 w-3 mr-1" />
-                  Pending Review
+                  Pending Approval
                 </Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {proposal.budgetEstimate && (
                   <div className="flex items-center gap-2">
                     <DollarSign className="h-4 w-4 text-yellow-400" />
@@ -219,13 +272,6 @@ export function ProposalApprovalQueue() {
                     </div>
                   </div>
                 )}
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-yellow-400" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Status</p>
-                    <p className="font-medium">Awaiting Approval</p>
-                  </div>
-                </div>
               </div>
 
               <div className="flex gap-2 pt-4">
@@ -258,20 +304,17 @@ export function ProposalApprovalQueue() {
             </DialogTitle>
             <DialogDescription>
               {actionType === 'approve'
-                ? 'This proposal will be published and visible to the client.'
+                ? 'This proposal will be approved and visible to the client.'
                 : 'Please provide a reason for rejecting this proposal.'}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             {selectedProposal && (
-              <div className="p-4 bg-muted rounded-lg space-y-2">
-                <p className="font-medium">{selectedProposal.title}</p>
-                <p className="text-sm text-muted-foreground">
-                  Project: {selectedProposal.project.title}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  Lead: {selectedProposal.biddingLead.fullName || selectedProposal.biddingLead.email}
+              <div className="p-4 bg-muted rounded-lg">
+                <p className="text-sm font-medium">{selectedProposal.title}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Project: {selectedProposal.project?.title || 'Unknown Project'}
                 </p>
               </div>
             )}

@@ -38,8 +38,7 @@ const proposalDetailsSchema = z.object({
     .max(100, "Timeline estimate must be less than 100 characters"),
   executiveSummary: z.string()
     .min(1, "Executive summary is required")
-    .min(50, "Executive summary must be at least 50 characters")
-    .max(5000, "Executive summary must be less than 5000 characters"),
+    .min(50, "Executive summary must be at least 50 characters"),
 })
 
 type ProposalDetailsFormData = z.infer<typeof proposalDetailsSchema>
@@ -250,7 +249,7 @@ export function ProposalDetailsStep({
                   </div>
                 </FormControl>
                 <FormDescription id="summary-description">
-                  A detailed summary of your proposal (50-5000 characters) • <span aria-live="polite">{editorTextLength} / 5000</span>
+                  A detailed summary of your proposal (minimum 50 characters) • <span aria-live="polite">{editorTextLength} characters</span>
                 </FormDescription>
                 {errors.executiveSummary && <FormMessage id="summary-error" />}
               </FormItem>

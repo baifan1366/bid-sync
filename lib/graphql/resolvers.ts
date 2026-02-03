@@ -202,6 +202,143 @@ const checkUserSuspension = (user: any, operation: string): void => {
   }
 };
 
+/**
+ * Safely converts content to string format
+ * Handles cases where content might be stored as JSON/JSONB
+ */
+const safeContentToString = (content: any): string => {
+  if (!content) return '';
+  
+  // If it's already a string, check if it's JSON
+  if (typeof content === 'string') {
+    // Try to parse if it looks like JSON
+    if (content.trim().startsWith('{') || content.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(content);
+        // If it's a Tiptap document, convert to HTML
+        if (parsed.type === 'doc' && parsed.content) {
+          return convertTiptapToHTML(parsed);
+        }
+        // If it's an empty object/array, return empty string
+        if (Array.isArray(parsed) && parsed.length === 0) return '';
+        if (typeof parsed === 'object' && Object.keys(parsed).length === 0) return '';
+        // Otherwise return the JSON string as-is
+        return content;
+      } catch {
+        // If parsing fails, return as-is
+        return content;
+      }
+    }
+    return content;
+  }
+  
+  // If it's an object
+  if (typeof content === 'object') {
+    // If it's an empty object/array, return empty string
+    if (Array.isArray(content) && content.length === 0) return '';
+    if (Object.keys(content).length === 0) return '';
+    
+    // If it's a Tiptap/ProseMirror JSON document
+    if (content.type === 'doc' && content.content) {
+      return convertTiptapToHTML(content);
+    }
+    
+    // For other objects, stringify them
+    return JSON.stringify(content);
+  }
+  
+  return String(content);
+};
+
+/**
+ * Convert Tiptap JSON to HTML
+ * Simple converter for basic Tiptap nodes
+ */
+const convertTiptapToHTML = (doc: any): string => {
+  if (!doc || !doc.content) return '';
+  
+  const convertNode = (node: any): string => {
+    if (!node) return '';
+    
+    switch (node.type) {
+      case 'doc':
+        return node.content ? node.content.map(convertNode).join('') : '';
+      
+      case 'paragraph':
+        const pContent = node.content ? node.content.map(convertNode).join('') : '';
+        return pContent ? `<p>${pContent}</p>` : '<p><br></p>';
+      
+      case 'text':
+        let text = node.text || '';
+        // Apply marks (bold, italic, etc.)
+        if (node.marks) {
+          node.marks.forEach((mark: any) => {
+            switch (mark.type) {
+              case 'bold':
+                text = `<strong>${text}</strong>`;
+                break;
+              case 'italic':
+                text = `<em>${text}</em>`;
+                break;
+              case 'underline':
+                text = `<u>${text}</u>`;
+                break;
+              case 'strike':
+                text = `<s>${text}</s>`;
+                break;
+              case 'code':
+                text = `<code>${text}</code>`;
+                break;
+              case 'link':
+                const href = mark.attrs?.href || '#';
+                text = `<a href="${href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+                break;
+            }
+          });
+        }
+        return text;
+      
+      case 'heading':
+        const level = node.attrs?.level || 1;
+        const hContent = node.content ? node.content.map(convertNode).join('') : '';
+        return `<h${level}>${hContent}</h${level}>`;
+      
+      case 'bulletList':
+        const ulContent = node.content ? node.content.map(convertNode).join('') : '';
+        return `<ul>${ulContent}</ul>`;
+      
+      case 'orderedList':
+        const olContent = node.content ? node.content.map(convertNode).join('') : '';
+        return `<ol>${olContent}</ol>`;
+      
+      case 'listItem':
+        const liContent = node.content ? node.content.map(convertNode).join('') : '';
+        return `<li>${liContent}</li>`;
+      
+      case 'blockquote':
+        const bqContent = node.content ? node.content.map(convertNode).join('') : '';
+        return `<blockquote>${bqContent}</blockquote>`;
+      
+      case 'codeBlock':
+        const codeContent = node.content ? node.content.map(convertNode).join('') : '';
+        const language = node.attrs?.language || '';
+        return `<pre><code class="language-${language}">${codeContent}</code></pre>`;
+      
+      case 'hardBreak':
+        return '<br>';
+      
+      case 'horizontalRule':
+        return '<hr>';
+      
+      default:
+        // For unknown nodes, try to render content
+        return node.content ? node.content.map(convertNode).join('') : '';
+    }
+  };
+  
+  return convertNode(doc);
+};
+
 // Helper function to map database project to GraphQL schema
 const mapProject = (project: any) => ({
   id: project.id,
@@ -419,8 +556,8 @@ export const resolvers = {
       // Calculate proposal counts
       const totalProposals = proposals?.length || 0;
       const submittedProposals = proposals?.filter((p: any) => p.status === 'submitted').length || 0;
-      const underReviewProposals = proposals?.filter((p: any) => p.status === 'reviewing').length || 0;
-      const acceptedProposals = proposals?.filter((p: any) => p.status === 'approved').length || 0;
+      const underReviewProposals = proposals?.filter((p: any) => p.status === 'under_review' || p.status === 'reviewing').length || 0;
+      const acceptedProposals = proposals?.filter((p: any) => p.status === 'accepted' || p.status === 'approved').length || 0;
       const rejectedProposals = proposals?.filter((p: any) => p.status === 'rejected').length || 0;
 
       // Build proposal summaries
@@ -477,7 +614,7 @@ export const resolvers = {
           timelineEstimate: proposal.timeline_estimate || null,
           executiveSummary: proposal.executive_summary || null,
           submissionDate: proposal.submitted_at || proposal.created_at,
-          status: proposal.status ? proposal.status.toUpperCase() : 'DRAFT',
+          status: (proposal.status || 'draft').toUpperCase(),
           complianceScore,
           unreadMessages: unreadCount || 0,
           additionalInfo: [], // Required field - empty array as default
@@ -491,7 +628,7 @@ export const resolvers = {
           clientId: project.client_id,
           title: project.title,
           description: project.description,
-          status: project.status.toUpperCase(),
+          status: (project.status || 'open').toUpperCase(),
           budget: project.budget,
           budget_min: project.budget_min,
           budget_max: project.budget_max,
@@ -627,63 +764,267 @@ export const resolvers = {
       // Filter out the lead from members list
       const members = teamMembersWithDetails.filter(m => m.id !== lead?.id && m.role !== 'lead');
 
-      // Fetch proposal versions
-      const { data: versions } = await supabase
+      // Fetch proposal versions with creator details
+      const { data: versions, error: versionsError } = await supabase
         .from('proposal_versions')
         .select('*')
         .eq('proposal_id', proposalId)
         .order('version_number', { ascending: false });
 
+      console.log('[proposalDetail] Versions query:', { 
+        proposal_id: proposalId,
+        version_count: versions?.length || 0,
+        error: versionsError,
+        first_version: versions?.[0],
+      });
+
       const currentVersion = versions?.[0]?.version_number || 1;
 
+      // Get creator names for versions
+      const versionsWithCreators = await Promise.all((versions || []).map(async (v: any) => {
+        const { data: creatorData } = await adminClient.auth.admin.getUserById(v.created_by);
+        return {
+          ...v,
+          created_by_name: creatorData?.user?.user_metadata?.full_name || 
+                          creatorData?.user?.user_metadata?.name || 
+                          creatorData?.user?.email?.split('@')[0] || 
+                          'Unknown'
+        };
+      }));
+
+      console.log('[proposalDetail] Versions with creators:', versionsWithCreators.length);
+
       // Fetch workspace and document sections for this proposal's project
-      const { data: workspace } = await supabase
+      // Note: There might be multiple workspaces per project, get the first one
+      const { data: workspaces, error: workspaceError } = await supabase
         .from('workspaces')
         .select('id')
         .eq('project_id', proposal.project_id)
-        .maybeSingle();
+        .limit(1);
+
+      const workspace = workspaces?.[0];
+
+      console.log('[proposalDetail] Workspace lookup:', { 
+        project_id: proposal.project_id, 
+        workspace_id: workspace?.id,
+        workspace_count: workspaces?.length || 0,
+        error: workspaceError 
+      });
 
       let sections: any[] = [];
       let documents: any[] = [];
 
       if (workspace) {
         // Fetch workspace documents
-        const { data: workspaceDocs } = await supabase
+        const { data: workspaceDocs, error: docsError } = await supabase
           .from('workspace_documents')
           .select('id, title, content, created_at')
           .eq('workspace_id', workspace.id);
 
-        // Fetch document sections
-        const { data: docSections } = await supabase
-          .from('document_sections')
-          .select('id, document_id, title, content, "order", status')
-          .in('document_id', (workspaceDocs || []).map(d => d.id))
-          .order('"order"', { ascending: true });
+        console.log('[proposalDetail] Workspace documents:', { 
+          workspace_id: workspace.id,
+          doc_count: workspaceDocs?.length || 0,
+          error: docsError 
+        });
 
-        sections = (docSections || []).map((section: any) => ({
-          id: section.id,
-          title: section.title || 'Untitled Section',
-          content: section.content || '',
-          order: section.order,
-        }));
+        // Fetch document sections only if we have workspace documents
+        if (workspaceDocs && workspaceDocs.length > 0) {
+          console.log('[proposalDetail] About to query document_sections for document_ids:', workspaceDocs.map(d => d.id));
+          
+          const { data: docSections, error: sectionsError } = await supabase
+            .from('document_sections')
+            .select('id, document_id, title, content, "order", status')
+            .in('document_id', workspaceDocs.map(d => d.id))
+            .order('"order"', { ascending: true });
 
-        // If no sections from document_sections, try to get from workspace_documents content
-        if (sections.length === 0 && workspaceDocs && workspaceDocs.length > 0) {
-          sections = workspaceDocs.map((doc: any, index: number) => ({
-            id: doc.id,
-            title: doc.title || `Document ${index + 1}`,
-            content: doc.content || '',
-            order: index,
+          console.log('[proposalDetail] Document sections query result:', { 
+            section_count: docSections?.length || 0,
+            error: sectionsError,
+            sections: docSections?.map(s => ({ 
+              id: s.id, 
+              document_id: s.document_id, 
+              title: s.title 
+            })),
+          });
+
+          // For each section, get content, versions, and attachments
+          sections = await Promise.all((docSections || []).map(async (section: any) => {
+            let contentStr = safeContentToString(section.content);
+            
+            // If section content is empty, try to get from document_versions
+            if (!contentStr || contentStr === '' || contentStr === '{}') {
+              const { data: latestVersion, error: versionError } = await supabase
+                .from('document_versions')
+                .select('content, version_number')
+                .eq('document_id', section.document_id)
+                .order('version_number', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              
+              console.log('[proposalDetail] Document version query:', {
+                section_id: section.id,
+                document_id: section.document_id,
+                version_found: !!latestVersion,
+                version_number: latestVersion?.version_number,
+                version_error: versionError,
+                content_type: latestVersion?.content ? typeof latestVersion.content : 'undefined',
+              });
+              
+              if (latestVersion?.content) {
+                contentStr = safeContentToString(latestVersion.content);
+              }
+            }
+            
+            // Get all versions for this section's document
+            const { data: sectionVersions, error: versionsError } = await supabase
+              .from('document_versions')
+              .select('id, version_number, content, created_by, changes_summary, is_rollback, rolled_back_from, created_at, sections_snapshot, attachments_snapshot')
+              .eq('document_id', section.document_id)
+              .order('version_number', { ascending: false });
+            
+            console.log('[proposalDetail] Section versions query:', {
+              section_id: section.id,
+              document_id: section.document_id,
+              versions_count: sectionVersions?.length || 0,
+              versions_error: versionsError,
+            });
+            
+            // Get creator names for versions
+            const versionsWithCreators = await Promise.all((sectionVersions || []).map(async (v: any) => {
+              const { data: creatorData } = await adminClient.auth.admin.getUserById(v.created_by);
+              return {
+                id: v.id,
+                versionNumber: v.version_number,
+                content: v.content,
+                createdBy: v.created_by,
+                createdByName: creatorData?.user?.user_metadata?.full_name || 
+                              creatorData?.user?.user_metadata?.name || 
+                              creatorData?.user?.email?.split('@')[0] || 
+                              'Unknown',
+                changesSummary: v.changes_summary || 'Document updated',
+                isRollback: v.is_rollback || false,
+                rolledBackFrom: v.rolled_back_from,
+                createdAt: v.created_at,
+                sectionsSnapshot: v.sections_snapshot || [],
+                attachmentsSnapshot: v.attachments_snapshot || [],
+              };
+            }));
+            
+            // Get attachments for this section
+            const { data: sectionAttachments, error: attachmentsError } = await supabase
+              .from('section_attachments')
+              .select('id, file_name, file_type, file_size, file_path, uploaded_by, created_at')
+              .eq('section_id', section.id)
+              .order('created_at', { ascending: false });
+            
+            console.log('[proposalDetail] Section attachments query:', {
+              section_id: section.id,
+              attachments_count: sectionAttachments?.length || 0,
+              attachments_error: attachmentsError,
+            });
+            
+            // Get uploader names for attachments
+            const attachmentsWithUploaders = await Promise.all((sectionAttachments || []).map(async (att: any) => {
+              const { data: uploaderData } = await adminClient.auth.admin.getUserById(att.uploaded_by);
+              return {
+                id: att.id,
+                name: att.file_name || 'attachment',
+                fileType: att.file_type || 'unknown',
+                fileSize: att.file_size || 0,
+                category: 'OTHER',
+                url: att.file_path || '',
+                uploadedAt: att.created_at,
+                uploadedBy: att.uploaded_by,
+                uploaderName: uploaderData?.user?.user_metadata?.full_name || 
+                             uploaderData?.user?.user_metadata?.name || 
+                             uploaderData?.user?.email?.split('@')[0] || 
+                             'Unknown',
+              };
+            }));
+            
+            console.log('[proposalDetail] Section mapping:', {
+              section_id: section.id,
+              document_id: section.document_id,
+              content_type: typeof section.content,
+              content_value: section.content,
+              converted_content: contentStr,
+              versions_count: versionsWithCreators.length,
+              attachments_count: attachmentsWithUploaders.length,
+              first_version: versionsWithCreators[0] ? {
+                id: versionsWithCreators[0].id,
+                versionNumber: versionsWithCreators[0].versionNumber,
+                createdByName: versionsWithCreators[0].createdByName,
+              } : null,
+            });
+            
+            const sectionResult = {
+              id: section.id,
+              title: section.title || 'Untitled Section',
+              content: contentStr,
+              order: section.order,
+              versions: versionsWithCreators,
+              documents: attachmentsWithUploaders,
+            };
+            
+            console.log('[proposalDetail] Section result structure:', {
+              section_id: sectionResult.id,
+              has_versions: Array.isArray(sectionResult.versions),
+              versions_length: sectionResult.versions.length,
+              has_documents: Array.isArray(sectionResult.documents),
+              documents_length: sectionResult.documents.length,
+            });
+            
+            return sectionResult;
+          }));
+
+          // If no sections from document_sections, try to get from workspace_documents content
+          if (sections.length === 0) {
+            sections = workspaceDocs.map((doc: any, index: number) => ({
+              id: doc.id,
+              title: doc.title || `Document ${index + 1}`,
+              content: safeContentToString(doc.content),
+              order: index,
+            }));
+          }
+        }
+      }
+
+      console.log('[proposalDetail] Sections after workspace query:', sections.length);
+      
+      // Debug: Print first section structure
+      if (sections.length > 0) {
+        console.log('[proposalDetail] First section structure:', {
+          id: sections[0].id,
+          title: sections[0].title,
+          has_versions: 'versions' in sections[0],
+          versions_is_array: Array.isArray(sections[0].versions),
+          versions_length: sections[0].versions?.length,
+          has_documents: 'documents' in sections[0],
+          documents_is_array: Array.isArray(sections[0].documents),
+          documents_length: sections[0].documents?.length,
+          all_keys: Object.keys(sections[0]),
+        });
+      }
+
+      // Fallback: try to get sections from latest version's sections_snapshot
+      if (sections.length === 0 && versionsWithCreators?.[0]?.sections_snapshot) {
+        const sectionsSnapshot = versionsWithCreators[0].sections_snapshot;
+        if (Array.isArray(sectionsSnapshot)) {
+          sections = sectionsSnapshot.map((section: any, index: number) => ({
+            id: section.id || `section-${index}`,
+            title: section.title || `Section ${index + 1}`,
+            content: safeContentToString(section.content),
+            order: section.order ?? index,
           }));
         }
       }
 
       // Fallback: try to get sections from proposal_versions content
-      if (sections.length === 0 && versions?.[0]?.content?.sections) {
-        sections = versions[0].content.sections.map((section: any, index: number) => ({
+      if (sections.length === 0 && versionsWithCreators?.[0]?.content?.sections) {
+        sections = versionsWithCreators[0].content.sections.map((section: any, index: number) => ({
           id: `section-${index}`,
           title: section.title || `Section ${index + 1}`,
-          content: section.content || '',
+          content: safeContentToString(section.content),
           order: index,
         }));
       }
@@ -705,13 +1046,55 @@ export const resolvers = {
         uploadedBy: doc.created_by,
       }));
 
+      // If no documents from documents table, try from section_attachments
+      if (documents.length === 0 && sections.length > 0) {
+        const sectionIds = sections.map(s => s.id);
+        const { data: sectionAttachments } = await supabase
+          .from('section_attachments')
+          .select('*')
+          .in('section_id', sectionIds);
+        
+        console.log('[proposalDetail] Section attachments:', {
+          section_count: sections.length,
+          attachment_count: sectionAttachments?.length || 0,
+        });
+        
+        documents = (sectionAttachments || []).map((att: any) => ({
+          id: att.id,
+          name: att.file_name || 'attachment',
+          fileType: att.file_type || 'unknown',
+          fileSize: att.file_size || 0,
+          category: 'OTHER',
+          url: att.file_path || '',
+          uploadedAt: att.created_at,
+          uploadedBy: att.uploaded_by,
+        }));
+      }
+
+      // If still no documents, try from latest version's documents_snapshot
+      if (documents.length === 0 && versionsWithCreators?.[0]?.documents_snapshot) {
+        const docsSnapshot = versionsWithCreators[0].documents_snapshot;
+        if (Array.isArray(docsSnapshot)) {
+          documents = docsSnapshot.map((doc: any) => ({
+            id: doc.id || `doc-${Math.random()}`,
+            name: doc.name || 'document',
+            fileType: doc.fileType || doc.file_type || 'unknown',
+            fileSize: doc.fileSize || doc.file_size || 0,
+            category: doc.category || 'OTHER',
+            url: doc.url || '',
+            uploadedAt: doc.uploadedAt || doc.uploaded_at || new Date().toISOString(),
+            uploadedBy: doc.uploadedBy || doc.uploaded_by || '',
+          }));
+        }
+      }
+
       // Fetch checklist items
       const { data: checklistItems } = await supabase
         .from('checklist_items')
         .select('*')
         .eq('proposal_id', proposalId);
 
-      return {
+      const result = {
         id: proposal.id,
         title: proposal.title || `Proposal for ${proposal.projects.title}`,
         status: proposal.status ? proposal.status.toUpperCase() : 'DRAFT',
@@ -730,15 +1113,28 @@ export const resolvers = {
           completedBy: item.reviewer_id,
           completedAt: item.checked_at,
         })),
-        versions: (versions || []).map((v: any) => ({
+        versions: (versionsWithCreators || []).map((v: any) => ({
           id: v.id,
           versionNumber: v.version_number,
-          content: JSON.stringify(v.content),
+          content: v.content,
+          sectionsSnapshot: v.sections_snapshot,
+          documentsSnapshot: v.documents_snapshot,
           createdBy: v.created_by,
+          createdByName: v.created_by_name,
           createdAt: v.created_at,
         })),
         currentVersion,
       };
+
+      console.log('[proposalDetail] Final result:', {
+        proposal_id: proposalId,
+        sections_count: result.sections.length,
+        documents_count: result.documents.length,
+        versions_count: result.versions.length,
+        has_workspace: !!workspace,
+      });
+
+      return result;
     },
 
     chatMessages: async (
@@ -1890,6 +2286,8 @@ export const resolvers = {
             isRollback: version.isRollback,
             rolledBackFrom: version.rolledBackFrom,
             createdAt: version.createdAt,
+            sectionsSnapshot: version.sectionsSnapshot || [],
+            attachmentsSnapshot: version.attachmentsSnapshot || [],
           };
         })
       );
@@ -5657,7 +6055,7 @@ export const resolvers = {
           return {
             id: p.id,
             projectTitle: p.projects?.title || 'Untitled Project',
-            status: p.status,
+            status: p.status ? p.status.toUpperCase() : 'DRAFT',
             submittedAt: p.submitted_at || p.created_at,
             budgetEstimate: p.budget_estimate || 0,
           };
@@ -6014,6 +6412,18 @@ export const resolvers = {
       );
 
       return sectionsWithDetails;
+    },
+  },
+
+  // Field Resolvers for ProposalSection
+  ProposalSection: {
+    versions: (parent: any) => {
+      console.log('[ProposalSection.versions] Resolving versions for section:', parent.id, 'count:', parent.versions?.length || 0);
+      return parent.versions || [];
+    },
+    documents: (parent: any) => {
+      console.log('[ProposalSection.documents] Resolving documents for section:', parent.id, 'count:', parent.documents?.length || 0);
+      return parent.documents || [];
     },
   },
 
@@ -6541,6 +6951,105 @@ export const resolvers = {
         decidedBy: decision.decided_by,
         decidedAt: decision.decided_at,
         feedback: decision.feedback,
+      };
+    },
+
+    updateProposalStatus: async (
+      _: any,
+      { proposalId, status }: { proposalId: string; status: string }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw createDetailedError('Not authenticated', 'UNAUTHENTICATED', {
+          operation: 'updateProposalStatus',
+          hint: 'Please log in to update proposal status',
+          originalError: authError,
+        });
+      }
+
+      // Validate status
+      const validStatuses = ['draft', 'submitted', 'under_review', 'accepted', 'rejected'];
+      if (!validStatuses.includes(status.toLowerCase())) {
+        throw createDetailedError('Invalid proposal status', 'BAD_USER_INPUT', {
+          operation: 'updateProposalStatus',
+          field: 'status',
+          hint: `Status must be one of: ${validStatuses.join(', ')}`,
+        });
+      }
+
+      // Get proposal and project details
+      const { data: proposal, error: proposalError } = await supabase
+        .from('proposals')
+        .select('id, project_id, lead_id, status, projects!inner(client_id)')
+        .eq('id', proposalId)
+        .single();
+
+      if (proposalError || !proposal) {
+        throw handleSupabaseError(proposalError, 'updateProposalStatus.fetchProposal', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: proposalId,
+        });
+      }
+
+      // Authorization: Only project client can update proposal status
+      const projectClientId = (proposal.projects as any).client_id;
+      if (projectClientId !== user.id) {
+        throw createDetailedError('Forbidden: Only the project client can update proposal status', 'FORBIDDEN', {
+          operation: 'updateProposalStatus',
+          userId: user.id,
+          resourceId: proposalId,
+          hint: 'You must be the project owner to update proposal status',
+        });
+      }
+
+      // Update proposal status
+      const { data: updatedProposal, error: updateError } = await supabase
+        .from('proposals')
+        .update({ 
+          status: status.toLowerCase(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', proposalId)
+        .select('id, status, updated_at')
+        .single();
+
+      if (updateError || !updatedProposal) {
+        throw handleSupabaseError(updateError, 'updateProposalStatus.update', {
+          table: 'proposals',
+          userId: user.id,
+          resourceId: proposalId,
+        });
+      }
+
+      // Send notification to bidding lead
+      if (status.toLowerCase() === 'under_review') {
+        const { NotificationService } = await import('@/lib/notification-service');
+        
+        NotificationService.createNotification({
+          userId: proposal.lead_id,
+          type: 'proposal_status_changed',
+          title: 'Proposal Under Review',
+          body: 'Your proposal is now being reviewed by the client.',
+          data: {
+            proposalId,
+            projectId: proposal.project_id,
+            newStatus: status.toLowerCase(),
+          },
+          sendEmail: false,
+          priority: NotificationService.NotificationPriority.MEDIUM,
+        }).catch(error => {
+          console.error('Failed to send notification:', error);
+        });
+      }
+
+      return {
+        id: updatedProposal.id,
+        status: updatedProposal.status,
+        updatedAt: updatedProposal.updated_at,
       };
     },
 
@@ -8064,6 +8573,89 @@ export const resolvers = {
       };
     },
 
+    // Admin Proposal Approval Mutations
+    approveProposal: async (
+      _: any,
+      { proposalId, notes }: { proposalId: string; notes?: string }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Verify user is admin
+      const userRole = user.user_metadata?.role;
+      if (userRole !== 'admin') {
+        throw new GraphQLError('Only admins can approve proposals', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Call the database function
+      const { data, error } = await supabase.rpc('approve_proposal', {
+        p_proposal_id: proposalId,
+        p_admin_id: user.id,
+        p_notes: notes || null,
+      });
+
+      if (error) {
+        console.error('Error approving proposal:', error);
+        return {
+          success: false,
+          message: '',
+          error: error.message,
+        };
+      }
+
+      return data as { success: boolean; message: string; error?: string };
+    },
+
+    rejectProposalSubmission: async (
+      _: any,
+      { proposalId, reason }: { proposalId: string; reason: string }
+    ) => {
+      const supabase = await createClient();
+      
+      // Get authenticated user
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        throw new GraphQLError('Not authenticated', {
+          extensions: { code: 'UNAUTHENTICATED' },
+        });
+      }
+
+      // Verify user is admin
+      const userRole = user.user_metadata?.role;
+      if (userRole !== 'admin') {
+        throw new GraphQLError('Only admins can reject proposals', {
+          extensions: { code: 'FORBIDDEN' },
+        });
+      }
+
+      // Call the database function
+      const { data, error } = await supabase.rpc('reject_proposal', {
+        p_proposal_id: proposalId,
+        p_admin_id: user.id,
+        p_reason: reason,
+      });
+
+      if (error) {
+        console.error('Error rejecting proposal:', error);
+        return {
+          success: false,
+          message: '',
+          error: error.message,
+        };
+      }
+
+      return data as { success: boolean; message: string; error?: string };
+    },
+
     // Collaborative Editor Mutations - Document Operations
     createWorkspace: async (
       _: any,
@@ -8165,6 +8757,8 @@ export const resolvers = {
       _: any,
       { documentId, input }: { documentId: string; input: { title?: string; description?: string; content?: any } }
     ) => {
+      console.log('[GraphQL Resolver] 🚀 updateDocument called:', { documentId, hasContent: !!input.content, hasTitle: !!input.title, hasDescription: !!input.description });
+      
       const supabase = await createClient();
       
       const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -8174,10 +8768,13 @@ export const resolvers = {
         });
       }
 
+      console.log('[GraphQL Resolver] 👤 User authenticated:', user.id);
+
       const documentService = new DocumentService();
 
       // Update metadata if provided
       if (input.title !== undefined || input.description !== undefined) {
+        console.log('[GraphQL Resolver] 📝 Updating metadata...');
         const metadataResult = await documentService.updateDocumentMetadata({
           documentId,
           title: input.title,
@@ -8186,29 +8783,37 @@ export const resolvers = {
         });
 
         if (!metadataResult.success) {
+          console.error('[GraphQL Resolver] ❌ Metadata update failed:', metadataResult.error);
           return {
             success: false,
             document: null,
             error: metadataResult.error || 'Failed to update document metadata',
           };
         }
+        console.log('[GraphQL Resolver] ✅ Metadata updated');
       }
 
       // Update content if provided
       if (input.content !== undefined) {
+        console.log('[GraphQL Resolver] 📄 Updating content...');
         const contentResult = await documentService.updateDocument({
           documentId,
           content: input.content,
           userId: user.id,
         });
 
+        console.log('[GraphQL Resolver] 📊 Content update result:', { success: contentResult.success, error: contentResult.error });
+
         if (!contentResult.success || !contentResult.data) {
+          console.error('[GraphQL Resolver] ❌ Content update failed');
           return {
             success: false,
             document: null,
             error: contentResult.error || 'Failed to update document content',
           };
         }
+
+        console.log('[GraphQL Resolver] ✅ Content updated successfully');
 
         // Sync document content to the corresponding proposal
         // This ensures workspace page shows the latest content from collaborative editor

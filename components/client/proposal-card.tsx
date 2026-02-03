@@ -2,11 +2,12 @@
 
 import { useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Calendar, Users, DollarSign, MessageSquare, Star, Award } from "lucide-react"
+import { Calendar, Users, DollarSign, MessageSquare, Star, Award, CheckCircle, XCircle, Eye } from "lucide-react"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Button } from "@/components/ui/button"
 import { ProposalSummary } from "@/lib/graphql/types"
 import { formatProposalBudget, calculateTeamSize } from "@/lib/proposal-utils"
 import { cn } from "@/lib/utils"
@@ -19,6 +20,10 @@ interface ProposalCardProps {
   onSelect: (id: string) => void
   onClick: (id: string) => void
   isSelectionDisabled?: boolean
+  onAccept?: (proposalId: string) => void
+  onReject?: (proposalId: string) => void
+  onMarkUnderReview?: (proposalId: string) => void
+  showQuickActions?: boolean
 }
 
 const statusColors: Record<string, string> = {
@@ -108,6 +113,10 @@ export function ProposalCard({
   onSelect,
   onClick,
   isSelectionDisabled = false,
+  onAccept,
+  onReject,
+  onMarkUnderReview,
+  showQuickActions = false,
 }: ProposalCardProps) {
   const [isHovered, setIsHovered] = useState(false)
   const queryClient = useQueryClient()
@@ -128,8 +137,9 @@ export function ProposalCard({
   }
 
   const handleCardClick = (e: React.MouseEvent) => {
-    // Don't trigger card click if clicking checkbox
-    if ((e.target as HTMLElement).closest('[data-checkbox]')) {
+    // Don't trigger card click if clicking checkbox or action buttons
+    if ((e.target as HTMLElement).closest('[data-checkbox]') || 
+        (e.target as HTMLElement).closest('[data-action-button]')) {
       return
     }
     onClick(proposal.id)
@@ -195,6 +205,7 @@ export function ProposalCard({
                 onCheckedChange={handleCheckboxChange}
                 disabled={isSelectionDisabled && !isSelected}
                 aria-label={`Select ${proposal.title || 'proposal'} for comparison`}
+                className="border-2 border-yellow-400 data-[state=checked]:bg-yellow-400 data-[state=checked]:border-yellow-400 data-[state=checked]:text-black h-5 w-5"
               />
             </div>
 
@@ -299,6 +310,55 @@ export function ProposalCard({
             >
               {proposal.unreadMessages} unread {proposal.unreadMessages === 1 ? 'message' : 'messages'}
             </Badge>
+          </div>
+        )}
+
+        {/* Quick Actions */}
+        {showQuickActions && (statusKey === 'submitted' || statusKey === 'under_review') && (
+          <div className="flex flex-col gap-2 pt-3 border-t border-yellow-400/20" data-action-button>
+            {statusKey === 'submitted' && onMarkUnderReview && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onMarkUnderReview(proposal.id)
+                }}
+                className="w-full border-yellow-400/40 hover:bg-yellow-400/10 hover:border-yellow-400 text-yellow-400"
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                Mark Under Review
+              </Button>
+            )}
+            <div className="flex gap-2">
+              {onAccept && (
+                <Button
+                  size="sm"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onAccept(proposal.id)
+                  }}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                >
+                  <CheckCircle className="h-4 w-4 mr-1" />
+                  Accept
+                </Button>
+              )}
+              {onReject && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onReject(proposal.id)
+                  }}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white"
+                >
+                  <XCircle className="h-4 w-4 mr-1" />
+                  Reject
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </CardContent>

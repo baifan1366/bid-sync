@@ -16,15 +16,8 @@ import {
   Image as ImageIcon,
   FileSpreadsheet,
   FileCode,
-  MoreVertical
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { SectionAttachmentService, type SectionAttachment } from '@/lib/section-attachment-service'
 import { useToast } from '@/components/ui/use-toast'
 
@@ -33,6 +26,7 @@ interface SectionAttachmentPanelProps {
   documentId: string
   currentUserId: string
   isLead: boolean
+  canUpload?: boolean // Whether user can upload files (editor/owner/team member)
   onClose: () => void
 }
 
@@ -41,12 +35,18 @@ interface SectionAttachmentPanelProps {
  * 
  * Displays and manages file attachments for a specific section.
  * Similar to Microsoft Teams attachments with upload, download, and delete.
+ * 
+ * Features:
+ * - All team members can view and download attachments
+ * - Team members with editor role can upload attachments
+ * - Only uploader and lead can delete attachments
  */
 export function SectionAttachmentPanel({
   sectionId,
   documentId,
   currentUserId,
   isLead,
+  canUpload = true,
   onClose,
 }: SectionAttachmentPanelProps) {
   const [attachments, setAttachments] = useState<SectionAttachment[]>([])
@@ -124,8 +124,6 @@ export function SectionAttachmentPanel({
   }
 
   const handleDelete = async (attachmentId: string, fileName: string) => {
-    if (!confirm(`Are you sure you want to delete ${fileName}?`)) return
-
     const result = await SectionAttachmentService.deleteAttachment(attachmentId, currentUserId)
 
     if (result.success) {
@@ -169,47 +167,44 @@ export function SectionAttachmentPanel({
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-yellow-400/20">
-        <div className="flex items-center gap-2">
-          <Paperclip className="h-5 w-5 text-yellow-400" />
-          <h3 className="font-semibold">Attachments</h3>
-          <Badge className="bg-yellow-400 text-black">{attachments.length}</Badge>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <X className="h-4 w-4" />
-        </Button>
+      <div className="flex items-center gap-2 p-4 border-b border-yellow-400/20">
+        <Paperclip className="h-5 w-5 text-yellow-400" />
+        <h3 className="font-semibold">Attachments</h3>
+        <Badge className="bg-yellow-400 text-black">{attachments.length}</Badge>
       </div>
 
-      {/* Upload Area */}
-      <div className="p-4 border-b border-yellow-400/20">
-        <input
-          ref={fileInputRef}
-          type="file"
-          onChange={handleFileSelect}
-          className="hidden"
-          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv,.zip"
-        />
-        <Button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={uploading}
-          className="w-full bg-yellow-400 hover:bg-yellow-500 text-black"
-        >
-          {uploading ? (
-            <>
-              <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-black border-t-transparent" />
-              Uploading...
-            </>
-          ) : (
-            <>
-              <Upload className="h-4 w-4 mr-2" />
-              Upload File
-            </>
-          )}
-        </Button>
-        <p className="text-xs text-muted-foreground mt-2 text-center">
-          Max file size: 100MB
-        </p>
-      </div>
+      {/* Upload Area - Only show if user can upload */}
+      {canUpload && (
+        <div className="p-4 border-b border-yellow-400/20">
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={handleFileSelect}
+            className="hidden"
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png,.gif,.webp,.txt,.csv,.zip"
+          />
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="w-full bg-yellow-400 hover:bg-yellow-500 text-black"
+          >
+            {uploading ? (
+              <>
+                <div className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-black border-t-transparent" />
+                Uploading...
+              </>
+            ) : (
+              <>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload File
+              </>
+            )}
+          </Button>
+          <p className="text-xs text-muted-foreground mt-2 text-center">
+            Max file size: 100MB
+          </p>
+        </div>
+      )}
 
       {/* Attachments List */}
       <ScrollArea className="flex-1 p-4">
@@ -219,7 +214,7 @@ export function SectionAttachmentPanel({
           <div className="text-center text-muted-foreground py-8">
             <Paperclip className="h-12 w-12 mx-auto mb-2 opacity-50" />
             <p>No attachments yet</p>
-            <p className="text-sm">Upload files to share with your team</p>
+            {canUpload && <p className="text-sm">Upload files to share with your team</p>}
           </div>
         ) : (
           <div className="space-y-2">
@@ -233,13 +228,22 @@ export function SectionAttachmentPanel({
                 >
                   <div className="flex items-start gap-3">
                     {/* File Icon */}
-                    <div className="flex-shrink-0">
+                    <div className="shrink-0">
                       {getFileIcon(attachment.fileType)}
                     </div>
 
-                    {/* File Info */}
+                    {/* File Info and Actions */}
                     <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm truncate">{attachment.fileName}</p>
+                      {/* File Name */}
+                      <button
+                        onClick={() => handleDownload(attachment)}
+                        className="font-medium text-sm truncate hover:text-yellow-400 transition-colors text-left w-full block"
+                        title="Click to download"
+                      >
+                        {attachment.fileName}
+                      </button>
+                      
+                      {/* File Metadata */}
                       <div className="flex items-center gap-2 mt-1">
                         <p className="text-xs text-muted-foreground">
                           {formatFileSize(attachment.fileSize)}
@@ -257,37 +261,39 @@ export function SectionAttachmentPanel({
                           {attachment.description}
                         </p>
                       )}
-                    </div>
 
-                    {/* Actions */}
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleDownload(attachment)}
-                        className="h-8 w-8 p-0 hover:bg-yellow-400/10"
-                      >
-                        <Download className="h-4 w-4 text-yellow-400" />
-                      </Button>
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-2 mt-2">
+                        {/* Download Button - Always visible for all users */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDownload(attachment)}
+                          className="h-7 px-2 text-xs border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black"
+                          title="Download file"
+                        >
+                          <Download className="h-3.5 w-3.5 mr-1" />
+                          Download
+                        </Button>
 
-                      {(isOwner || isLead) && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                              <MoreVertical className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => handleDelete(attachment.id, attachment.fileName)}
-                              className="text-red-500"
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
+                        {/* Delete Button - Only for owner or lead */}
+                        {(isOwner || isLead) && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              if (confirm(`Are you sure you want to delete ${attachment.fileName}?`)) {
+                                handleDelete(attachment.id, attachment.fileName)
+                              }
+                            }}
+                            className="h-7 px-2 text-xs text-red-500 hover:bg-red-500/10 hover:text-red-600"
+                            title="Delete file"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                            Delete
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

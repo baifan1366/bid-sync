@@ -48,8 +48,8 @@ export function AcceptProposalDialog({
     setIsConfirming(true)
     try {
       await acceptMutation.mutateAsync({
-        proposal_id: proposalId,
-        project_id: projectId,
+        proposalId: proposalId,
+        projectId: projectId,
       })
 
       toast({

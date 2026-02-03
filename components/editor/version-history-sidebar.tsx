@@ -13,7 +13,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useGraphQLQuery, useGraphQLMutation } from '@/hooks/use-graphql'
 import { GET_VERSION_HISTORY, GET_VERSION } from '@/lib/graphql/queries'
 import { ROLLBACK_TO_VERSION } from '@/lib/graphql/mutations'
@@ -49,6 +49,8 @@ import {
   AlertCircle,
   History,
   X,
+  Paperclip,
+  FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { JSONContent } from '@/types/document'
@@ -64,6 +66,8 @@ interface DocumentVersion {
   isRollback: boolean
   rolledBackFrom?: string
   createdAt: string
+  sectionsSnapshot?: any[]
+  attachmentsSnapshot?: any[]
 }
 
 interface VersionHistorySidebarProps {
@@ -72,6 +76,8 @@ interface VersionHistorySidebarProps {
   onClose: () => void
   onVersionRestored?: () => void
   canEdit: boolean
+  sectionId?: string  // Optional: filter versions by section
+  sectionTitle?: string  // Optional: display section name in header
 }
 
 export function VersionHistorySidebar({
@@ -80,6 +86,8 @@ export function VersionHistorySidebar({
   onClose,
   onVersionRestored,
   canEdit,
+  sectionId,
+  sectionTitle,
 }: VersionHistorySidebarProps) {
   const [selectedVersion, setSelectedVersion] = useState<DocumentVersion | null>(null)
   const [previewVersion, setPreviewVersion] = useState<DocumentVersion | null>(null)
@@ -100,6 +108,38 @@ export function VersionHistorySidebar({
     refetchOnMount: true,
   })
 
+  // Log when data changes
+  useEffect(() => {
+    if (data?.documentVersionHistory) {
+      console.log('[VersionHistorySidebar] 📊 Version history loaded:', {
+        count: data.documentVersionHistory.length,
+        versions: data.documentVersionHistory.map(v => ({
+          id: v.id,
+          number: v.versionNumber,
+          createdAt: v.createdAt
+        }))
+      });
+    }
+  }, [data]);
+
+  useEffect(() => {
+    if (error) {
+      console.error('[VersionHistorySidebar] ❌ Failed to load version history:', error);
+    }
+  }, [error]);
+
+  useEffect(() => {
+    console.log('[VersionHistorySidebar] 🔄 State updated:', {
+      hasData: !!data,
+      versionCount: data?.documentVersionHistory?.length || 0,
+      isLoading,
+      hasError: !!error,
+      documentId,
+      sectionId,
+      sectionTitle
+    });
+  }, [data, isLoading, error, documentId, sectionId, sectionTitle]);
+
   // Rollback mutation
   const rollbackMutation = useGraphQLMutation<any, any>(ROLLBACK_TO_VERSION, [
     ['versionHistory', documentId],
@@ -107,6 +147,45 @@ export function VersionHistorySidebar({
   ])
 
   const versions = data?.documentVersionHistory || []
+
+  // Check if any version has sections data
+  const hasSectionsData = versions.some(v => (v.sectionsSnapshot?.length || 0) > 0)
+  
+  console.log('[VersionHistorySidebar] 📊 Sections data check:', {
+    totalVersions: versions.length,
+    hasSectionsData,
+    sectionId,
+    sectionTitle
+  });
+
+  // Filter versions by section if sectionId is provided AND versions have sections data
+  const filteredVersions = sectionId && hasSectionsData
+    ? versions.filter(version => {
+        // Check if this version has changes to the specified section
+        const sectionsSnapshot = version.sectionsSnapshot || []
+        const hasSection = sectionsSnapshot.some((section: any) => section.id === sectionId)
+        
+        console.log('[VersionHistorySidebar] 🔍 Filtering version:', {
+          versionId: version.id,
+          versionNumber: version.versionNumber,
+          sectionId,
+          sectionsSnapshotLength: sectionsSnapshot.length,
+          sectionsSnapshot: sectionsSnapshot.map((s: any) => ({ id: s.id, title: s.title })),
+          hasSection
+        });
+        
+        return hasSection
+      })
+    : versions
+
+  console.log('[VersionHistorySidebar] 📊 Filtering result:', {
+    totalVersions: versions.length,
+    filteredVersions: filteredVersions.length,
+    sectionId,
+    sectionTitle,
+    isFiltering: !!(sectionId && hasSectionsData),
+    reason: !hasSectionsData ? 'No sections data in versions - showing all' : 'Normal filtering'
+  });
 
   const handleRollback = async () => {
     if (!selectedVersion) return
@@ -136,16 +215,17 @@ export function VersionHistorySidebar({
   }
 
   const handleCompare = (version: DocumentVersion) => {
-    // Always compare selected version with the current (latest) version
-    const currentVersion = versions[0] // First version is the latest (current)
+    // When filtering by section, compare with latest filtered version
+    // Otherwise, compare with overall latest version
+    const currentVersion = filteredVersions[0] // First version is the latest (current)
     
     if (currentVersion && version.id !== currentVersion.id) {
       // Compare selected version with current version
       setCompareVersions({ version1: version, version2: currentVersion })
       setShowCompareSheet(true)
-    } else if (versions.length > 1) {
+    } else if (filteredVersions.length > 1) {
       // If clicking on current version, compare with previous version
-      setCompareVersions({ version1: versions[1], version2: currentVersion })
+      setCompareVersions({ version1: filteredVersions[1], version2: currentVersion })
       setShowCompareSheet(true)
     }
   }
@@ -253,14 +333,21 @@ export function VersionHistorySidebar({
     const newText = extractFullText(newContent)
     const diff = computeDiff(oldText, newText)
 
+    console.log('[VersionHistorySidebar] 🎨 Rendering diff:', {
+      oldTextLength: oldText.length,
+      newTextLength: newText.length,
+      diffSegments: diff.length,
+      segments: diff.map(s => ({ type: s.type, textLength: s.text.length }))
+    });
+
     return (
       <div className="whitespace-pre-wrap">
         {diff.map((segment, index) => (
           <span
             key={index}
             className={cn(
-              segment.type === 'added' && 'bg-green-400/30 text-green-700 dark:text-green-300',
-              segment.type === 'removed' && 'bg-red-400/30 text-red-700 dark:text-red-300 line-through'
+              segment.type === 'added' && 'bg-green-500/20 text-green-600 dark:bg-green-400/20 dark:text-green-400',
+              segment.type === 'removed' && 'bg-red-500/20 text-red-600 dark:bg-red-400/20 dark:text-red-400 line-through'
             )}
           >
             {segment.text}
@@ -291,8 +378,19 @@ export function VersionHistorySidebar({
               <X className="h-4 w-4" />
             </Button>
           </div>
+          {sectionTitle && (
+            <div className="mt-2 flex items-center gap-2">
+              <Badge className="bg-yellow-400 text-black">
+                <FileText className="h-3 w-3 mr-1" />
+                {sectionTitle}
+              </Badge>
+            </div>
+          )}
           <p className="text-sm text-muted-foreground mt-1">
-            {versions.length} version{versions.length !== 1 ? 's' : ''}
+            {filteredVersions.length} version{filteredVersions.length !== 1 ? 's' : ''}
+            {sectionId && filteredVersions.length < versions.length && (
+              <span className="text-yellow-400"> (filtered)</span>
+            )}
           </p>
         </div>
 
@@ -314,16 +412,18 @@ export function VersionHistorySidebar({
               </Card>
             )}
 
-            {!isLoading && !error && versions.length === 0 && (
+            {!isLoading && !error && filteredVersions.length === 0 && (
               <Card className="border-yellow-400/20 p-6">
                 <div className="text-center text-muted-foreground">
                   <History className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No versions yet</p>
+                  <p className="text-sm">
+                    {sectionId ? 'No versions for this section' : 'No versions yet'}
+                  </p>
                 </div>
               </Card>
             )}
 
-            {versions.map((version, index) => (
+            {filteredVersions.map((version, index) => (
               <Card
                 key={version.id}
                 className={cn(
@@ -368,6 +468,24 @@ export function VersionHistorySidebar({
                   <Clock className="h-3 w-3" />
                   <span>{formatDate(version.createdAt)}</span>
                 </div>
+
+                {/* Content statistics */}
+                {(version.sectionsSnapshot || version.attachmentsSnapshot) && (
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
+                    {version.sectionsSnapshot && version.sectionsSnapshot.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        <FileText className="h-3 w-3" />
+                        <span>{version.sectionsSnapshot.length} sections</span>
+                      </div>
+                    )}
+                    {version.attachmentsSnapshot && version.attachmentsSnapshot.length > 0 && (
+                      <div className="flex items-center gap-1">
+                        <Paperclip className="h-3 w-3 text-yellow-400" />
+                        <span className="text-yellow-400">{version.attachmentsSnapshot.length} attachments</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Changes summary */}
                 <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
@@ -524,6 +642,93 @@ export function VersionHistorySidebar({
                   renderDiffContent(compareVersions.version1.content, compareVersions.version2.content)}
               </div>
             </Card>
+
+            {/* Attachment Changes */}
+            {(() => {
+              const v1Attachments = compareVersions.version1?.attachmentsSnapshot || []
+              const v2Attachments = compareVersions.version2?.attachmentsSnapshot || []
+              
+              // Find added and removed attachments
+              const addedAttachments = v2Attachments.filter(
+                (a2: any) => !v1Attachments.some((a1: any) => a1.id === a2.id)
+              )
+              const removedAttachments = v1Attachments.filter(
+                (a1: any) => !v2Attachments.some((a2: any) => a2.id === a1.id)
+              )
+              
+              const hasChanges = addedAttachments.length > 0 || removedAttachments.length > 0
+              
+              if (!hasChanges) return null
+              
+              const formatFileSize = (bytes: number): string => {
+                if (bytes < 1024) return `${bytes} B`
+                if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+                return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+              }
+              
+              return (
+                <Card className="border-yellow-400/20 p-6 mb-4">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Paperclip className="h-4 w-4 text-yellow-400" />
+                    <Badge className="bg-yellow-400 text-black">Attachment Changes</Badge>
+                  </div>
+                  
+                  {/* Added Attachments */}
+                  {addedAttachments.length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge className="bg-green-400 text-white text-xs">
+                          +{addedAttachments.length} Added
+                        </Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {addedAttachments.map((attachment: any) => (
+                          <div
+                            key={attachment.id}
+                            className="flex items-center gap-2 p-2 rounded bg-green-400/10 border border-green-400/20"
+                          >
+                            <Paperclip className="h-3 w-3 text-green-400" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{attachment.fileName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatFileSize(attachment.fileSize)} • {attachment.fileType}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Removed Attachments */}
+                  {removedAttachments.length > 0 && (
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Badge className="bg-red-400 text-white text-xs">
+                          -{removedAttachments.length} Removed
+                        </Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {removedAttachments.map((attachment: any) => (
+                          <div
+                            key={attachment.id}
+                            className="flex items-center gap-2 p-2 rounded bg-red-400/10 border border-red-400/20"
+                          >
+                            <Paperclip className="h-3 w-3 text-red-400" />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate line-through">{attachment.fileName}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatFileSize(attachment.fileSize)} • {attachment.fileType}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              )
+            })()}
 
             {/* Side by Side View */}
             <div className="grid grid-cols-2 gap-4">

@@ -733,7 +733,7 @@ CREATE POLICY "proposal_additional_info_lead_select" ON public.proposal_addition
 FOR SELECT USING (proposal_id IN (SELECT id FROM public.proposals WHERE lead_id = auth.uid()));
 
 CREATE POLICY "proposal_additional_info_team_select" ON public.proposal_additional_info
-FOR SELECT USING (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.bid_team_members btm ON btm.project_id = p.project_id WHERE btm.user_id = auth.uid()));
+FOR SELECT USING (proposal_id IN (SELECT p.id FROM public.proposals p INNER JOIN public.proposal_team_members ptm ON ptm.proposal_id = p.id WHERE ptm.user_id = auth.uid()));
 
 CREATE POLICY "proposal_additional_info_lead_insert" ON public.proposal_additional_info
 FOR INSERT WITH CHECK (proposal_id IN (SELECT id FROM public.proposals WHERE lead_id = auth.uid()));
@@ -2091,9 +2091,9 @@ FOR SELECT USING (
         AND (
             p.lead_id = auth.uid()
             OR EXISTS (
-                SELECT 1 FROM public.bid_team_members btm
-                WHERE btm.project_id = p.project_id
-                AND btm.user_id = auth.uid()
+                SELECT 1 FROM public.proposal_team_members ptm
+                WHERE ptm.proposal_id = p.id
+                AND ptm.user_id = auth.uid()
             )
         )
     )
@@ -2107,9 +2107,9 @@ FOR INSERT WITH CHECK (
         AND (
             p.lead_id = auth.uid()
             OR EXISTS (
-                SELECT 1 FROM public.bid_team_members btm
-                WHERE btm.project_id = p.project_id
-                AND btm.user_id = auth.uid()
+                SELECT 1 FROM public.proposal_team_members ptm
+                WHERE ptm.proposal_id = p.id
+                AND ptm.user_id = auth.uid()
             )
         )
     )
@@ -2429,8 +2429,9 @@ FOR SELECT USING (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id AND ptm.user_id = auth.uid()
       )
     )
   )
@@ -2440,8 +2441,9 @@ CREATE POLICY "deliverables_team_insert" ON public.project_deliverables
 FOR INSERT WITH CHECK (
   uploaded_by = auth.uid()
   AND EXISTS (
-    SELECT 1 FROM public.bid_team_members btm
-    WHERE btm.project_id = project_deliverables.project_id AND btm.user_id = auth.uid()
+    SELECT 1 FROM public.proposals pr
+    JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+    WHERE pr.project_id = project_deliverables.project_id AND ptm.user_id = auth.uid()
   )
 );
 
@@ -2463,8 +2465,9 @@ FOR SELECT USING (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id AND ptm.user_id = auth.uid()
       )
     )
   )
@@ -2474,9 +2477,10 @@ CREATE POLICY "completions_lead_insert" ON public.project_completions
 FOR INSERT WITH CHECK (
   submitted_by = auth.uid()
   AND EXISTS (
-    SELECT 1 FROM public.bid_team_members btm
-    WHERE btm.project_id = project_completions.project_id
-    AND btm.user_id = auth.uid() AND btm.role = 'lead'
+    SELECT 1 FROM public.proposals pr
+    JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+    WHERE pr.project_id = project_completions.project_id
+    AND ptm.user_id = auth.uid() AND ptm.role = 'lead'
   )
 );
 
@@ -2497,8 +2501,9 @@ FOR SELECT USING (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id AND ptm.user_id = auth.uid()
       )
     )
   )
@@ -2517,8 +2522,9 @@ FOR SELECT USING (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id AND ptm.user_id = auth.uid()
       )
     )
   )
@@ -2545,8 +2551,9 @@ FOR INSERT WITH CHECK (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id AND ptm.user_id = auth.uid()
       )
     )
   )
@@ -3249,48 +3256,29 @@ COMMENT ON COLUMN public.documents.file_size IS 'File size in bytes';
 COMMENT ON COLUMN public.documents.is_required IS 'Whether this document is required for proposal submission';
 
 -- ============================================================
--- MIGRATION 032: VERIFY SECURITY MEASURES
+-- MIGRATION 032: REMOVED - bid_team_members deprecated
 -- ============================================================
+-- NOTE: bid_team_members table and related policies have been removed.
+-- All team management now uses proposal_team_members (proposal-level teams).
+-- See MIGRATION 004 for proposal_team_members implementation.
 
--- Drop existing policies if they exist (for idempotency)
-DROP POLICY IF EXISTS "bid_team_members_read" ON public.bid_team_members;
-DROP POLICY IF EXISTS "bid_team_members_lead_insert" ON public.bid_team_members;
-DROP POLICY IF EXISTS "bid_team_members_lead_delete" ON public.bid_team_members;
-DROP POLICY IF EXISTS "bid_team_members_admin_all" ON public.bid_team_members;
-
--- Team members can view their own team
-CREATE POLICY "bid_team_members_read" ON public.bid_team_members
-FOR SELECT USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM public.bid_team_members btm WHERE btm.project_id = bid_team_members.project_id AND btm.user_id = auth.uid()));
-
--- Only leads can add team members to their projects
-CREATE POLICY "bid_team_members_lead_insert" ON public.bid_team_members
-FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM public.bid_team_members btm WHERE btm.project_id = bid_team_members.project_id AND btm.user_id = auth.uid() AND btm.role = 'lead'));
-
--- Only leads can remove team members from their projects
-CREATE POLICY "bid_team_members_lead_delete" ON public.bid_team_members
-FOR DELETE USING (EXISTS (SELECT 1 FROM public.bid_team_members btm WHERE btm.project_id = bid_team_members.project_id AND btm.user_id = auth.uid() AND btm.role = 'lead'));
-
--- Admins can view all team members
-CREATE POLICY "bid_team_members_admin_all" ON public.bid_team_members
-FOR ALL USING (EXISTS (SELECT 1 FROM auth.users WHERE id = auth.uid() AND raw_user_meta_data->>'role' = 'admin'));
-
--- Helper Functions for Authorization
-CREATE OR REPLACE FUNCTION public.is_project_lead(p_project_id UUID, p_user_id UUID)
+-- Helper Functions for Authorization (using proposal_team_members)
+CREATE OR REPLACE FUNCTION public.is_proposal_lead(p_proposal_id UUID, p_user_id UUID)
 RETURNS BOOLEAN AS $
 BEGIN
-    RETURN EXISTS (SELECT 1 FROM public.bid_team_members WHERE project_id = p_project_id AND user_id = p_user_id AND role = 'lead');
+    RETURN EXISTS (SELECT 1 FROM public.proposal_team_members WHERE proposal_id = p_proposal_id AND user_id = p_user_id AND role = 'lead');
 END;
 $ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
-CREATE OR REPLACE FUNCTION public.is_team_member(p_project_id UUID, p_user_id UUID)
+CREATE OR REPLACE FUNCTION public.is_proposal_team_member(p_proposal_id UUID, p_user_id UUID)
 RETURNS BOOLEAN AS $
 BEGIN
-    RETURN EXISTS (SELECT 1 FROM public.bid_team_members WHERE project_id = p_project_id AND user_id = p_user_id);
+    RETURN EXISTS (SELECT 1 FROM public.proposal_team_members WHERE proposal_id = p_proposal_id AND user_id = p_user_id);
 END;
 $ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
-GRANT EXECUTE ON FUNCTION public.is_project_lead(UUID, UUID) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.is_team_member(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_proposal_lead(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_proposal_team_member(UUID, UUID) TO authenticated;
 
 -- ============================================================
 -- MIGRATION 033: ADD MISSING PROPOSAL CONTENT FIELDS
@@ -3565,7 +3553,7 @@ ALTER TABLE public.project_exports ENABLE ROW LEVEL SECURITY;
 -- ============================================================
 
 -- Team members and client can view deliverables
-CREATE POLICY "deliverables_team_client_select" ON public.project_deliverables
+CREATE POLICY "deliverables_team_client_select_v2" ON public.project_deliverables
 FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM public.projects p
@@ -3573,22 +3561,24 @@ FOR SELECT USING (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id
-        AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id
+        AND ptm.user_id = auth.uid()
       )
     )
   )
 );
 
 -- Team members can insert deliverables
-CREATE POLICY "deliverables_team_insert" ON public.project_deliverables
+CREATE POLICY "deliverables_team_insert_v2" ON public.project_deliverables
 FOR INSERT WITH CHECK (
   uploaded_by = auth.uid()
   AND EXISTS (
-    SELECT 1 FROM public.bid_team_members btm
-    WHERE btm.project_id = project_deliverables.project_id
-    AND btm.user_id = auth.uid()
+    SELECT 1 FROM public.proposals pr
+    JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+    WHERE pr.project_id = project_deliverables.project_id
+    AND ptm.user_id = auth.uid()
   )
 );
 
@@ -3618,7 +3608,7 @@ FOR SELECT USING (
 -- ============================================================
 
 -- Team members and client can view completions
-CREATE POLICY "completions_team_client_select" ON public.project_completions
+CREATE POLICY "completions_team_client_select_v2" ON public.project_completions
 FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM public.projects p
@@ -3626,23 +3616,25 @@ FOR SELECT USING (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id
-        AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id
+        AND ptm.user_id = auth.uid()
       )
     )
   )
 );
 
 -- Team leads can insert completions
-CREATE POLICY "completions_lead_insert" ON public.project_completions
+CREATE POLICY "completions_lead_insert_v2" ON public.project_completions
 FOR INSERT WITH CHECK (
   submitted_by = auth.uid()
   AND EXISTS (
-    SELECT 1 FROM public.bid_team_members btm
-    WHERE btm.project_id = project_completions.project_id
-    AND btm.user_id = auth.uid()
-    AND btm.role = 'lead'
+    SELECT 1 FROM public.proposals pr
+    JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+    WHERE pr.project_id = project_completions.project_id
+    AND ptm.user_id = auth.uid()
+    AND ptm.role = 'lead'
   )
 );
 
@@ -3677,7 +3669,7 @@ FOR SELECT USING (
 -- ============================================================
 
 -- Participants can view archives
-CREATE POLICY "archives_participants_select" ON public.project_archives
+CREATE POLICY "archives_participants_select_v2" ON public.project_archives
 FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM public.projects p
@@ -3685,9 +3677,10 @@ FOR SELECT USING (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id
-        AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id
+        AND ptm.user_id = auth.uid()
       )
     )
   )
@@ -3716,7 +3709,7 @@ FOR ALL USING (
 -- ============================================================
 
 -- Team members and client can view revisions
-CREATE POLICY "revisions_team_client_select" ON public.completion_revisions
+CREATE POLICY "revisions_team_client_select_v2" ON public.completion_revisions
 FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM public.project_completions pc
@@ -3725,9 +3718,10 @@ FOR SELECT USING (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id
-        AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id
+        AND ptm.user_id = auth.uid()
       )
     )
   )
@@ -3750,18 +3744,18 @@ CREATE POLICY "revisions_lead_update" ON public.completion_revisions
 FOR UPDATE USING (
   EXISTS (
     SELECT 1 FROM public.project_completions pc
-    JOIN public.bid_team_members btm ON btm.project_id = pc.project_id
+    JOIN public.proposal_team_members ptm ON ptm.proposal_id = pc.proposal_id
     WHERE pc.id = completion_revisions.completion_id
-    AND btm.user_id = auth.uid()
-    AND btm.role = 'lead'
+    AND ptm.user_id = auth.uid()
+    AND ptm.role = 'lead'
   )
 ) WITH CHECK (
   EXISTS (
     SELECT 1 FROM public.project_completions pc
-    JOIN public.bid_team_members btm ON btm.project_id = pc.project_id
+    JOIN public.proposal_team_members ptm ON ptm.proposal_id = pc.proposal_id
     WHERE pc.id = completion_revisions.completion_id
-    AND btm.user_id = auth.uid()
-    AND btm.role = 'lead'
+    AND ptm.user_id = auth.uid()
+    AND ptm.role = 'lead'
   )
 );
 
@@ -3774,7 +3768,7 @@ CREATE POLICY "exports_user_select" ON public.project_exports
 FOR SELECT USING (requested_by = auth.uid());
 
 -- Users can create export requests for projects they have access to
-CREATE POLICY "exports_user_insert" ON public.project_exports
+CREATE POLICY "exports_user_insert_v2" ON public.project_exports
 FOR INSERT WITH CHECK (
   requested_by = auth.uid()
   AND EXISTS (
@@ -3783,9 +3777,10 @@ FOR INSERT WITH CHECK (
     AND (
       p.client_id = auth.uid()
       OR EXISTS (
-        SELECT 1 FROM public.bid_team_members btm
-        WHERE btm.project_id = p.id
-        AND btm.user_id = auth.uid()
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = p.id
+        AND ptm.user_id = auth.uid()
       )
     )
   )
@@ -4065,10 +4060,11 @@ BEGIN
         RETURN 3 >= v_required_hierarchy; -- Editor level (3)
     END IF;
     
-    -- Check if user is a team member for the project
+    -- Check if user is a team member for any proposal in the project
     SELECT EXISTS(
-        SELECT 1 FROM public.bid_team_members 
-        WHERE project_id = v_project_id AND user_id = p_user_id
+        SELECT 1 FROM public.proposals pr
+        JOIN public.proposal_team_members ptm ON ptm.proposal_id = pr.id
+        WHERE pr.project_id = v_project_id AND ptm.user_id = p_user_id
     ) INTO v_is_team_member;
     
     IF v_is_team_member THEN

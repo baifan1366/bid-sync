@@ -15,6 +15,7 @@ export interface ProposalVersion {
   content: any;
   sectionsSnapshot: any[];
   documentsSnapshot: any[];
+  attachmentsSnapshot: any[];
   changeSummary?: string;
   createdBy: string;
   createdAt: string;
@@ -37,6 +38,8 @@ export interface VersionComparison {
     sectionsModified: any[];
     documentsAdded: any[];
     documentsRemoved: any[];
+    attachmentsAdded: any[];
+    attachmentsRemoved: any[];
   };
 }
 
@@ -178,6 +181,34 @@ export class VersionService {
         };
       }
 
+      // Capture section attachments snapshot
+      let attachments: any[] = [];
+      if (sections && sections.length > 0) {
+        const sectionIds = sections.map((s: any) => s.id);
+        const { data: attachmentsData, error: attachmentsError } = await supabase
+          .from('section_attachments')
+          .select(`
+            id,
+            section_id,
+            document_id,
+            uploaded_by,
+            file_name,
+            file_path,
+            file_type,
+            file_size,
+            description,
+            created_at
+          `)
+          .in('section_id', sectionIds);
+
+        if (attachmentsError) {
+          console.error('Error capturing attachments snapshot:', attachmentsError);
+          // Don't fail - attachments are optional, just log the error
+        } else {
+          attachments = attachmentsData || [];
+        }
+      }
+
       // Get next version number
       const { data: versionNumber } = await supabase
         .rpc('get_next_version_number', { p_proposal_id: proposalId });
@@ -191,6 +222,7 @@ export class VersionService {
           content: proposal.content || {},
           sections_snapshot: sections || [],
           documents_snapshot: documents || [],
+          attachments_snapshot: attachments || [],
           change_summary: changeSummary,
           created_by: userId,
         })
@@ -201,6 +233,7 @@ export class VersionService {
           content,
           sections_snapshot,
           documents_snapshot,
+          attachments_snapshot,
           change_summary,
           created_by,
           created_at
@@ -225,6 +258,7 @@ export class VersionService {
           content: version.content,
           sectionsSnapshot: version.sections_snapshot,
           documentsSnapshot: version.documents_snapshot,
+          attachmentsSnapshot: version.attachments_snapshot,
           changeSummary: version.change_summary,
           createdBy: version.created_by,
           createdAt: version.created_at,
@@ -261,6 +295,7 @@ export class VersionService {
           content,
           sections_snapshot,
           documents_snapshot,
+          attachments_snapshot,
           change_summary,
           created_by,
           created_at
@@ -280,6 +315,7 @@ export class VersionService {
         content: v.content,
         sectionsSnapshot: v.sections_snapshot,
         documentsSnapshot: v.documents_snapshot,
+        attachmentsSnapshot: v.attachments_snapshot || [],
         changeSummary: v.change_summary,
         createdBy: v.created_by,
         createdAt: v.created_at,
@@ -309,6 +345,7 @@ export class VersionService {
           content,
           sections_snapshot,
           documents_snapshot,
+          attachments_snapshot,
           change_summary,
           created_by,
           created_at
@@ -328,6 +365,7 @@ export class VersionService {
         content: version.content,
         sectionsSnapshot: version.sections_snapshot,
         documentsSnapshot: version.documents_snapshot,
+        attachmentsSnapshot: version.attachments_snapshot || [],
         changeSummary: version.change_summary,
         createdBy: version.created_by,
         createdAt: version.created_at,
@@ -392,6 +430,16 @@ export class VersionService {
       const documentsAdded = newDocuments.filter((d: any) => !oldDocIds.has(d.id));
       const documentsRemoved = oldDocuments.filter((d: any) => !newDocIds.has(d.id));
 
+      // Compare attachments
+      const oldAttachments = oldVersion.attachmentsSnapshot || [];
+      const newAttachments = newVersion.attachmentsSnapshot || [];
+
+      const oldAttachmentIds = new Set(oldAttachments.map((a: any) => a.id));
+      const newAttachmentIds = new Set(newAttachments.map((a: any) => a.id));
+
+      const attachmentsAdded = newAttachments.filter((a: any) => !oldAttachmentIds.has(a.id));
+      const attachmentsRemoved = oldAttachments.filter((a: any) => !newAttachmentIds.has(a.id));
+
       // Compare content
       const contentChanges = this.generateContentDiff(oldVersion.content, newVersion.content);
 
@@ -405,6 +453,8 @@ export class VersionService {
           sectionsModified,
           documentsAdded,
           documentsRemoved,
+          attachmentsAdded,
+          attachmentsRemoved,
         },
       };
     } catch (error) {
@@ -517,10 +567,61 @@ export class VersionService {
             deadline: s.deadline,
           }));
 
+          let restoredSections: any[] = [];
           if (sectionsToRestore.length > 0) {
-            await supabase
+            const { data: insertedSections } = await supabase
               .from('document_sections')
-              .insert(sectionsToRestore);
+              .insert(sectionsToRestore)
+              .select('id');
+            
+            restoredSections = insertedSections || [];
+          }
+
+          // Restore attachments (delete current and recreate from snapshot)
+          if (restoredSections.length > 0) {
+            // Delete existing attachments for these sections
+            await supabase
+              .from('section_attachments')
+              .delete()
+              .eq('document_id', document.id);
+
+            // Map old section IDs to new section IDs
+            const sectionIdMap = new Map<string, string>();
+            versionToRestore.sectionsSnapshot.forEach((oldSection: any, index: number) => {
+              if (restoredSections[index]) {
+                sectionIdMap.set(oldSection.id, restoredSections[index].id);
+              }
+            });
+
+            // Restore attachments with new section IDs
+            const attachmentsToRestore = (versionToRestore.attachmentsSnapshot || [])
+              .map((a: any) => {
+                const newSectionId = sectionIdMap.get(a.section_id);
+                if (!newSectionId) return null;
+
+                return {
+                  section_id: newSectionId,
+                  document_id: document.id,
+                  uploaded_by: a.uploaded_by,
+                  file_name: a.file_name,
+                  file_path: a.file_path,
+                  file_type: a.file_type,
+                  file_size: a.file_size,
+                  description: a.description,
+                };
+              })
+              .filter((a: any) => a !== null);
+
+            if (attachmentsToRestore.length > 0) {
+              const { error: attachmentsError } = await supabase
+                .from('section_attachments')
+                .insert(attachmentsToRestore);
+
+              if (attachmentsError) {
+                console.error('Error restoring attachments:', attachmentsError);
+                // Don't fail the operation, just log the error
+              }
+            }
           }
         }
       }
@@ -614,6 +715,7 @@ export class VersionService {
           content,
           sections_snapshot,
           documents_snapshot,
+          attachments_snapshot,
           change_summary,
           created_by,
           created_at
@@ -634,6 +736,7 @@ export class VersionService {
         content: version.content,
         sectionsSnapshot: version.sections_snapshot,
         documentsSnapshot: version.documents_snapshot,
+        attachmentsSnapshot: version.attachments_snapshot || [],
         changeSummary: version.change_summary,
         createdBy: version.created_by,
         createdAt: version.created_at,

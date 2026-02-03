@@ -58,10 +58,8 @@ function buildValidationSchema(requirements: AdditionalInfoRequirement[]) {
         if (req.required) {
           fieldSchema = z.string()
             .min(1, `${req.fieldName} is required`)
-            .max(5000, `${req.fieldName} must be 5000 characters or less`)
         } else {
           fieldSchema = z.string()
-            .max(5000, `${req.fieldName} must be 5000 characters or less`)
             .optional()
             .or(z.literal(''))
         }

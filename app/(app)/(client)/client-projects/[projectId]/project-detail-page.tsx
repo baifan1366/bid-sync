@@ -31,6 +31,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { ProjectHeaderSkeleton } from "@/components/client/project-header-skeleton"
+import { StatCardSkeleton } from "@/components/client/stat-card-skeleton"
 import {
   formatBudget,
   formatDate,
@@ -205,8 +207,21 @@ export function ProjectDetailPage() {
     return (
       <div className="container mx-auto p-4 sm:p-6 space-y-6">
         <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-64 w-full" />
-        <Skeleton className="h-48 w-full" />
+        <ProjectHeaderSkeleton />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <StatCardSkeleton />
+          <StatCardSkeleton />
+        </div>
+        <Card className="border-yellow-400/20">
+          <CardContent className="p-6 space-y-4">
+            <Skeleton className="h-6 w-32" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-3/4" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
     )
   }

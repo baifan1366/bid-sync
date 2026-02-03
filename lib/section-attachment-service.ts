@@ -115,22 +115,9 @@ export class SectionAttachmentService {
 
       const supabase = createClient();
 
-      // Verify user has editor access to the document
-      const { data: collaborator } = await supabase
-        .from('document_collaborators')
-        .select('role')
-        .eq('document_id', input.documentId)
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      if (!collaborator || !['owner', 'editor'].includes(collaborator.role)) {
-        return {
-          success: false,
-          error: 'You do not have permission to upload attachments to this document',
-          errorCode: 'UNAUTHORIZED',
-        };
-      }
-
+      // Note: Permission check is handled by RLS policies
+      // RLS allows document collaborators (editor/owner) and proposal team members to upload
+      
       // Upload file to Supabase Storage
       const fileExt = input.file.name.split('.').pop();
       const fileName = `${input.documentId}/${input.sectionId}/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
@@ -169,13 +156,7 @@ export class SectionAttachmentService {
           file_size: input.file.size,
           description: input.description,
         })
-        .select(`
-          *,
-          users:uploaded_by (
-            id,
-            raw_user_meta_data
-          )
-        `)
+        .select('*')
         .single();
 
       if (dbError || !attachment) {
@@ -193,9 +174,18 @@ export class SectionAttachmentService {
         };
       }
 
+      // Get user info
+      const { data: userInfo } = await supabase.rpc('get_user_display_info', { 
+        p_user_id: userId 
+      });
+
       return {
         success: true,
-        attachment: this.mapAttachment(attachment, urlData.publicUrl),
+        attachment: this.mapAttachment(
+          attachment, 
+          urlData.publicUrl, 
+          userInfo && userInfo.length > 0 ? userInfo[0] : undefined
+        ),
       };
     } catch (error) {
       console.error('Unexpected error in uploadAttachment:', error);
@@ -209,6 +199,7 @@ export class SectionAttachmentService {
 
   /**
    * Gets all attachments for a section
+   * Note: RLS policies ensure users can only see attachments they have access to
    */
   static async getSectionAttachments(
     sectionId: string,
@@ -220,13 +211,7 @@ export class SectionAttachmentService {
       // Get all attachments for the section
       const { data: attachments, error } = await supabase
         .from('section_attachments')
-        .select(`
-          *,
-          users:uploaded_by (
-            id,
-            raw_user_meta_data
-          )
-        `)
+        .select('*')
         .eq('section_id', sectionId)
         .order('created_at', { ascending: false });
 
@@ -238,6 +223,21 @@ export class SectionAttachmentService {
         };
       }
 
+      // Get user info for all unique uploaders
+      const uploaderIds = [...new Set((attachments || []).map(a => a.uploaded_by))];
+      const userInfoPromises = uploaderIds.map(id => 
+        supabase.rpc('get_user_display_info', { p_user_id: id })
+      );
+      
+      const userInfoResults = await Promise.all(userInfoPromises);
+      const usersMap = new Map();
+      
+      userInfoResults.forEach((result, index) => {
+        if (result.data && result.data.length > 0) {
+          usersMap.set(uploaderIds[index], result.data[0]);
+        }
+      });
+
       // Get download URLs for all attachments
       const mappedAttachments = await Promise.all(
         (attachments || []).map(async (attachment) => {
@@ -245,7 +245,8 @@ export class SectionAttachmentService {
             .from('section-attachments')
             .getPublicUrl(attachment.file_path);
 
-          return this.mapAttachment(attachment, urlData.publicUrl);
+          const userInfo = usersMap.get(attachment.uploaded_by);
+          return this.mapAttachment(attachment, urlData.publicUrl, userInfo);
         })
       );
 
@@ -264,6 +265,7 @@ export class SectionAttachmentService {
 
   /**
    * Deletes an attachment
+   * Note: RLS policies ensure only uploader, document owner, or proposal lead can delete
    */
   static async deleteAttachment(
     attachmentId: string,
@@ -272,10 +274,10 @@ export class SectionAttachmentService {
     try {
       const supabase = createClient();
 
-      // Get attachment details
+      // Get attachment details (for file path and validation)
       const { data: attachment, error: fetchError } = await supabase
         .from('section_attachments')
-        .select('uploaded_by, file_path, document_id')
+        .select('file_path')
         .eq('id', attachmentId)
         .single();
 
@@ -286,23 +288,8 @@ export class SectionAttachmentService {
         };
       }
 
-      // Check if user is uploader or document owner
-      const isUploader = attachment.uploaded_by === userId;
-      const { data: collaborator } = await supabase
-        .from('document_collaborators')
-        .select('role')
-        .eq('document_id', attachment.document_id)
-        .eq('user_id', userId)
-        .maybeSingle();
-
-      const isOwner = collaborator?.role === 'owner';
-
-      if (!isUploader && !isOwner) {
-        return {
-          success: false,
-          error: 'You can only delete your own attachments or you must be the document owner',
-        };
-      }
+      // Note: Permission check is handled by RLS policies
+      // RLS allows uploader, document owner, or proposal lead to delete
 
       // Delete from storage
       const { error: storageError } = await supabase.storage
@@ -365,8 +352,7 @@ export class SectionAttachmentService {
   /**
    * Maps database attachment to SectionAttachment interface
    */
-  private static mapAttachment(attachment: any, downloadUrl: string): SectionAttachment {
-    const user = attachment.users;
+  private static mapAttachment(attachment: any, downloadUrl: string, userInfo?: any): SectionAttachment {
     return {
       id: attachment.id,
       sectionId: attachment.section_id,
@@ -378,13 +364,17 @@ export class SectionAttachmentService {
       fileSize: attachment.file_size,
       description: attachment.description,
       createdAt: attachment.created_at,
-      uploader: user
+      uploader: userInfo
         ? {
-            id: user.id,
-            name: user.raw_user_meta_data?.name || 'Unknown User',
-            email: user.raw_user_meta_data?.email || '',
+            id: userInfo.id,
+            name: userInfo.name || 'Team Member',
+            email: userInfo.email || '',
           }
-        : undefined,
+        : {
+            id: attachment.uploaded_by,
+            name: 'Team Member',
+            email: '',
+          },
       downloadUrl,
     };
   }

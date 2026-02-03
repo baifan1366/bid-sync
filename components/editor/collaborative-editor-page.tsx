@@ -45,9 +45,11 @@ import { ConflictResolutionDialog } from './conflict-resolution-dialog'
 import { ActiveCollaborators } from '@/components/editor/active-collaborators'
 import { VersionHistorySidebar } from './version-history-sidebar'
 import { TeamManagementPanel } from './team-management-panel'
+import { SectionAttachmentPanel } from './section-attachment-panel'
 import { CollaborativeEditorSkeleton } from './collaborative-editor-skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import { Sheet, SheetContent } from '@/components/ui/sheet'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,6 +74,7 @@ import {
   MoreVertical,
   UserPlus,
   Trash2,
+  Paperclip,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/use-toast'
@@ -151,6 +154,7 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
   const [showVersionHistory, setShowVersionHistory] = useState(false)
   const [showTeamManagement, setShowTeamManagement] = useState(false)
   const [showConflictDialog, setShowConflictDialog] = useState(false)
+  const [showAttachmentPanel, setShowAttachmentPanel] = useState(false)
   const [isLead, setIsLead] = useState(false)
   
   // Debug log when isLead changes
@@ -172,6 +176,7 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
   const [teamMembers, setTeamMembers] = useState<Array<{ id: string; name: string }>>([])
   const [showAddSectionDialog, setShowAddSectionDialog] = useState(false)
   const [newSectionTitle, setNewSectionTitle] = useState('')
+  const [sectionAttachmentCounts, setSectionAttachmentCounts] = useState<Map<string, number>>(new Map())
 
   // Fetch document data
   const { data, isLoading, error, refetch } = useGraphQLQuery<{ document: Document }>(
@@ -182,6 +187,7 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
 
   const updateDocumentMutation = useGraphQLMutation<any, any>(UPDATE_DOCUMENT, [
     ['document', documentId],
+    ['versionHistory', documentId],  // Also invalidate version history
   ])
 
   const document = data?.document
@@ -443,6 +449,11 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
           if (data && data.length > 0) {
             setActiveSection(data[0].id)
           }
+          
+          // Load attachment counts for all sections
+          if (data && data.length > 0) {
+            loadAttachmentCounts(data.map(s => s.id))
+          }
         }
       } catch (err) {
         console.error('[CollaborativeEditorPage] Unexpected error loading sections:', err)
@@ -454,6 +465,29 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
 
     loadSections()
   }, [documentId, user?.id, toast])
+
+  // Load attachment counts for sections
+  const loadAttachmentCounts = async (sectionIds: string[]) => {
+    try {
+      const supabase = createClient()
+      const counts = new Map<string, number>()
+      
+      for (const sectionId of sectionIds) {
+        const { count, error } = await supabase
+          .from('section_attachments')
+          .select('*', { count: 'exact', head: true })
+          .eq('section_id', sectionId)
+        
+        if (!error && count !== null) {
+          counts.set(sectionId, count)
+        }
+      }
+      
+      setSectionAttachmentCounts(counts)
+    } catch (err) {
+      console.error('[CollaborativeEditorPage] Error loading attachment counts:', err)
+    }
+  }
 
   // Load team members for assignment
   useEffect(() => {
@@ -793,6 +827,8 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
     userName: user?.email || 'Anonymous',
     userColor: getUserColor(user?.id || 'anonymous'),
     onUpdate: (content) => {
+      // Auto-update section status when user starts editing
+      updateSectionStatusOnEdit()
       // Auto-save on content change
       handleAutoSave({ content })
       // Broadcast update to collaborators
@@ -800,10 +836,48 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
     },
   })
 
+  // Auto-update section status when user starts editing
+  const updateSectionStatusOnEdit = useCallback(async () => {
+    if (!activeSection || !user?.id) return
+
+    const currentSection = sections.find(s => s.id === activeSection)
+    if (!currentSection) return
+
+    // Only update if status is 'not_started'
+    if (currentSection.status === 'not_started') {
+      try {
+        const supabase = createClient()
+        
+        const { error } = await supabase
+          .from('document_sections')
+          .update({ status: 'in_progress' })
+          .eq('id', activeSection)
+
+        if (!error) {
+          // Update local state
+          setSections(prevSections =>
+            prevSections.map(s =>
+              s.id === activeSection ? { ...s, status: 'in_progress' } : s
+            )
+          )
+        }
+      } catch (err) {
+        console.error('[CollaborativeEditorPage] Error updating section status:', err)
+      }
+    }
+  }, [activeSection, sections, user?.id])
+
   // Auto-save function
   const handleAutoSave = useCallback(
     (updates: { title?: string; description?: string; content?: JSONContent }) => {
       if (!canEdit) return
+
+      console.log('[CollaborativeEditor] 💾 Auto-save triggered with updates:', {
+        hasTitle: !!updates.title,
+        hasDescription: !!updates.description,
+        hasContent: !!updates.content,
+        documentId
+      })
 
       // Clear existing timer
       if (saveTimer) {
@@ -812,15 +886,18 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
 
       // Set new timer for auto-save
       const timer = setTimeout(async () => {
+        console.log('[CollaborativeEditor] ⏰ Auto-save timer fired, starting save...')
         setIsSaving(true)
         try {
-          await updateDocumentMutation.mutateAsync({
+          console.log('[CollaborativeEditor] 📤 Calling updateDocumentMutation...')
+          const result = await updateDocumentMutation.mutateAsync({
             documentId,
             input: updates,
           })
+          console.log('[CollaborativeEditor] ✅ Document saved successfully:', result)
           setLastSaved(new Date())
         } catch (error) {
-          console.error('Failed to save document:', error)
+          console.error('[CollaborativeEditor] ❌ Failed to save document:', error)
         } finally {
           setIsSaving(false)
         }
@@ -873,15 +950,19 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
   const handleManualSave = async () => {
     if (!editor || !canEdit) return
 
+    console.log('[CollaborativeEditor] 🖱️ Manual save triggered')
     setIsSaving(true)
     try {
-      await updateDocumentMutation.mutateAsync({
+      const content = editor.getJSON()
+      console.log('[CollaborativeEditor] 📤 Calling updateDocumentMutation with content...')
+      const result = await updateDocumentMutation.mutateAsync({
         documentId,
-        input: { content: editor.getJSON() },
+        input: { content },
       })
+      console.log('[CollaborativeEditor] ✅ Manual save successful:', result)
       setLastSaved(new Date())
     } catch (error) {
-      console.error('Failed to save document:', error)
+      console.error('[CollaborativeEditor] ❌ Manual save failed:', error)
     } finally {
       setIsSaving(false)
     }
@@ -1261,7 +1342,7 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
         ) : (
           <Tabs value={activeSection || undefined} onValueChange={setActiveSection}>
             <div className="max-w-[1800px] mx-auto px-4 sm:px-6">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 pb-2">
                 <ScrollArea className="flex-1">
                   <TabsList className="bg-transparent border-b-0 h-auto p-0 inline-flex space-x-1">
                     {sections.map((section) => {
@@ -1269,18 +1350,18 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
                       const isAssignedToCurrentUser = section.assigned_to === user?.id
                       
                       return (
-                        <div key={section.id} className="inline-flex items-center gap-1">
+                        <div key={section.id} className="inline-flex items-center gap-0.5">
                           <TabsTrigger
                             value={section.id}
-                            className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-yellow-400 whitespace-nowrap"
+                            className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-yellow-400 whitespace-nowrap text-xs py-1.5 px-3"
                           >
-                            <div className="flex items-center gap-2">
-                              <span>{section.title}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs">{section.title}</span>
                               {assignedName && (
                                 <Badge
                                   variant="secondary"
                                   className={cn(
-                                    'text-xs',
+                                    'text-[10px] h-4 px-1.5',
                                     isAssignedToCurrentUser && 'bg-yellow-400/20 border-yellow-400'
                                   )}
                                 >
@@ -1291,7 +1372,7 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
                                 <Badge
                                   variant="secondary"
                                   className={cn(
-                                    'text-xs',
+                                    'text-[10px] h-4 px-1.5',
                                     section.status === 'completed' && 'bg-green-500/20 text-green-500',
                                     section.status === 'in_progress' && 'bg-blue-500/20 text-blue-500',
                                     section.status === 'in_review' && 'bg-yellow-400/20 text-yellow-400',
@@ -1301,8 +1382,38 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
                                   {section.status.replace('_', ' ')}
                                 </Badge>
                               )}
+                              {/* Attachment count badge */}
+                              {sectionAttachmentCounts.get(section.id) ? (
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    'text-[10px] h-4 px-1.5',
+                                    activeSection === section.id 
+                                      ? 'bg-black text-white dark:bg-white dark:text-black' 
+                                      : 'bg-yellow-400/20 text-yellow-400'
+                                  )}
+                                >
+                                  <Paperclip className="h-2.5 w-2.5 mr-0.5" />
+                                  {sectionAttachmentCounts.get(section.id)}
+                                </Badge>
+                              ) : null}
                             </div>
                           </TabsTrigger>
+                          
+                          {/* Attachment Button - Always visible */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 hover:bg-yellow-400/10 hover:text-yellow-400"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setActiveSection(section.id)
+                              setShowAttachmentPanel(true)
+                            }}
+                            title="View attachments"
+                          >
+                            <Paperclip className="h-3.5 w-3.5" />
+                          </Button>
                           
                           {/* Section Actions Dropdown - Only for Lead */}
                           {isLead && (
@@ -1311,10 +1422,10 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-8 w-8 p-0"
+                                  className="h-7 w-7 p-0 hover:bg-yellow-400/10 hover:text-yellow-400"
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  <MoreVertical className="h-4 w-4" />
+                                  <MoreVertical className="h-3.5 w-3.5" />
                                 </Button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-48">
@@ -1355,7 +1466,7 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
                       )
                     })}
                   </TabsList>
-                  <ScrollBar orientation="horizontal" />
+                  <ScrollBar orientation="horizontal" className="h-1.5" />
                 </ScrollArea>
                 
                 {/* Add Section Button - Only for Lead */}
@@ -1364,7 +1475,7 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
                     size="sm"
                     variant="ghost"
                     onClick={() => setShowAddSectionDialog(true)}
-                    className="shrink-0"
+                    className="shrink-0 hover:bg-yellow-400/10 hover:text-yellow-400"
                   >
                     <Plus className="h-4 w-4" />
                   </Button>
@@ -1376,51 +1487,49 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
       </div>
 
       {/* Add Section Dialog */}
-      {isLead && (
-        <Dialog open={showAddSectionDialog} onOpenChange={setShowAddSectionDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add New Section</DialogTitle>
-              <DialogDescription>
-                Create a new section for your proposal document
-              </DialogDescription>
-            </DialogHeader>
-            <Input
-              value={newSectionTitle}
-              onChange={(e) => setNewSectionTitle(e.target.value)}
-              placeholder="Enter section title..."
-              className="border-yellow-400/20"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleAddSection()
-                if (e.key === 'Escape') {
-                  setShowAddSectionDialog(false)
-                  setNewSectionTitle('')
-                }
+      <Dialog open={showAddSectionDialog} onOpenChange={setShowAddSectionDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add New Section</DialogTitle>
+            <DialogDescription>
+              Create a new section for your proposal document
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={newSectionTitle}
+            onChange={(e) => setNewSectionTitle(e.target.value)}
+            placeholder="Enter section title..."
+            className="border-yellow-400/20"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddSection()
+              if (e.key === 'Escape') {
+                setShowAddSectionDialog(false)
+                setNewSectionTitle('')
+              }
+            }}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowAddSectionDialog(false)
+                setNewSectionTitle('')
               }}
-              autoFocus
-            />
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowAddSectionDialog(false)
-                  setNewSectionTitle('')
-                }}
-                className="border-yellow-400 text-yellow-400 hover:bg-yellow-400/10"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddSection}
-                disabled={!newSectionTitle.trim()}
-                className="bg-yellow-400 hover:bg-yellow-500 text-black"
-              >
-                Add Section
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
+              className="border-yellow-400 text-yellow-400 hover:bg-yellow-400/10"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddSection}
+              disabled={!newSectionTitle.trim()}
+              className="bg-yellow-400 hover:bg-yellow-500 text-black"
+            >
+              Add Section
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Editor Content */}
       <div className="flex-1 overflow-auto">
@@ -1483,6 +1592,8 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
           }
         }}
         canEdit={canEdit}
+        sectionId={activeSection || undefined}
+        sectionTitle={activeSection ? sections.find(s => s.id === activeSection)?.title : undefined}
       />
 
       {/* Team Management Panel */}
@@ -1500,6 +1611,28 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
         onResolve={handleResolveConflict}
         onResolveAll={handleResolveAllConflicts}
       />
+
+      {/* Section Attachment Panel */}
+      <Sheet open={showAttachmentPanel} onOpenChange={setShowAttachmentPanel}>
+        <SheetContent side="right" className="w-[400px] sm:w-[540px] p-0">
+          {activeSection && user?.id && (
+            <SectionAttachmentPanel
+              sectionId={activeSection}
+              documentId={documentId}
+              currentUserId={user.id}
+              isLead={isLead}
+              canUpload={canEdit} // Allow upload if user can edit the document
+              onClose={() => {
+                setShowAttachmentPanel(false)
+                // Reload attachment counts when panel closes
+                if (sections.length > 0) {
+                  loadAttachmentCounts(sections.map(s => s.id))
+                }
+              }}
+            />
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }

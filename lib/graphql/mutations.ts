@@ -76,6 +76,16 @@ export const REJECT_PROPOSAL = gql`
   }
 `
 
+export const UPDATE_PROPOSAL_STATUS = gql`
+  mutation UpdateProposalStatus($proposalId: ID!, $status: String!) {
+    updateProposalStatus(proposalId: $proposalId, status: $status) {
+      id
+      status
+      updatedAt
+    }
+  }
+`
+
 export const UPDATE_PROJECT_STATUS = gql`
   mutation UpdateProjectStatus($projectId: ID!, $status: ProjectStatus!, $notes: String) {
     updateProjectStatus(projectId: $projectId, status: $status, notes: $notes) {

@@ -20,9 +20,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Search, Eye, Calendar, User, Briefcase } from 'lucide-react'
+import { Search, Eye, Calendar, User, Briefcase, AlertCircle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { createGraphQLClient, ADMIN_ALL_PROPOSALS } from '@/lib/graphql/client'
+import { createGraphQLClient, ADMIN_ALL_PROPOSALS, ADMIN_PENDING_PROPOSALS } from '@/lib/graphql/client'
+import { ProposalApprovalQueue } from './proposal-approval-queue'
 
 interface Proposal {
   id: string
@@ -65,6 +66,20 @@ export function ProposalOversight() {
     queryFn: () => fetchProposals(statusFilter, searchQuery),
   })
 
+  // Query for pending approvals count
+  const { data: pendingData } = useQuery({
+    queryKey: ['admin-pending-proposals'],
+    queryFn: async () => {
+      const client = createGraphQLClient()
+      const data = await client.request<{ adminPendingProposals: Proposal[] }>(
+        ADMIN_PENDING_PROPOSALS
+      )
+      return data.adminPendingProposals
+    },
+  })
+
+  const pendingCount = pendingData?.length || 0
+
   if (isLoading) {
     return <ProposalsSkeleton />
   }
@@ -81,6 +96,26 @@ export function ProposalOversight() {
 
   return (
     <div className="space-y-6">
+      {/* Pending Approvals Section */}
+      {pendingCount > 0 && (
+        <Card className="border-yellow-400 bg-yellow-400/5">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-yellow-400" />
+              <CardTitle>Pending Approvals</CardTitle>
+              <Badge className="bg-yellow-400 text-black ml-auto">
+                {pendingCount} pending
+              </Badge>
+            </div>
+            <CardDescription>
+              Review and approve proposals before they become visible to clients
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ProposalApprovalQueue />
+          </CardContent>
+        </Card>
+      )}
       {/* Filters */}
       <Card className="border-yellow-400/20">
         <CardHeader>
@@ -104,6 +139,7 @@ export function ProposalOversight() {
               <SelectContent>
                 <SelectItem value="all">All Statuses</SelectItem>
                 <SelectItem value="draft">Draft</SelectItem>
+                <SelectItem value="pending_approval">Pending Approval</SelectItem>
                 <SelectItem value="submitted">Submitted</SelectItem>
                 <SelectItem value="under_review">Under Review</SelectItem>
                 <SelectItem value="accepted">Accepted</SelectItem>
@@ -267,8 +303,9 @@ export function ProposalOversight() {
 function getStatusColor(status: string): string {
   const colors: Record<string, string> = {
     draft: 'bg-gray-500 hover:bg-gray-600',
+    pending_approval: 'bg-yellow-400 hover:bg-yellow-500 text-black',
     submitted: 'bg-blue-500 hover:bg-blue-600',
-    under_review: 'bg-yellow-400 hover:bg-yellow-500 text-black',
+    under_review: 'bg-purple-500 hover:bg-purple-600',
     accepted: 'bg-green-500 hover:bg-green-600',
     rejected: 'bg-red-500 hover:bg-red-600',
   }

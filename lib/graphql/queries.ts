@@ -130,6 +130,30 @@ export const GET_PROPOSAL_DETAILS = gql`
         title
         content
         order
+        versions {
+          id
+          versionNumber
+          content
+          createdBy
+          createdByName
+          changesSummary
+          isRollback
+          rolledBackFrom
+          createdAt
+          sectionsSnapshot
+          attachmentsSnapshot
+        }
+        documents {
+          id
+          name
+          fileType
+          fileSize
+          category
+          url
+          uploadedAt
+          uploadedBy
+          uploaderName
+        }
       }
       documents {
         id
@@ -153,7 +177,10 @@ export const GET_PROPOSAL_DETAILS = gql`
         id
         versionNumber
         content
+        sectionsSnapshot
+        documentsSnapshot
         createdBy
+        createdByName
         createdAt
       }
       currentVersion
@@ -232,6 +259,8 @@ export const GET_VERSION_HISTORY = gql`
       isRollback
       rolledBackFrom
       createdAt
+      sectionsSnapshot
+      attachmentsSnapshot
     }
   }
 `

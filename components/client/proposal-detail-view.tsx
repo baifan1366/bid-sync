@@ -215,22 +215,10 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
                   Sections
                 </TabsTrigger>
                 <TabsTrigger
-                  value="documents"
-                  className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black"
-                >
-                  Documents
-                </TabsTrigger>
-                <TabsTrigger
                   value="team"
                   className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black"
                 >
                   Team
-                </TabsTrigger>
-                <TabsTrigger
-                  value="history"
-                  className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black"
-                >
-                  History
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -241,23 +229,15 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
               </TabsContent>
 
               <TabsContent value="sections" className="mt-0">
-                <SectionsTab proposal={proposal} />
-              </TabsContent>
-
-              <TabsContent value="documents" className="mt-0">
-                <DocumentsTab proposal={proposal} />
+                <SectionsTab 
+                  proposal={proposal}
+                  onViewVersion={(version) => setViewVersionDialog({ open: true, version })}
+                  onCompareVersions={(versions) => setCompareDialog({ open: true, versions })}
+                />
               </TabsContent>
 
               <TabsContent value="team" className="mt-0">
                 <TeamTab proposal={proposal} />
-              </TabsContent>
-
-              <TabsContent value="history" className="mt-0">
-                <HistoryTab 
-                  proposal={proposal} 
-                  onViewVersion={(version) => setViewVersionDialog({ open: true, version })}
-                  onCompareVersions={(versions) => setCompareDialog({ open: true, versions })}
-                />
               </TabsContent>
             </div>
           </Tabs>
@@ -282,11 +262,11 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Eye className="h-5 w-5 text-yellow-400" />
-              Version {viewVersionDialog.version?.version_number}
+              Version {viewVersionDialog.version?.versionNumber}
             </DialogTitle>
             <DialogDescription>
-              Created by {viewVersionDialog.version?.created_by_name || 'Unknown'} on{' '}
-              {viewVersionDialog.version && new Date(viewVersionDialog.version.created_at).toLocaleString()}
+              Created by {viewVersionDialog.version?.createdByName || viewVersionDialog.version?.createdBy || 'Unknown'} on{' '}
+              {viewVersionDialog.version && new Date(viewVersionDialog.version.createdAt).toLocaleString()}
             </DialogDescription>
           </DialogHeader>
           <Separator className="bg-yellow-400/10" />
@@ -307,8 +287,8 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
             <DialogDescription>
               {compareDialog.versions.length === 2 && (
                 <>
-                  Comparing Version {compareDialog.versions[0]?.version_number} with Version{' '}
-                  {compareDialog.versions[1]?.version_number}
+                  Comparing Version {compareDialog.versions[0]?.versionNumber} with Version{' '}
+                  {compareDialog.versions[1]?.versionNumber}
                 </>
               )}
             </DialogDescription>
@@ -321,25 +301,25 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
                   <Card className="border-yellow-400/20 p-4">
                     <div className="flex items-center gap-2 mb-3">
                       <Badge className="bg-blue-400 text-white">
-                        Version {compareDialog.versions[0]?.version_number}
+                        Version {compareDialog.versions[0]?.versionNumber}
                       </Badge>
                       <Badge variant="secondary" className="text-xs">Older</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground mb-2">
-                      {compareDialog.versions[0]?.created_by_name} •{' '}
-                      {new Date(compareDialog.versions[0]?.created_at).toLocaleString()}
+                      {compareDialog.versions[0]?.createdByName || compareDialog.versions[0]?.createdBy} •{' '}
+                      {new Date(compareDialog.versions[0]?.createdAt).toLocaleString()}
                     </div>
                   </Card>
                   <Card className="border-yellow-400/20 p-4">
                     <div className="flex items-center gap-2 mb-3">
                       <Badge className="bg-green-400 text-white">
-                        Version {compareDialog.versions[1]?.version_number}
+                        Version {compareDialog.versions[1]?.versionNumber}
                       </Badge>
                       <Badge variant="secondary" className="text-xs">Newer</Badge>
                     </div>
                     <div className="text-xs text-muted-foreground mb-2">
-                      {compareDialog.versions[1]?.created_by_name} •{' '}
-                      {new Date(compareDialog.versions[1]?.created_at).toLocaleString()}
+                      {compareDialog.versions[1]?.createdByName || compareDialog.versions[1]?.createdBy} •{' '}
+                      {new Date(compareDialog.versions[1]?.createdAt).toLocaleString()}
                     </div>
                   </Card>
                 </div>
@@ -561,7 +541,15 @@ function OverviewTab({ proposal }: { proposal: ProposalDetail | null }) {
 }
 
 // Sections Tab Component
-function SectionsTab({ proposal }: { proposal: ProposalDetail | null }) {
+function SectionsTab({ 
+  proposal,
+  onViewVersion,
+  onCompareVersions
+}: { 
+  proposal: ProposalDetail | null
+  onViewVersion: (version: any) => void
+  onCompareVersions: (versions: any[]) => void
+}) {
   const [expandedSections, setExpandedSections] = React.useState<Set<string>>(new Set())
 
   if (!proposal) {
@@ -640,6 +628,18 @@ function SectionsTab({ proposal }: { proposal: ProposalDetail | null }) {
         {sortedSections.map((section, index) => {
           const isExpanded = expandedSections.has(section.id)
           
+          // Debug log
+          console.log('[ProposalDetailView] Rendering section:', {
+            id: section.id,
+            title: section.title,
+            has_versions: 'versions' in section,
+            versions_is_array: Array.isArray(section.versions),
+            versions_length: section.versions?.length || 0,
+            has_documents: 'documents' in section,
+            documents_is_array: Array.isArray(section.documents),
+            documents_length: section.documents?.length || 0,
+          });
+          
           return (
             <div
               key={section.id}
@@ -667,14 +667,179 @@ function SectionsTab({ proposal }: { proposal: ProposalDetail | null }) {
 
               {/* Section Content */}
               {isExpanded && (
-                <div className="border-t border-yellow-400/20 bg-white p-6 dark:bg-black">
-                  <div className="prose prose-sm max-w-none dark:prose-invert">
-                    {/* Render rich text content */}
-                    <div
-                      className="text-black dark:text-white"
-                      dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.content) }}
-                    />
+                <div className="border-t border-yellow-400/20 bg-white dark:bg-black">
+                  {/* Section Content */}
+                  <div className="p-6">
+                    {/* Render rich text content with enhanced styling */}
+                    {section.content && section.content.trim() !== '' && section.content !== '{}' ? (
+                      <div
+                        className="prose prose-sm max-w-none dark:prose-invert
+                          prose-headings:text-black dark:prose-headings:text-white
+                          prose-p:text-gray-700 dark:prose-p:text-gray-300
+                          prose-p:leading-relaxed
+                          prose-strong:text-black dark:prose-strong:text-white
+                          prose-strong:font-bold
+                          prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:underline
+                          prose-code:text-yellow-400 prose-code:bg-yellow-400/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                          prose-pre:bg-gray-100 dark:prose-pre:bg-gray-900 prose-pre:border prose-pre:border-yellow-400/20
+                          prose-ul:list-disc prose-ul:pl-6
+                          prose-ol:list-decimal prose-ol:pl-6
+                          prose-li:text-gray-700 dark:prose-li:text-gray-300
+                          prose-blockquote:border-l-4 prose-blockquote:border-yellow-400 prose-blockquote:pl-4 prose-blockquote:italic
+                          prose-hr:border-yellow-400/20"
+                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.content) }}
+                      />
+                    ) : (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <p className="text-sm">No content yet</p>
+                      </div>
+                    )}
                   </div>
+
+                  {/* Section Documents */}
+                  {(() => {
+                    const hasDocuments = section.documents && section.documents.length > 0;
+                    console.log('[ProposalDetailView] Documents Render Check:', {
+                      section_id: section.id,
+                      section_title: section.title,
+                      has_documents: !!section.documents,
+                      is_array: Array.isArray(section.documents),
+                      length: section.documents?.length || 0,
+                      condition_result: hasDocuments,
+                      will_render: hasDocuments ? 'YES' : 'NO',
+                      documents: section.documents,
+                    });
+                    return null;
+                  })()}
+                  {section.documents && section.documents.length > 0 && (
+                    <div className="border-t border-yellow-400/20 p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <FileText className="h-5 w-5 text-yellow-400" />
+                        <h5 className="font-semibold text-black dark:text-white">
+                          Attachments ({section.documents.length})
+                        </h5>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {section.documents.map((doc: any) => (
+                          <Card key={doc.id} className="border-yellow-400/20 p-3 hover:border-yellow-400/40 transition-colors">
+                            <div className="flex items-start gap-3">
+                              <FileText className="h-5 w-5 text-yellow-400 shrink-0 mt-0.5" />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-sm text-black dark:text-white truncate">
+                                  {doc.name}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {doc.fileType} • {(doc.fileSize / 1024).toFixed(1)} KB
+                                </p>
+                                {doc.uploaderName && (
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    Uploaded by {doc.uploaderName}
+                                  </p>
+                                )}
+                                <p className="text-xs text-muted-foreground">
+                                  {new Date(doc.uploadedAt).toLocaleDateString()}
+                                </p>
+                              </div>
+                              {doc.url && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="shrink-0 border-yellow-400 text-yellow-400 hover:bg-yellow-400 hover:text-black"
+                                  onClick={() => window.open(doc.url, '_blank')}
+                                >
+                                  <Download className="h-3 w-3" />
+                                </Button>
+                              )}
+                            </div>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Section Version History */}
+                  {(() => {
+                    const hasVersions = section.versions && section.versions.length > 0;
+                    console.log('[ProposalDetailView] Version History Render Check:', {
+                      section_id: section.id,
+                      section_title: section.title,
+                      has_versions: !!section.versions,
+                      is_array: Array.isArray(section.versions),
+                      length: section.versions?.length || 0,
+                      condition_result: hasVersions,
+                      will_render: hasVersions ? 'YES' : 'NO',
+                      first_version: section.versions?.[0],
+                    });
+                    return null;
+                  })()}
+                  {section.versions && section.versions.length > 0 && (
+                    <div className="border-t border-yellow-400/20 p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <History className="h-5 w-5 text-yellow-400" />
+                        <h5 className="font-semibold text-black dark:text-white">
+                          Version History ({section.versions.length})
+                        </h5>
+                      </div>
+                      <div className="space-y-2">
+                        {section.versions.slice(0, 3).map((version: any, vIdx: number) => (
+                          <Card key={version.id} className="border-yellow-400/20 p-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Badge className="bg-yellow-400 text-black">
+                                    v{version.versionNumber}
+                                  </Badge>
+                                  {vIdx === 0 && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      Current
+                                    </Badge>
+                                  )}
+                                  {version.isRollback && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      Rollback
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-sm text-muted-foreground">
+                                  {version.changesSummary}
+                                </p>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  {version.createdByName} • {new Date(version.createdAt).toLocaleString()}
+                                </p>
+                              </div>
+                              <div className="flex gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="border-yellow-400/20 text-xs"
+                                  onClick={() => onViewVersion(version)}
+                                >
+                                  <Eye className="h-3 w-3 mr-1" />
+                                  View
+                                </Button>
+                                {vIdx > 0 && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-yellow-400/20 text-xs"
+                                    onClick={() => onCompareVersions([section.versions?.[vIdx], section.versions?.[0]])}
+                                  >
+                                    <GitCompare className="h-3 w-3 mr-1" />
+                                    Compare
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+                          </Card>
+                        ))}
+                        {section.versions.length > 3 && (
+                          <p className="text-xs text-center text-muted-foreground pt-2">
+                            + {section.versions.length - 3} more versions
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1152,7 +1317,7 @@ function HistoryTab({
   }
 
   const handleViewVersion = (versionNumber: number) => {
-    const version = proposal?.versions.find(v => v.version_number === versionNumber)
+    const version = proposal?.versions.find(v => v.versionNumber === versionNumber)
     if (version) {
       onViewVersion(version)
     }
@@ -1161,9 +1326,9 @@ function HistoryTab({
   const handleCompareVersions = () => {
     if (selectedVersions.length === 2) {
       const versions = selectedVersions
-        .map(vNum => proposal?.versions.find(v => v.version_number === vNum))
+        .map(vNum => proposal?.versions.find(v => v.versionNumber === vNum))
         .filter(Boolean)
-        .sort((a, b) => a!.version_number - b!.version_number) // Sort older first
+        .sort((a, b) => a!.versionNumber - b!.versionNumber) // Sort older first
       
       if (versions.length === 2) {
         onCompareVersions(versions as any[])
@@ -1173,7 +1338,7 @@ function HistoryTab({
 
   // Sort versions by version number (newest first)
   const sortedVersions = [...proposal.versions].sort(
-    (a, b) => b.version_number - a.version_number
+    (a, b) => b.versionNumber - a.versionNumber
   )
 
   return (
@@ -1216,8 +1381,8 @@ function HistoryTab({
         <div className="absolute left-6 top-0 h-full w-0.5 bg-yellow-400/20" />
 
         {sortedVersions.map((version, index) => {
-          const isCurrentVersion = version.version_number === proposal.currentVersion
-          const isSelected = selectedVersions.includes(version.version_number)
+          const isCurrentVersion = version.versionNumber === proposal.currentVersion
+          const isSelected = selectedVersions.includes(version.versionNumber)
 
           return (
             <div key={version.id} className="relative flex gap-4">
@@ -1231,7 +1396,7 @@ function HistoryTab({
                   }`}
                 >
                   <span className="text-xs font-semibold">
-                    {version.version_number}
+                    {version.versionNumber}
                   </span>
                 </div>
               </div>
@@ -1248,17 +1413,17 @@ function HistoryTab({
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <h4 className="font-semibold text-black dark:text-white">
-                        Version {version.version_number}
+                        Version {version.versionNumber}
                       </h4>
                       {isCurrentVersion && (
                         <Badge className="bg-yellow-400 text-black">Current</Badge>
                       )}
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Created on {formatDate(version.created_at)}
+                      Created on {formatDate(version.createdAt)}
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      By: {version.created_by}
+                      By: {version.createdByName || version.createdBy}
                     </p>
                   </div>
 
@@ -1266,7 +1431,7 @@ function HistoryTab({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleVersionSelect(version.version_number)}
+                      onClick={() => handleVersionSelect(version.versionNumber)}
                       className={`border-yellow-400/40 ${
                         isSelected
                           ? 'bg-yellow-400 text-black hover:bg-yellow-500'
@@ -1278,7 +1443,7 @@ function HistoryTab({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleViewVersion(version.version_number)}
+                      onClick={() => handleViewVersion(version.versionNumber)}
                       className="border-yellow-400/40 hover:bg-yellow-400/10"
                     >
                       <Eye className="mr-2 h-4 w-4" />

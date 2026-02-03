@@ -399,7 +399,15 @@ function ProposalColumn({ proposal, alignedSections, differences, onScroll, allP
                   </h5>
                   {proposalSection ? (
                     <div
-                      className="prose prose-sm max-w-none text-sm text-muted-foreground dark:prose-invert"
+                      className="prose prose-sm max-w-none dark:prose-invert
+                        prose-headings:text-black dark:prose-headings:text-white prose-headings:text-sm
+                        prose-p:text-gray-700 dark:prose-p:text-gray-300 prose-p:text-sm prose-p:leading-relaxed
+                        prose-strong:text-black dark:prose-strong:text-white prose-strong:font-semibold
+                        prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:underline
+                        prose-code:text-yellow-400 prose-code:bg-yellow-400/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs
+                        prose-ul:list-disc prose-ul:pl-4 prose-ul:text-sm
+                        prose-ol:list-decimal prose-ol:pl-4 prose-ol:text-sm
+                        prose-li:text-gray-700 dark:prose-li:text-gray-300"
                       dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(proposalSection.content) }}
                     />
                   ) : (

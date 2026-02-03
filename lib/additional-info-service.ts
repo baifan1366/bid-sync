@@ -184,9 +184,7 @@ export class AdditionalInfoService {
       return `${fieldName} cannot be empty`;
     }
 
-    if (value.length > 5000) {
-      return `${fieldName} must be 5000 characters or less`;
-    }
+    // No character limit for text fields
 
     return null;
   }

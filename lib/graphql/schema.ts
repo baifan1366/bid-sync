@@ -130,6 +130,8 @@ export const typeDefs = /* GraphQL */ `
     isRollback: Boolean!
     rolledBackFrom: ID
     createdAt: String!
+    sectionsSnapshot: JSON
+    attachmentsSnapshot: JSON
   }
 
   type DocumentCollaborator {
@@ -901,6 +903,8 @@ export const typeDefs = /* GraphQL */ `
     title: String!
     content: String!
     order: Int!
+    versions: [DocumentVersion!]!
+    documents: [ProposalDocument!]!
   }
 
   type ProposalDocument {
@@ -912,6 +916,7 @@ export const typeDefs = /* GraphQL */ `
     url: String!
     uploadedAt: String!
     uploadedBy: String!
+    uploaderName: String
   }
 
   enum DocumentCategory {
@@ -939,8 +944,11 @@ export const typeDefs = /* GraphQL */ `
   type ProposalVersion {
     id: ID!
     versionNumber: Int!
-    content: String!
+    content: JSON!
+    sectionsSnapshot: JSON
+    documentsSnapshot: JSON
     createdBy: String!
+    createdByName: String
     createdAt: String!
   }
 
@@ -948,6 +956,7 @@ export const typeDefs = /* GraphQL */ `
     DRAFT
     SUBMITTED
     PENDING_APPROVAL
+    UNDER_REVIEW
     REVIEWING
     APPROVED
     REJECTED
@@ -1055,6 +1064,12 @@ export const typeDefs = /* GraphQL */ `
     proposalId: ID!
     submittedAt: String!
     errors: [String!]
+  }
+
+  type ApprovalResult {
+    success: Boolean!
+    message: String!
+    error: String
   }
 
   # Collaborative Editor Inputs
@@ -1448,6 +1463,7 @@ export const typeDefs = /* GraphQL */ `
     markMessagesAsRead(projectId: ID!, proposalId: ID): Boolean!
     acceptProposal(proposalId: ID!, projectId: ID!): ProposalDecision!
     rejectProposal(input: RejectProposalInput!): ProposalDecision!
+    updateProposalStatus(proposalId: ID!, status: String!): Proposal!
     
     # Q&A mutations
     askQuestion(projectId: ID!, question: String!): ProjectQuestion!
@@ -1467,6 +1483,10 @@ export const typeDefs = /* GraphQL */ `
     submitProposal(input: SubmitProposalInput!): SubmissionResult!
     saveSubmissionDraft(proposalId: ID!, step: Int!, data: JSON!): Boolean!
     deleteSubmissionDraft(proposalId: ID!): Boolean!
+    
+    # Admin proposal approval mutations
+    approveProposal(proposalId: ID!, notes: String): ApprovalResult!
+    rejectProposalSubmission(proposalId: ID!, reason: String!): ApprovalResult!
     
     # Admin management mutations
     inviteAdmin(email: String!): AdminInvitation!

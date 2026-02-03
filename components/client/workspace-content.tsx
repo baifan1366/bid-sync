@@ -151,14 +151,19 @@ const statusColors: Record<string, { bg: string; text: string; icon: React.React
     text: "text-gray-700 dark:text-gray-300",
     icon: <FileText className="h-4 w-4" />,
   },
+  pending_approval: {
+    bg: "bg-yellow-100 dark:bg-yellow-900/20",
+    text: "text-yellow-700 dark:text-yellow-300",
+    icon: <Clock className="h-4 w-4" />,
+  },
   submitted: {
     bg: "bg-blue-100 dark:bg-blue-900/20",
     text: "text-blue-700 dark:text-blue-300",
-    icon: <Clock className="h-4 w-4" />,
+    icon: <CheckCircle2 className="h-4 w-4" />,
   },
   under_review: {
-    bg: "bg-yellow-100 dark:bg-yellow-900/20",
-    text: "text-yellow-700 dark:text-yellow-300",
+    bg: "bg-purple-100 dark:bg-purple-900/20",
+    text: "text-purple-700 dark:text-purple-300",
     icon: <AlertCircle className="h-4 w-4" />,
   },
   accepted: {
@@ -171,6 +176,15 @@ const statusColors: Record<string, { bg: string; text: string; icon: React.React
     text: "text-red-700 dark:text-red-300",
     icon: <XCircle className="h-4 w-4" />,
   },
+}
+
+const statusLabels: Record<string, string> = {
+  draft: "Draft",
+  pending_approval: "Pending Approval",
+  submitted: "Submitted",
+  under_review: "Under Review",
+  accepted: "Accepted",
+  rejected: "Rejected",
 }
 
 export function WorkspaceContent() {
@@ -191,7 +205,7 @@ export function WorkspaceContent() {
   const isBiddingMember = user?.user_metadata?.role === 'bidding_member'
   
   // Fetch proposals for the current lead
-  const { data: leadData, isLoading: leadLoading, error: leadError } = useGraphQLQuery<{ leadProposals: ProposalWithProject[] }>(
+  const { data: leadData, isLoading: leadLoading, error: leadError, refetch: refetchLeadProposals } = useGraphQLQuery<{ leadProposals: ProposalWithProject[] }>(
     ['lead-proposals', user?.id || 'no-user'],
     GET_LEAD_PROPOSALS,
     { leadId: user?.id || 'placeholder' },
@@ -202,7 +216,7 @@ export function WorkspaceContent() {
   )
 
   // Fetch proposals for members (proposals they're part of)
-  const { data: memberData, isLoading: memberLoading, error: memberError } = useGraphQLQuery<{ myMemberProposals: ProposalWithProject[] }>(
+  const { data: memberData, isLoading: memberLoading, error: memberError, refetch: refetchMemberProposals } = useGraphQLQuery<{ myMemberProposals: ProposalWithProject[] }>(
     ['member-proposals', user?.id || 'no-user'],
     GET_MEMBER_PROPOSALS,
     {},
@@ -380,7 +394,7 @@ export function WorkspaceContent() {
   const handleSaveProposal = async (data: ProposalFormData) => {
     if (!selectedProposal) {
       console.error('[Save] No selected proposal')
-      return
+      throw new Error('No proposal selected')
     }
 
     console.log('[Save] Starting save for proposal:', selectedProposal.id)
@@ -413,6 +427,11 @@ export function WorkspaceContent() {
       })
 
       console.log('[Save] Response status:', response.status)
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      
       const result = await response.json()
       console.log('[Save] Result:', JSON.stringify(result, null, 2))
 
@@ -421,8 +440,12 @@ export function WorkspaceContent() {
         throw new Error(result.errors[0]?.message || "Failed to save proposal")
       }
 
+      if (!result.data?.updateProposal) {
+        throw new Error("No data returned from save operation")
+      }
+
       console.log('[Save] Save successful')
-      // Don't show alert or reload when called from submit flow
+      return result.data.updateProposal
     } catch (error) {
       console.error("[Save] Error saving proposal:", error)
       throw error // Re-throw to let caller handle it
@@ -431,14 +454,17 @@ export function WorkspaceContent() {
 
   // Wrapper for direct save button (shows toast without reload)
   const handleDirectSave = async (data: ProposalFormData) => {
+    console.log('[DirectSave] Starting direct save...')
     try {
       await handleSaveProposal(data)
+      console.log('[DirectSave] Save successful, showing toast')
       toast({
         title: "Success",
         description: "Proposal saved successfully!",
       })
       // Don't reload - user may want to continue editing or submit
     } catch (error) {
+      console.error('[DirectSave] Save failed:', error)
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : "Failed to save proposal",
@@ -511,11 +537,27 @@ export function WorkspaceContent() {
       }
 
       console.log('[Submit] Success!')
+      
+      // Update local state immediately to reflect new status
+      if (selectedProposal) {
+        selectedProposal.status = 'pending_approval'
+      }
+      
+      // Refresh the proposal list to get updated status from server
+      if (isBiddingLead) {
+        await refetchLeadProposals()
+      } else if (isBiddingMember) {
+        await refetchMemberProposals()
+      }
+      
       toast({
         title: "Success",
-        description: "Proposal submitted successfully!",
+        description: "Proposal submitted for admin approval!",
       })
-      // Stay on current page - user can navigate manually if needed
+      
+      // Switch to view mode since proposal is no longer editable
+      setViewMode('view')
+      
     } catch (error) {
       console.error("[Submit] Error submitting proposal:", error)
       toast({
@@ -684,7 +726,7 @@ export function WorkspaceContent() {
                           className={`${statusInfo.bg} ${statusInfo.text} flex items-center gap-1`}
                         >
                           {statusInfo.icon}
-                          {statusKey.replace(/_/g, " ")}
+                          {statusLabels[statusKey] || statusKey.replace(/_/g, " ")}
                         </Badge>
                       </div>
 
@@ -705,6 +747,23 @@ export function WorkspaceContent() {
           <div className="xl:col-span-6">
             {selectedProposal ? (
               <div className="space-y-6">
+                {/* Pending Approval Notice */}
+                {selectedProposal.status === 'pending_approval' && (
+                  <Card className="p-4 border-yellow-400 bg-yellow-50 dark:bg-yellow-950/10">
+                    <div className="flex items-start gap-3">
+                      <Clock className="h-5 w-5 text-yellow-600 dark:text-yellow-400 mt-0.5 shrink-0" />
+                      <div>
+                        <h3 className="font-semibold text-yellow-900 dark:text-yellow-100">
+                          Pending Admin Approval
+                        </h3>
+                        <p className="text-sm text-yellow-800 dark:text-yellow-200 mt-1">
+                          Your proposal has been submitted and is awaiting admin approval. You will be notified once it has been reviewed.
+                        </p>
+                      </div>
+                    </div>
+                  </Card>
+                )}
+                
                 {/* Header with Mode Toggle */}
                 <Card className="p-4 border-yellow-400/20">
                   <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -713,7 +772,7 @@ export function WorkspaceContent() {
                         {selectedProposal.project.title}
                       </h2>
                       <p className="text-sm text-muted-foreground mt-1">
-                        {isDraft ? "Draft Proposal" : "Submitted Proposal"}
+                        {isDraft ? "Draft Proposal" : statusLabels[selectedProposal.status?.toLowerCase() || ''] || "Proposal"}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 flex-wrap">

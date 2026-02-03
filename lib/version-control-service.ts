@@ -94,13 +94,23 @@ export class VersionControlService {
     input: CreateVersionInput
   ): Promise<VersionControlServiceResult<DocumentVersion>> {
     try {
+      console.log('[VersionControlService] 🚀 createVersion called with:', {
+        documentId: input.documentId,
+        userId: input.userId,
+        hasContent: !!input.content,
+        changesSummary: input.changesSummary
+      });
+
       // Validate input
       const validated = CreateVersionInputSchema.parse(input)
+      console.log('[VersionControlService] ✅ Input validated');
 
       // Use admin client to bypass RLS
       const adminClient = createAdminClient()
+      console.log('[VersionControlService] 🔑 Admin client created');
 
       // Check if user has editor or owner permissions
+      console.log('[VersionControlService] 🔍 Checking permissions...');
       const { data: hasPermission } = await adminClient
         .rpc('has_document_permission', {
           p_document_id: validated.documentId,
@@ -108,7 +118,10 @@ export class VersionControlService {
           p_required_role: 'editor'
         })
 
+      console.log('[VersionControlService] 🔐 Permission check result:', hasPermission);
+
       if (!hasPermission) {
+        console.error('[VersionControlService] ❌ Insufficient permissions');
         return {
           success: false,
           error: 'Insufficient permissions to create version',
@@ -117,6 +130,7 @@ export class VersionControlService {
 
       // Generate changes summary if not provided
       const changesSummary = validated.changesSummary || this.generateChangesSummary(validated.content)
+      console.log('[VersionControlService] 📝 Changes summary:', changesSummary);
 
       // Retry logic to handle race conditions
       let version = null
@@ -126,18 +140,23 @@ export class VersionControlService {
 
       while (retryCount < maxRetries && !version) {
         try {
+          console.log(`[VersionControlService] 🔄 Attempt ${retryCount + 1}/${maxRetries} to create version...`);
+          
           // Get next version number with locking
           const { data: nextVersionNumber, error: versionError } = await adminClient
             .rpc('get_next_version_number', {
               p_document_id: validated.documentId
             })
 
+          console.log('[VersionControlService] 🔢 Next version number:', nextVersionNumber, 'Error:', versionError);
+
           if (versionError || nextVersionNumber === null) {
-            console.error('Failed to get next version number:', versionError)
+            console.error('[VersionControlService] ❌ Failed to get next version number:', versionError)
             throw new Error('Failed to generate version number')
           }
 
           // Create version using admin client to bypass RLS
+          console.log('[VersionControlService] 💾 Inserting version into database...');
           const result = await adminClient
             .from('document_versions')
             .insert({
@@ -154,12 +173,19 @@ export class VersionControlService {
           version = result.data
           createError = result.error
 
+          console.log('[VersionControlService] 📊 Insert result:', {
+            hasVersion: !!version,
+            versionId: version?.id,
+            versionNumber: version?.version_number,
+            error: createError
+          });
+
           if (createError) {
             // Check if it's a duplicate key error (race condition)
             if (createError.code === '23505' && createError.message?.includes('document_versions_document_id_version_number_key')) {
               retryCount++
               if (retryCount < maxRetries) {
-                console.log(`Version creation race condition detected, retrying (${retryCount}/${maxRetries})...`)
+                console.log(`[VersionControlService] ⚠️ Race condition detected, retrying (${retryCount}/${maxRetries})...`)
                 // Wait a bit before retrying (exponential backoff)
                 await new Promise(resolve => setTimeout(resolve, 50 * Math.pow(2, retryCount - 1)))
                 continue
@@ -169,10 +195,12 @@ export class VersionControlService {
           }
 
           // Success - exit loop
+          console.log('[VersionControlService] ✅ Version created successfully!');
           break
         } catch (error) {
+          console.error(`[VersionControlService] ❌ Error on attempt ${retryCount + 1}:`, error);
           if (retryCount >= maxRetries - 1) {
-            console.error('Failed to create version after retries:', error)
+            console.error('[VersionControlService] 💥 Failed to create version after retries:', error)
             return {
               success: false,
               error: `Failed to create version: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -183,6 +211,7 @@ export class VersionControlService {
       }
 
       if (!version) {
+        console.error('[VersionControlService] 💥 No version created after retries');
         return {
           success: false,
           error: 'Failed to create version after multiple retries',
@@ -190,8 +219,10 @@ export class VersionControlService {
       }
 
       // Get user details for createdByName
+      console.log('[VersionControlService] 👤 Fetching user details...');
       const { data: { user } } = await adminClient.auth.admin.getUserById(validated.userId)
       const createdByName = user?.user_metadata?.full_name || user?.email || 'Unknown User'
+      console.log('[VersionControlService] 👤 User name:', createdByName);
 
       // Transform database response to DocumentVersion type
       const result: DocumentVersion = {
@@ -207,19 +238,26 @@ export class VersionControlService {
         createdAt: version.created_at,
       }
 
+      console.log('[VersionControlService] 🎉 Version creation complete:', {
+        id: result.id,
+        versionNumber: result.versionNumber,
+        createdBy: result.createdByName
+      });
+
       return {
         success: true,
         data: result,
       }
     } catch (error) {
       if (error instanceof z.ZodError) {
+        console.error('[VersionControlService] ❌ Validation error:', error.issues);
         return {
           success: false,
           error: error.issues.map((e: z.ZodIssue) => e.message).join(', '),
         }
       }
 
-      console.error('Error in createVersion:', error)
+      console.error('[VersionControlService] ❌ Unexpected error in createVersion:', error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error occurred',
@@ -299,6 +337,8 @@ export class VersionControlService {
         isRollback: v.is_rollback,
         rolledBackFrom: v.rolled_back_from,
         createdAt: v.created_at,
+        sectionsSnapshot: v.sections_snapshot || [],
+        attachmentsSnapshot: v.attachments_snapshot || [],
       }))
 
       return {

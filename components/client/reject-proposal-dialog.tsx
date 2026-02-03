@@ -58,9 +58,11 @@ export function RejectProposalDialog({
 
     try {
       await rejectMutation.mutateAsync({
-        proposal_id: proposalId,
-        project_id: projectId,
-        feedback: trimmedFeedback,
+        input: {
+          proposalId: proposalId,
+          projectId: projectId,
+          feedback: trimmedFeedback,
+        }
       })
 
       toast({

@@ -240,7 +240,7 @@ export function LeadDashboardOverview() {
             <div>
               <p className="text-sm text-muted-foreground mb-1">Total Bid Value</p>
               <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">
-                {formatBudget(stats?.totalBidValue || 0)}
+                {formatBudget(stats?.totalBidValue || 0, true)}
               </p>
               <p className="text-xs text-muted-foreground mt-2">
                 Across all proposals

@@ -18,6 +18,10 @@ interface ProposalsListProps {
   sortOrder?: 'asc' | 'desc'
   pageSize?: number
   enableInfiniteScroll?: boolean
+  onAccept?: (proposalId: string) => void
+  onReject?: (proposalId: string) => void
+  onMarkUnderReview?: (proposalId: string) => void
+  showQuickActions?: boolean
 }
 
 export function ProposalsList({
@@ -31,6 +35,10 @@ export function ProposalsList({
   sortOrder = 'desc',
   pageSize = 20,
   enableInfiniteScroll = false,
+  onAccept,
+  onReject,
+  onMarkUnderReview,
+  showQuickActions = false,
 }: ProposalsListProps) {
   const [currentPage, setCurrentPage] = React.useState(1)
   const [displayedCount, setDisplayedCount] = React.useState(pageSize)
@@ -168,6 +176,10 @@ export function ProposalsList({
               onSelect={onProposalSelect}
               onClick={onProposalClick}
               isSelectionDisabled={isDisabled}
+              onAccept={onAccept}
+              onReject={onReject}
+              onMarkUnderReview={onMarkUnderReview}
+              showQuickActions={showQuickActions}
             />
           )
         })}

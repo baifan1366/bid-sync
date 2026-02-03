@@ -113,8 +113,6 @@ export class ProposalSubmissionService {
     // Validate executive summary
     if (!params.executiveSummary || params.executiveSummary.trim().length === 0) {
       errors.push('Executive summary is required');
-    } else if (params.executiveSummary.length > 5000) {
-      errors.push('Executive summary must be 5000 characters or less');
     }
 
     // Validate proposal exists and is in draft status
@@ -189,6 +187,7 @@ export class ProposalSubmissionService {
       }
 
       // Begin transaction by updating proposal
+      // Status changes to 'pending_approval' - admin must approve before it becomes 'submitted'
       const { error: updateError } = await supabase
         .from('proposals')
         .update({
@@ -196,7 +195,7 @@ export class ProposalSubmissionService {
           budget_estimate: params.budgetEstimate,
           timeline_estimate: params.timelineEstimate,
           executive_summary: params.executiveSummary,
-          status: 'submitted',
+          status: 'pending_approval', // Changed from 'submitted' to 'pending_approval'
           submitted_at: submittedAt,
         })
         .eq('id', params.proposalId)
