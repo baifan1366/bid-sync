@@ -489,7 +489,7 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
                     <option value="">Select a proposal to chat...</option>
                     {projectData.proposals.map((proposal) => (
                       <option key={proposal.id} value={proposal.id}>
-                        {proposal.biddingTeamName || proposal.biddingLead?.fullName || 'Team'} - {proposal.title || 'Untitled'}
+                        {proposal.biddingTeamName || proposal.biddingLead?.name || 'Team'} - {proposal.title || 'Untitled'}
                       </option>
                     ))}
                   </select>

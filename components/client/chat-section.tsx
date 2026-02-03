@@ -50,7 +50,18 @@ export function ChatSection({
     try {
       let query = supabase
         .from("chat_messages")
-        .select("id, content, created_at, sender_id, read")
+        .select(`
+          id, 
+          content, 
+          created_at, 
+          sender_id, 
+          read,
+          sender:users!sender_id(
+            id,
+            email,
+            raw_user_meta_data
+          )
+        `)
         .eq("project_id", projectId)
         .order("created_at", { ascending: true })
 
@@ -64,16 +75,24 @@ export function ChatSection({
 
       if (error) throw error
 
-      // For now, use sender_id as the name until we implement proper user lookup
-      const formattedMessages: Message[] = (data || []).map((msg: any) => ({
-        id: msg.id,
-        content: msg.content,
-        senderName: msg.sender_id === user?.id ? "You" : "User",
-        senderAvatar: null,
-        senderRole: "bidding_member",
-        senderId: msg.sender_id,
-        timestamp: msg.created_at,
-      }))
+      // Format messages with actual user names
+      const formattedMessages: Message[] = (data || []).map((msg: any) => {
+        const senderData = msg.sender
+        const senderName = senderData?.raw_user_meta_data?.full_name || 
+                          senderData?.raw_user_meta_data?.name || 
+                          senderData?.email?.split('@')[0] || 
+                          'User'
+        
+        return {
+          id: msg.id,
+          content: msg.content,
+          senderName: msg.sender_id === user?.id ? "You" : senderName,
+          senderAvatar: senderData?.raw_user_meta_data?.avatar_url || null,
+          senderRole: "bidding_member",
+          senderId: msg.sender_id,
+          timestamp: msg.created_at,
+        }
+      })
 
       setMessages(formattedMessages)
     } catch (error) {
@@ -90,11 +109,23 @@ export function ChatSection({
   // Handle new messages from realtime
   const handleNewMessage = useCallback(
     async (newMessage: any) => {
+      // Fetch sender info for the new message
+      const { data: senderData } = await supabase
+        .from("users")
+        .select("id, email, raw_user_meta_data")
+        .eq("id", newMessage.sender_id)
+        .single()
+
+      const senderName = senderData?.raw_user_meta_data?.full_name || 
+                        senderData?.raw_user_meta_data?.name || 
+                        senderData?.email?.split('@')[0] || 
+                        'User'
+
       const formattedMessage: Message = {
         id: newMessage.id,
         content: newMessage.content,
-        senderName: newMessage.sender_id === user?.id ? "You" : "User",
-        senderAvatar: null,
+        senderName: newMessage.sender_id === user?.id ? "You" : senderName,
+        senderAvatar: senderData?.raw_user_meta_data?.avatar_url || null,
         senderRole: "bidding_member",
         senderId: newMessage.sender_id,
         timestamp: newMessage.created_at,
@@ -108,7 +139,7 @@ export function ChatSection({
         return [...prev, formattedMessage]
       })
     },
-    [user?.id]
+    [user?.id, supabase]
   )
 
   // Set up realtime subscription
