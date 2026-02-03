@@ -45,6 +45,11 @@ All features have been successfully implemented and all bugs have been fixed.
 - Convert status values to uppercase in resolver
 - Frontend handles lowercase conversion
 
+### 4. Database Enum Missing Value ⚠️ **ACTION REQUIRED**
+**Issue:** `invalid input value for enum proposal_status: "under_review"`
+**Fix:** Need to add `'under_review'` to database enum
+**Action:** Run `ADD-UNDER-REVIEW-STATUS.sql` in Supabase SQL Editor
+
 ## 📊 Build Status
 
 ```
@@ -118,7 +123,7 @@ All features have been successfully implemented and all bugs have been fixed.
 ## 🚀 Deployment Checklist
 
 - [x] Code implemented
-- [x] All bugs fixed
+- [x] All bugs fixed (except database enum)
 - [x] Build successful
 - [x] GraphQL schema updated
 - [x] Resolvers implemented
@@ -126,6 +131,7 @@ All features have been successfully implemented and all bugs have been fixed.
 - [x] Notifications configured
 - [x] Design system followed
 - [x] Documentation complete
+- [ ] **DATABASE FIX REQUIRED:** Run `ADD-UNDER-REVIEW-STATUS.sql`
 - [ ] Manual testing
 - [ ] User acceptance testing
 - [ ] Deploy to staging

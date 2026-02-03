@@ -6,7 +6,7 @@
 -- 1. Create ENUM Types
 -- ============================================================
 CREATE TYPE user_role AS ENUM ('client', 'bidding_member', 'bidding_lead', 'admin');
-CREATE TYPE proposal_status AS ENUM ('draft', 'submitted', 'reviewing', 'approved', 'rejected', 'archived');
+CREATE TYPE proposal_status AS ENUM ('draft', 'submitted', 'under_review', 'reviewing', 'approved', 'rejected', 'archived');
 CREATE TYPE project_status AS ENUM ('pending_review', 'open', 'closed', 'awarded');
 CREATE TYPE comment_visibility AS ENUM ('internal', 'public');
 

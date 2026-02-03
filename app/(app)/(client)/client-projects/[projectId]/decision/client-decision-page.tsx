@@ -385,7 +385,7 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
 
   // Main page layout
   return (
-    <div className="min-h-screen bg-white dark:bg-black">
+    <div className="bg-white dark:bg-black">
       <div className="mx-auto max-w-[1800px] px-4 py-6 sm:px-6" role="main">
         {/* Connection Status Bar */}
         {proposalConnectionStatus.status !== "connected" && (
@@ -480,13 +480,11 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
 
         {/* Chat Section (Mobile - Bottom) */}
         <aside className="lg:hidden mt-6" aria-label="Project chat">
-          <div className="h-[600px]">
-            <ChatSection
-              projectId={projectId}
-              proposalId={null}
-              projectTitle={projectData.project.title}
-            />
-          </div>
+          <ChatSection
+            projectId={projectId}
+            proposalId={null}
+            projectTitle={projectData.project.title}
+          />
         </aside>
       </div>
 
