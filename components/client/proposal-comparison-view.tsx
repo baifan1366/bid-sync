@@ -108,9 +108,9 @@ export function ProposalComparisonView({ proposalIds, onClose }: ProposalCompari
       biddingTeamName: p.biddingTeam.lead.name,
       biddingLead: p.biddingTeam.lead,
       teamSize: p.biddingTeam.members.length + 1,
-      budgetEstimate: null,
-      timelineEstimate: null,
-      executiveSummary: null,
+      budgetEstimate: p.budgetEstimate,
+      timelineEstimate: p.timelineEstimate,
+      executiveSummary: p.executiveSummary,
       submissionDate: p.submissionDate,
       status: p.status,
       complianceScore: p.complianceChecklist.length > 0
@@ -121,7 +121,7 @@ export function ProposalComparisonView({ proposalIds, onClose }: ProposalCompari
           )
         : 0,
       unreadMessages: 0,
-      additionalInfo: [],
+      additionalInfo: p.additionalInfo || [],
     }))
   )
 
@@ -344,7 +344,7 @@ function ProposalColumn({ proposal, alignedSections, differences, onScroll, allP
             <ComparisonMetric
               icon={<DollarSign className="h-4 w-4" />}
               label="Budget"
-              value="Not specified"
+              value={proposal.budgetEstimate ? `$${proposal.budgetEstimate.toLocaleString()}` : "Not specified"}
               hasDifference={budgetDiff?.hasDifference || false}
             />
 
@@ -352,7 +352,7 @@ function ProposalColumn({ proposal, alignedSections, differences, onScroll, allP
             <ComparisonMetric
               icon={<Clock className="h-4 w-4" />}
               label="Timeline"
-              value="Not specified"
+              value={proposal.timelineEstimate || "Not specified"}
               hasDifference={timelineDiff?.hasDifference || false}
             />
 
