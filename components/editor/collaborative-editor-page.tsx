@@ -30,6 +30,14 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { EditorToolbar } from './editor-toolbar'
 import { ConnectionStatusIndicator } from './connection-status-indicator'
 import { OfflineWarningBanner } from './offline-warning-banner'
@@ -38,7 +46,15 @@ import { ActiveCollaborators } from '@/components/editor/active-collaborators'
 import { VersionHistorySidebar } from './version-history-sidebar'
 import { TeamManagementPanel } from './team-management-panel'
 import { CollaborativeEditorSkeleton } from './collaborative-editor-skeleton'
-import { SimpleSectionTabs } from './simple-section-tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { createClient } from '@/lib/supabase/client'
 import {
   ArrowLeft,
   Save,
@@ -52,8 +68,13 @@ import {
   History,
   UserCog,
   RefreshCw,
+  Plus,
+  MoreVertical,
+  UserPlus,
+  Trash2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/components/ui/use-toast'
 
 const GET_DOCUMENT = gql`
   query GetDocument($id: ID!) {
@@ -119,6 +140,7 @@ interface CollaborativeEditorPageProps {
 export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageProps) {
   const router = useRouter()
   const { user } = useUser()
+  const { toast } = useToast()
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [isEditingDescription, setIsEditingDescription] = useState(false)
   const [title, setTitle] = useState('')
@@ -130,6 +152,26 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
   const [showTeamManagement, setShowTeamManagement] = useState(false)
   const [showConflictDialog, setShowConflictDialog] = useState(false)
   const [isLead, setIsLead] = useState(false)
+  
+  // Debug log when isLead changes
+  useEffect(() => {
+    console.log('[CollaborativeEditorPage] 🔔 isLead state changed to:', isLead)
+    console.log('[CollaborativeEditorPage] This controls whether assignment UI is shown')
+  }, [isLead])
+  
+  // Sections state
+  const [sections, setSections] = useState<Array<{
+    id: string
+    title: string
+    order: number
+    assigned_to?: string
+    status?: string
+  }>>([])
+  const [activeSection, setActiveSection] = useState<string | null>(null)
+  const [sectionsLoading, setSectionsLoading] = useState(true)
+  const [teamMembers, setTeamMembers] = useState<Array<{ id: string; name: string }>>([])
+  const [showAddSectionDialog, setShowAddSectionDialog] = useState(false)
+  const [newSectionTitle, setNewSectionTitle] = useState('')
 
   // Fetch document data
   const { data, isLoading, error, refetch } = useGraphQLQuery<{ document: Document }>(
@@ -155,8 +197,12 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
   // Check if user is a lead for this document's proposal
   useEffect(() => {
     const checkIfLead = async () => {
-      if (!user?.id || !documentId) {
-        console.log('[CollaborativeEditorPage] Missing user or documentId:', { userId: user?.id, documentId })
+      if (!user?.id || !documentId || !document) {
+        console.log('[CollaborativeEditorPage] Missing user, documentId, or document:', { 
+          userId: user?.id, 
+          documentId,
+          hasDocument: !!document 
+        })
         return
       }
 
@@ -164,92 +210,518 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
         const { createClient } = await import('@/lib/supabase/client')
         const supabase = createClient()
         
-        console.log('[CollaborativeEditorPage] Checking lead status for user:', user.id)
+        console.log('=== [CollaborativeEditorPage] START checkIfLead ===')
+        console.log('[CollaborativeEditorPage] User ID:', user.id)
         console.log('[CollaborativeEditorPage] Document ID:', documentId)
+        console.log('[CollaborativeEditorPage] Document object:', document)
+        console.log('[CollaborativeEditorPage] Workspace ID from document:', document.workspaceId)
+        console.log('[CollaborativeEditorPage] Workspace ID type:', typeof document.workspaceId)
         
-        // Get workspace to find proposal
-        const { data: doc, error: docError } = await supabase
-          .from('workspace_documents')
-          .select('workspace_id, workspaces!inner(project_id)')
-          .eq('id', documentId)
-          .single()
+        // Check current user session
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+        console.log('[CollaborativeEditorPage] Current session:', {
+          hasSession: !!sessionData?.session,
+          userId: sessionData?.session?.user?.id,
+          sessionError
+        })
+        
+        // Get workspace to find project_id
+        console.log('[CollaborativeEditorPage] About to query workspaces table...')
+        console.log('[CollaborativeEditorPage] Query: SELECT project_id FROM workspaces WHERE id =', document.workspaceId)
+        
+        const { data: workspace, error: workspaceError } = await supabase
+          .from('workspaces')
+          .select('project_id, lead_id, proposal_id, name')
+          .eq('id', document.workspaceId)
+          .maybeSingle()
 
-        console.log('[CollaborativeEditorPage] Workspace query result:', { doc, docError })
+        console.log('[CollaborativeEditorPage] Workspace query completed')
+        console.log('[CollaborativeEditorPage] Workspace data:', workspace)
+        console.log('[CollaborativeEditorPage] Workspace error:', workspaceError)
+        console.log('[CollaborativeEditorPage] Workspace error details:', {
+          message: workspaceError?.message,
+          code: workspaceError?.code,
+          details: workspaceError?.details,
+          hint: workspaceError?.hint
+        })
 
-        if (docError) {
-          console.error('[CollaborativeEditorPage] Workspace query error:', docError)
-          // If workspace query fails, check if user is lead by checking document_sections directly
-          // This is a fallback - if user created sections, they're likely a lead
-          const { data: userSections } = await supabase
-            .from('document_sections')
-            .select('id')
-            .eq('document_id', documentId)
-            .limit(1)
-          
-          if (userSections && userSections.length > 0) {
-            console.log('[CollaborativeEditorPage] ⚠️ Using fallback: sections exist, assuming lead')
-            setIsLead(true)
-          } else {
-            setIsLead(false)
-          }
+        if (workspaceError) {
+          console.error('[CollaborativeEditorPage] ❌ Workspace query failed with error:', workspaceError)
+          console.error('[CollaborativeEditorPage] This might be an RLS policy issue')
+          setIsLead(false)
           return
         }
+        
+        if (!workspace) {
+          console.error('[CollaborativeEditorPage] ❌ Workspace not found (returned null)')
+          console.error('[CollaborativeEditorPage] Possible reasons:')
+          console.error('[CollaborativeEditorPage] 1. Workspace does not exist')
+          console.error('[CollaborativeEditorPage] 2. RLS policy blocking access')
+          console.error('[CollaborativeEditorPage] 3. User does not have permission')
+          setIsLead(false)
+          return
+        }
+        
+        console.log('[CollaborativeEditorPage] ✅ Workspace found successfully')
 
-        if (doc) {
-          const workspace = doc.workspaces as any
-          console.log('[CollaborativeEditorPage] Workspace project_id:', workspace.project_id)
-          
-          // Get proposal for this project
-          const { data: proposal, error: proposalError } = await supabase
+        console.log('[CollaborativeEditorPage] ✅ Workspace found successfully')
+        console.log('[CollaborativeEditorPage] Workspace details:', {
+          id: document.workspaceId,
+          name: workspace.name,
+          project_id: workspace.project_id,
+          lead_id: workspace.lead_id,
+          proposal_id: workspace.proposal_id
+        })
+        
+        // Check if proposal_id is set
+        if (!workspace.proposal_id) {
+          console.warn('[CollaborativeEditorPage] ⚠️ WARNING: workspace.proposal_id is NULL')
+          console.warn('[CollaborativeEditorPage] This means migration 044 may not have been applied')
+          console.warn('[CollaborativeEditorPage] Will use fallback method (project_id + lead_id)')
+        }
+
+        console.log('[CollaborativeEditorPage] Workspace project_id:', workspace.project_id)
+        
+        // Get proposal - use proposal_id if available, otherwise fallback to project_id
+        console.log('[CollaborativeEditorPage] Querying proposals table...')
+        
+        let proposal = null
+        let proposalError = null
+        
+        if (workspace.proposal_id) {
+          // Direct lookup by proposal_id (preferred)
+          console.log('[CollaborativeEditorPage] Using proposal_id:', workspace.proposal_id)
+          const result = await supabase
             .from('proposals')
-            .select('id, lead_id')
+            .select('id, lead_id, status')
+            .eq('id', workspace.proposal_id)
+            .maybeSingle()
+          
+          proposal = result.data
+          proposalError = result.error
+        } else {
+          // Fallback: lookup by project_id + lead_id (for legacy workspaces)
+          console.log('[CollaborativeEditorPage] Using project_id + lead_id fallback')
+          const result = await supabase
+            .from('proposals')
+            .select('id, lead_id, status')
             .eq('project_id', workspace.project_id)
-            .single()
+            .eq('lead_id', workspace.lead_id)
+            .maybeSingle()
+          
+          proposal = result.data
+          proposalError = result.error
+        }
 
-          console.log('[CollaborativeEditorPage] Proposal query result:', { proposal, proposalError })
+        console.log('[CollaborativeEditorPage] Proposal query completed')
+        console.log('[CollaborativeEditorPage] Proposal data:', proposal)
+        console.log('[CollaborativeEditorPage] Proposal error:', proposalError)
 
-          if (proposal) {
-            console.log('[CollaborativeEditorPage] Checking team member for proposal:', proposal.id)
-            console.log('[CollaborativeEditorPage] Proposal lead_id:', proposal.lead_id)
-            console.log('[CollaborativeEditorPage] Current user id:', user.id)
-            
-            // Check if user is lead in proposal_team_members
-            const { data: teamMember, error: teamError } = await supabase
-              .from('proposal_team_members')
-              .select('role')
-              .eq('proposal_id', proposal.id)
-              .eq('user_id', user.id)
-              .single()
+        if (proposalError) {
+          console.error('[CollaborativeEditorPage] ❌ Proposal query failed:', proposalError)
+        }
 
-            console.log('[CollaborativeEditorPage] Team member query result:', { teamMember, teamError })
+        if (proposal) {
+          console.log('[CollaborativeEditorPage] ✅ Proposal found')
+          console.log('[CollaborativeEditorPage] Proposal ID:', proposal.id)
+          console.log('[CollaborativeEditorPage] Proposal lead_id:', proposal.lead_id)
+          console.log('[CollaborativeEditorPage] Proposal status:', proposal.status)
+          console.log('[CollaborativeEditorPage] Current user id:', user.id)
+          console.log('[CollaborativeEditorPage] Is user the proposal lead?', proposal.lead_id === user.id)
+          
+          // Check if user is in proposal_team_members
+          console.log('[CollaborativeEditorPage] Checking proposal_team_members table...')
+          const { data: teamMember, error: teamError } = await supabase
+            .from('proposal_team_members')
+            .select('role, user_id, proposal_id')
+            .eq('proposal_id', proposal.id)
+            .eq('user_id', user.id)
+            .maybeSingle()
 
-            if (teamMember && teamMember.role === 'lead') {
-              console.log('[CollaborativeEditorPage] ✅ User IS a lead - setting isLead=true')
-              setIsLead(true)
-            } else if (proposal.lead_id === user.id) {
-              // Fallback: check if user is the proposal lead_id
-              console.log('[CollaborativeEditorPage] ✅ User is proposal lead_id - setting isLead=true')
-              setIsLead(true)
-            } else {
-              console.log('[CollaborativeEditorPage] ❌ User is NOT a lead - setting isLead=false')
-              setIsLead(false)
-            }
+          console.log('[CollaborativeEditorPage] Team member query completed')
+          console.log('[CollaborativeEditorPage] Team member data:', teamMember)
+          console.log('[CollaborativeEditorPage] Team member error:', teamError)
+
+          if (teamMember && teamMember.role === 'lead') {
+            console.log('[CollaborativeEditorPage] ✅ Decision: User IS a lead (from proposal_team_members)')
+            console.log('[CollaborativeEditorPage] Setting isLead = true')
+            setIsLead(true)
+          } else if (proposal.lead_id === user.id) {
+            // Fallback: check if user is the proposal lead_id
+            console.log('[CollaborativeEditorPage] ✅ Decision: User is proposal lead_id (fallback check)')
+            console.log('[CollaborativeEditorPage] Setting isLead = true')
+            setIsLead(true)
           } else {
-            console.log('[CollaborativeEditorPage] No proposal found for project')
+            console.log('[CollaborativeEditorPage] ❌ Decision: User is NOT a lead')
+            console.log('[CollaborativeEditorPage] Reasons:')
+            console.log('[CollaborativeEditorPage]   - Not in proposal_team_members with role=lead:', !teamMember || teamMember.role !== 'lead')
+            console.log('[CollaborativeEditorPage]   - Not the proposal lead_id:', proposal.lead_id !== user.id)
+            console.log('[CollaborativeEditorPage] Setting isLead = false')
             setIsLead(false)
           }
         } else {
-          console.log('[CollaborativeEditorPage] No workspace document found')
+          console.log('[CollaborativeEditorPage] ❌ No proposal found for project:', workspace.project_id)
+          console.log('[CollaborativeEditorPage] This might indicate:')
+          console.log('[CollaborativeEditorPage]   1. Proposal was deleted')
+          console.log('[CollaborativeEditorPage]   2. Workspace is orphaned')
+          console.log('[CollaborativeEditorPage]   3. Data inconsistency')
+          console.log('[CollaborativeEditorPage] Setting isLead = false')
           setIsLead(false)
         }
+        
+        console.log('=== [CollaborativeEditorPage] END checkIfLead ===')
       } catch (err) {
-        console.error('[CollaborativeEditorPage] Error checking lead status:', err)
+        console.error('=== [CollaborativeEditorPage] EXCEPTION in checkIfLead ===')
+        console.error('[CollaborativeEditorPage] Error type:', err?.constructor?.name)
+        console.error('[CollaborativeEditorPage] Error message:', (err as Error)?.message)
+        console.error('[CollaborativeEditorPage] Full error:', err)
+        console.error('[CollaborativeEditorPage] Stack trace:', (err as Error)?.stack)
+        console.log('[CollaborativeEditorPage] Setting isLead = false due to error')
         setIsLead(false)
       }
     }
 
     checkIfLead()
-  }, [user?.id, documentId])
+  }, [user?.id, documentId, document])
+
+  // Load sections
+  useEffect(() => {
+    const loadSections = async () => {
+      if (!documentId || !user?.id) {
+        console.log('[CollaborativeEditorPage] Missing documentId or userId for sections')
+        setSectionsLoading(false)
+        return
+      }
+
+      console.log('[CollaborativeEditorPage] Loading sections for document:', documentId)
+      
+      try {
+        const supabase = createClient()
+        
+        const { data, error } = await supabase
+          .from('document_sections')
+          .select('id, title, order, assigned_to, status')
+          .eq('document_id', documentId)
+          .order('order', { ascending: true })
+
+        console.log('[CollaborativeEditorPage] Sections query result:', { 
+          dataCount: data?.length || 0, 
+          error,
+          data: data?.map(s => ({ id: s.id, title: s.title, assigned_to: s.assigned_to }))
+        })
+
+        if (error) {
+          console.error('[CollaborativeEditorPage] Error loading sections:', error)
+          toast({
+            title: 'Error',
+            description: `Failed to load sections: ${error.message}`,
+            variant: 'destructive',
+          })
+          setSections([])
+        } else {
+          console.log('[CollaborativeEditorPage] Sections loaded successfully:', data?.length || 0)
+          setSections(data || [])
+          if (data && data.length > 0) {
+            setActiveSection(data[0].id)
+          }
+        }
+      } catch (err) {
+        console.error('[CollaborativeEditorPage] Unexpected error loading sections:', err)
+        setSections([])
+      } finally {
+        setSectionsLoading(false)
+      }
+    }
+
+    loadSections()
+  }, [documentId, user?.id, toast])
+
+  // Load team members for assignment
+  useEffect(() => {
+    const loadTeamMembers = async () => {
+      if (!documentId || !isLead || !document) {
+        console.log('[CollaborativeEditorPage] loadTeamMembers skipped:', { 
+          hasDocumentId: !!documentId, 
+          isLead, 
+          hasDocument: !!document 
+        })
+        return
+      }
+
+      console.log('[CollaborativeEditorPage] === loadTeamMembers START ===')
+
+      try {
+        const supabase = createClient()
+        
+        // Get workspace to find proposal_id (or project_id + lead_id as fallback)
+        console.log('[CollaborativeEditorPage] Fetching workspace:', document.workspaceId)
+        const { data: workspace, error: workspaceError } = await supabase
+          .from('workspaces')
+          .select('project_id, lead_id, proposal_id')
+          .eq('id', document.workspaceId)
+          .maybeSingle()
+
+        console.log('[CollaborativeEditorPage] Workspace result:', { workspace, workspaceError })
+
+        if (workspaceError || !workspace) {
+          console.error('[CollaborativeEditorPage] Failed to load workspace for team members')
+          return
+        }
+
+        // Get proposal - use proposal_id if available, otherwise fallback to project_id + lead_id
+        let proposal = null
+        let proposalError = null
+        
+        if (workspace.proposal_id) {
+          // Direct lookup by proposal_id (preferred)
+          console.log('[CollaborativeEditorPage] Loading team members using proposal_id:', workspace.proposal_id)
+          const result = await supabase
+            .from('proposals')
+            .select('id')
+            .eq('id', workspace.proposal_id)
+            .maybeSingle()
+          
+          proposal = result.data
+          proposalError = result.error
+        } else {
+          // Fallback: lookup by project_id + lead_id (for legacy workspaces)
+          console.log('[CollaborativeEditorPage] Loading team members using project_id + lead_id fallback')
+          const result = await supabase
+            .from('proposals')
+            .select('id')
+            .eq('project_id', workspace.project_id)
+            .eq('lead_id', workspace.lead_id)
+            .maybeSingle()
+          
+          proposal = result.data
+          proposalError = result.error
+        }
+
+        console.log('[CollaborativeEditorPage] Proposal result:', { proposal, proposalError })
+
+        if (proposalError || !proposal) {
+          console.error('[CollaborativeEditorPage] Failed to load proposal for team members')
+          return
+        }
+
+        // Get team members with user info via RPC function
+        console.log('[CollaborativeEditorPage] Calling get_proposal_team_with_users for proposal:', proposal.id)
+        const { data: members, error: membersError } = await supabase
+          .rpc('get_proposal_team_with_users', { 
+            p_proposal_id: proposal.id 
+          })
+
+        console.log('[CollaborativeEditorPage] Team members RPC result:', { 
+          memberCount: members?.length || 0, 
+          membersError 
+        })
+
+        if (membersError) {
+          console.error('[CollaborativeEditorPage] Error loading team members:', membersError)
+        } else if (members && members.length > 0) {
+          const teamList = members.map((member: any) => ({
+            id: member.user_id,
+            name: member.user_name || member.user_email || 'Unknown',
+          }))
+          
+          console.log('[CollaborativeEditorPage] ✅ Team members loaded:', teamList)
+          setTeamMembers(teamList)
+        } else {
+          console.log('[CollaborativeEditorPage] No team members found')
+          setTeamMembers([])
+        }
+      } catch (err) {
+        console.error('[CollaborativeEditorPage] Exception in loadTeamMembers:', err)
+      }
+      
+      console.log('[CollaborativeEditorPage] === loadTeamMembers END ===')
+    }
+
+    loadTeamMembers()
+  }, [documentId, isLead, document])
+
+  // Handle assign section
+  const handleAssignSection = async (sectionId: string, userId: string) => {
+    console.log('[CollaborativeEditorPage] === handleAssignSection START ===')
+    console.log('[CollaborativeEditorPage] sectionId:', sectionId)
+    console.log('[CollaborativeEditorPage] userId:', userId)
+    console.log('[CollaborativeEditorPage] documentId:', documentId)
+    
+    try {
+      const supabase = createClient()
+      
+      // Check current user
+      const { data: { user } } = await supabase.auth.getUser()
+      console.log('[CollaborativeEditorPage] Current user:', user?.id)
+      
+      // Try to update
+      console.log('[CollaborativeEditorPage] Attempting to update document_sections...')
+      const { data, error } = await supabase
+        .from('document_sections')
+        .update({ assigned_to: userId })
+        .eq('id', sectionId)
+        .select()
+
+      console.log('[CollaborativeEditorPage] Update result:', { data, error })
+
+      if (error) {
+        console.error('[CollaborativeEditorPage] ❌ Error assigning section:', error)
+        console.error('[CollaborativeEditorPage] Error details:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        })
+        toast({
+          title: 'Error',
+          description: `Failed to assign section: ${error.message}`,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      console.log('[CollaborativeEditorPage] ✅ Section updated successfully')
+
+      // Reload sections
+      const { data: sectionsData } = await supabase
+        .from('document_sections')
+        .select('id, title, order, assigned_to, status')
+        .eq('document_id', documentId)
+        .order('order', { ascending: true })
+
+      if (sectionsData) {
+        console.log('[CollaborativeEditorPage] Reloaded sections:', sectionsData.length)
+        setSections(sectionsData)
+      }
+
+      toast({
+        title: 'Section assigned',
+        description: 'The section has been assigned successfully',
+      })
+    } catch (err) {
+      console.error('[CollaborativeEditorPage] ❌ Exception in handleAssignSection:', err)
+      toast({
+        title: 'Error',
+        description: 'An unexpected error occurred',
+        variant: 'destructive',
+      })
+    }
+    console.log('[CollaborativeEditorPage] === handleAssignSection END ===')
+  }
+
+  // Handle delete section
+  const handleDeleteSection = async (sectionId: string) => {
+    if (!confirm('Are you sure you want to delete this section?')) return
+
+    try {
+      const supabase = createClient()
+      
+      const { error } = await supabase
+        .from('document_sections')
+        .delete()
+        .eq('id', sectionId)
+
+      if (error) {
+        toast({
+          title: 'Error',
+          description: 'Failed to delete section',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      // Reload sections
+      const { data } = await supabase
+        .from('document_sections')
+        .select('id, title, order, assigned_to, status')
+        .eq('document_id', documentId)
+        .order('order', { ascending: true })
+
+      if (data) {
+        setSections(data)
+        if (data.length > 0 && activeSection === sectionId) {
+          setActiveSection(data[0].id)
+        }
+      }
+
+      toast({
+        title: 'Section deleted',
+        description: 'The section has been deleted',
+      })
+    } catch (err) {
+      console.error('[CollaborativeEditorPage] Error deleting section:', err)
+      toast({
+        title: 'Error',
+        description: 'Failed to delete section',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  // Get assigned member name
+  const getAssignedMemberName = (userId?: string) => {
+    if (!userId) return null
+    const member = teamMembers.find(m => m.id === userId)
+    return member?.name || 'Unknown'
+  }
+
+  // Handle add section
+  const handleAddSection = async () => {
+    if (!newSectionTitle.trim()) return
+
+    try {
+      const supabase = createClient()
+      const maxOrder = sections.length > 0 ? Math.max(...sections.map(s => s.order)) : -1
+
+      const { data, error } = await supabase
+        .from('document_sections')
+        .insert({
+          document_id: documentId,
+          title: newSectionTitle.trim(),
+          order: maxOrder + 1,
+          content: {},
+          status: 'not_started',
+        })
+        .select('id, title, order, assigned_to, status')
+        .single()
+
+      if (error) {
+        console.error('[CollaborativeEditorPage] Error creating section:', error)
+        toast({
+          title: 'Error',
+          description: `Failed to create section: ${error.message}`,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      // Reload sections
+      const { data: allSections } = await supabase
+        .from('document_sections')
+        .select('id, title, order, assigned_to, status')
+        .eq('document_id', documentId)
+        .order('order', { ascending: true })
+
+      if (allSections) {
+        setSections(allSections)
+        setActiveSection(data.id)
+      }
+
+      setShowAddSectionDialog(false)
+      setNewSectionTitle('')
+      toast({
+        title: 'Section added',
+        description: `"${newSectionTitle}" has been added`,
+      })
+    } catch (err) {
+      console.error('[CollaborativeEditorPage] Error creating section:', err)
+      toast({
+        title: 'Error',
+        description: 'Failed to create section',
+        variant: 'destructive',
+      })
+    }
+  }
 
   // Get user's role (case-insensitive comparison)
   const userRole = document?.collaborators.find((c) => c.userId === user?.id)?.role
@@ -721,19 +1193,197 @@ export function CollaborativeEditorPage({ documentId }: CollaborativeEditorPageP
       )}
 
       {/* Section Tabs */}
-      <SimpleSectionTabs
-        documentId={documentId}
-        currentUserId={user?.id || ''}
-        isLead={isLead}
-      >
-        {(sectionId) => (
-          <div className="p-4 bg-yellow-400/5 border-b border-yellow-400/20">
-            <p className="text-sm text-muted-foreground">
-              {sectionId ? `Editing section: ${sectionId}` : 'No section selected'}
-            </p>
+      <div className="border-b border-yellow-400/20 bg-white dark:bg-black">
+        {sectionsLoading ? (
+          <div className="flex items-center justify-center p-4">
+            <Loader2 className="h-5 w-5 animate-spin text-yellow-400 mr-2" />
+            <span className="text-sm text-muted-foreground">Loading sections...</span>
           </div>
+        ) : sections.length === 0 ? (
+          <div className="p-4">
+            {isLead ? (
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  No sections yet. Create your first section to get started.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => setShowAddSectionDialog(true)}
+                  className="bg-yellow-400 hover:bg-yellow-500 text-black"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add Section
+                </Button>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground text-center">
+                No sections available yet. The lead will create sections and assign them to team members.
+              </p>
+            )}
+          </div>
+        ) : (
+          <Tabs value={activeSection || undefined} onValueChange={setActiveSection}>
+            <div className="max-w-[1800px] mx-auto px-4 sm:px-6">
+              <div className="flex items-center gap-2">
+                <ScrollArea className="flex-1">
+                  <TabsList className="bg-transparent border-b-0 h-auto p-0 inline-flex space-x-1">
+                    {sections.map((section) => {
+                      const assignedName = getAssignedMemberName(section.assigned_to)
+                      const isAssignedToCurrentUser = section.assigned_to === user?.id
+                      
+                      return (
+                        <div key={section.id} className="inline-flex items-center gap-1">
+                          <TabsTrigger
+                            value={section.id}
+                            className="data-[state=active]:bg-yellow-400 data-[state=active]:text-black rounded-t-md rounded-b-none border-b-2 border-transparent data-[state=active]:border-yellow-400 whitespace-nowrap"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span>{section.title}</span>
+                              {assignedName && (
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    'text-xs',
+                                    isAssignedToCurrentUser && 'bg-yellow-400/20 border-yellow-400'
+                                  )}
+                                >
+                                  {isAssignedToCurrentUser ? 'You' : assignedName}
+                                </Badge>
+                              )}
+                              {section.status && (
+                                <Badge
+                                  variant="secondary"
+                                  className={cn(
+                                    'text-xs',
+                                    section.status === 'completed' && 'bg-green-500/20 text-green-500',
+                                    section.status === 'in_progress' && 'bg-blue-500/20 text-blue-500',
+                                    section.status === 'in_review' && 'bg-yellow-400/20 text-yellow-400',
+                                    section.status === 'not_started' && 'bg-gray-500/20 text-gray-500'
+                                  )}
+                                >
+                                  {section.status.replace('_', ' ')}
+                                </Badge>
+                              )}
+                            </div>
+                          </TabsTrigger>
+                          
+                          {/* Section Actions Dropdown - Only for Lead */}
+                          {isLead && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <MoreVertical className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-48">
+                                {teamMembers.length > 0 ? (
+                                  <>
+                                    <div className="px-2 py-1.5 text-sm font-semibold">Assign to:</div>
+                                    {teamMembers.map((member) => (
+                                      <DropdownMenuItem
+                                        key={member.id}
+                                        onClick={() => handleAssignSection(section.id, member.id)}
+                                        className={cn(
+                                          section.assigned_to === member.id && 'bg-yellow-400/20'
+                                        )}
+                                      >
+                                        <UserPlus className="h-4 w-4 mr-2" />
+                                        {member.name}
+                                        {section.assigned_to === member.id && ' ✓'}
+                                      </DropdownMenuItem>
+                                    ))}
+                                    <div className="border-t my-1" />
+                                  </>
+                                ) : (
+                                  <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                                    No team members
+                                  </div>
+                                )}
+                                <DropdownMenuItem
+                                  onClick={() => handleDeleteSection(section.id)}
+                                  className="text-red-500"
+                                >
+                                  <Trash2 className="h-4 w-4 mr-2" />
+                                  Delete Section
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </TabsList>
+                  <ScrollBar orientation="horizontal" />
+                </ScrollArea>
+                
+                {/* Add Section Button - Only for Lead */}
+                {isLead && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setShowAddSectionDialog(true)}
+                    className="shrink-0"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          </Tabs>
         )}
-      </SimpleSectionTabs>
+      </div>
+
+      {/* Add Section Dialog */}
+      {isLead && (
+        <Dialog open={showAddSectionDialog} onOpenChange={setShowAddSectionDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add New Section</DialogTitle>
+              <DialogDescription>
+                Create a new section for your proposal document
+              </DialogDescription>
+            </DialogHeader>
+            <Input
+              value={newSectionTitle}
+              onChange={(e) => setNewSectionTitle(e.target.value)}
+              placeholder="Enter section title..."
+              className="border-yellow-400/20"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddSection()
+                if (e.key === 'Escape') {
+                  setShowAddSectionDialog(false)
+                  setNewSectionTitle('')
+                }
+              }}
+              autoFocus
+            />
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowAddSectionDialog(false)
+                  setNewSectionTitle('')
+                }}
+                className="border-yellow-400 text-yellow-400 hover:bg-yellow-400/10"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddSection}
+                disabled={!newSectionTitle.trim()}
+                className="bg-yellow-400 hover:bg-yellow-500 text-black"
+              >
+                Add Section
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Editor Content */}
       <div className="flex-1 overflow-auto">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -41,25 +41,108 @@ interface Section {
 }
 
 export function SimpleSectionTabs({ documentId, currentUserId, isLead = false, children }: SimpleSectionTabsProps) {
+  console.log('[SimpleSectionTabs] Component render/mount', { documentId, currentUserId, isLead })
+  
   const [sections, setSections] = useState<Section[]>([])
   const [loading, setLoading] = useState(true)
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [newSectionTitle, setNewSectionTitle] = useState('')
   const [teamMembers, setTeamMembers] = useState<Array<{ id: string; name: string }>>([])
+  const [hasLoadedRef] = useState({ current: false })
   const { toast } = useToast()
 
-  useEffect(() => {
-    console.log('[SimpleSectionTabs] Component mounted')
+  const loadSections = useCallback(async () => {
+    if (hasLoadedRef.current) {
+      console.log('[SimpleSectionTabs] Already loaded, skipping')
+      return
+    }
+    
+    console.log('[SimpleSectionTabs] loadSections called')
     console.log('[SimpleSectionTabs] documentId:', documentId)
     console.log('[SimpleSectionTabs] currentUserId:', currentUserId)
-    console.log('[SimpleSectionTabs] isLead:', isLead)
-    console.log('[SimpleSectionTabs] isLead type:', typeof isLead)
+    
+    hasLoadedRef.current = true
+    
+    try {
+      setLoading(true)
+      const supabase = createClient()
+      console.log('[SimpleSectionTabs] Supabase client created')
+
+      // Check if user is authenticated
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      console.log('[SimpleSectionTabs] Auth check:', { 
+        userId: user?.id, 
+        authError,
+        matchesCurrentUser: user?.id === currentUserId 
+      })
+
+      // Load sections directly - RLS policies should allow team members to see them
+      const { data, error } = await supabase
+        .from('document_sections')
+        .select('id, title, order, assigned_to, status')
+        .eq('document_id', documentId)
+        .order('order', { ascending: true })
+
+      console.log('[SimpleSectionTabs] Sections query result:', { 
+        dataCount: data?.length || 0, 
+        error,
+        data: data?.map(s => ({ id: s.id, title: s.title, assigned_to: s.assigned_to }))
+      })
+
+      if (error) {
+        console.error('[SimpleSectionTabs] Error loading sections:', error)
+        toast({
+          title: 'Error',
+          description: `Failed to load sections: ${error.message}`,
+          variant: 'destructive',
+        })
+        return
+      }
+
+      console.log('[SimpleSectionTabs] Sections loaded:', data?.length || 0)
+      setSections(data || [])
+      
+      if (data && data.length > 0) {
+        console.log('[SimpleSectionTabs] Setting active section to:', data[0].id)
+        setActiveSection(data[0].id)
+      } else {
+        console.log('[SimpleSectionTabs] No sections found - checking if sections exist at all')
+        // Try to count sections without RLS to see if they exist
+        const { count } = await supabase
+          .from('document_sections')
+          .select('*', { count: 'exact', head: true })
+          .eq('document_id', documentId)
+        console.log('[SimpleSectionTabs] Total sections in DB (may be filtered by RLS):', count)
+      }
+    } catch (err) {
+      console.error('[SimpleSectionTabs] Unexpected error:', err)
+      toast({
+        title: 'Error',
+        description: 'Failed to load sections',
+        variant: 'destructive',
+      })
+    } finally {
+      setLoading(false)
+    }
+  }, [documentId, currentUserId, toast, hasLoadedRef])
+
+  useEffect(() => {
+    console.log('[SimpleSectionTabs] useEffect triggered', { documentId, isLead, hasLoaded: hasLoadedRef.current })
+    
+    if (!documentId || !currentUserId) {
+      console.log('[SimpleSectionTabs] Missing required props, skipping load')
+      setLoading(false)
+      return
+    }
+    
+    console.log('[SimpleSectionTabs] Calling loadSections from useEffect')
     loadSections()
+    
     if (isLead) {
       loadTeamMembers()
     }
-  }, [documentId, isLead])
+  }, [documentId, currentUserId, isLead, loadSections])
 
   const loadTeamMembers = async () => {
     try {
@@ -104,53 +187,6 @@ export function SimpleSectionTabs({ documentId, currentUserId, isLead = false, c
       }
     } catch (err) {
       console.error('[SimpleSectionTabs] Error loading team members:', err)
-    }
-  }
-
-  const loadSections = async () => {
-    console.log('[SimpleSectionTabs] loadSections called')
-    try {
-      setLoading(true)
-      const supabase = createClient()
-      console.log('[SimpleSectionTabs] Supabase client created')
-
-      const { data, error } = await supabase
-        .from('document_sections')
-        .select('id, title, order, assigned_to, status')
-        .eq('document_id', documentId)
-        .order('order', { ascending: true })
-
-      console.log('[SimpleSectionTabs] Query result:', { data, error })
-
-      if (error) {
-        console.error('[SimpleSectionTabs] Error loading sections:', error)
-        toast({
-          title: 'Error',
-          description: `Failed to load sections: ${error.message}`,
-          variant: 'destructive',
-        })
-        return
-      }
-
-      console.log('[SimpleSectionTabs] Sections loaded:', data?.length || 0)
-      setSections(data || [])
-      
-      if (data && data.length > 0) {
-        console.log('[SimpleSectionTabs] Setting active section to:', data[0].id)
-        setActiveSection(data[0].id)
-      } else {
-        console.log('[SimpleSectionTabs] No sections found')
-      }
-    } catch (err) {
-      console.error('[SimpleSectionTabs] Unexpected error:', err)
-      toast({
-        title: 'Error',
-        description: 'Failed to load sections',
-        variant: 'destructive',
-      })
-    } finally {
-      setLoading(false)
-      console.log('[SimpleSectionTabs] Loading complete')
     }
   }
 

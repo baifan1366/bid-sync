@@ -138,6 +138,7 @@ export class ProposalService {
         .insert({
           project_id: projectId,
           lead_id: leadId,
+          proposal_id: proposal.id,
           name: workspaceName,
           description: `Collaborative workspace for proposal on ${project.title}`,
         })
@@ -354,6 +355,35 @@ export class ProposalService {
   /**
    * Gets workspace for a proposal
    * 
+   * @param proposalId - The proposal ID
+   * @returns Workspace data or null
+   */
+  static async getWorkspaceByProposal(proposalId: string) {
+    try {
+      const supabase = await createClient();
+
+      const { data: workspace, error } = await supabase
+        .from('workspaces')
+        .select('*')
+        .eq('proposal_id', proposalId)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error fetching workspace:', error);
+        return null;
+      }
+
+      return workspace;
+    } catch (error) {
+      console.error('Unexpected error in getWorkspaceByProposal:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Gets workspace for a proposal (legacy method using project_id and lead_id)
+   * 
+   * @deprecated Use getWorkspaceByProposal instead
    * @param projectId - The project ID
    * @param leadId - The lead ID
    * @returns Workspace data or null

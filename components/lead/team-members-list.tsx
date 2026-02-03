@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { GET_ALL_PROPOSAL_TEAM_MEMBERS } from "@/lib/graphql/queries"
 import { RemoveTeamMemberDialog } from "./remove-team-member-dialog"
 import { TeamInvitationDialog } from "./team-invitation-dialog"
+import { useUser } from "@/hooks/use-user"
 import {
   Users,
   Crown,
@@ -49,14 +50,20 @@ interface TeamMembersListProps {
 }
 
 export function TeamMembersList({ projectId }: TeamMembersListProps) {
+  const { user } = useUser()
   const [memberToRemove, setMemberToRemove] = useState<{
     member: ProposalTeamMember
     proposalId: string
   } | null>(null)
 
+  // Check if current user is a lead
+  const isCurrentUserLead = user?.user_metadata?.role === 'bidding_lead'
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["all-proposal-team-members"],
     queryFn: async () => {
+      console.log('[TeamMembersList] Fetching team members...')
+      
       const response = await fetch("/api/graphql", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -66,12 +73,25 @@ export function TeamMembersList({ projectId }: TeamMembersListProps) {
       })
 
       const result = await response.json()
+      
+      console.log('[TeamMembersList] GraphQL response:', result)
 
       if (result.errors) {
+        console.error('[TeamMembersList] GraphQL errors:', result.errors)
         throw new Error(result.errors[0]?.message || "Failed to fetch team members")
       }
 
-      return result.data.getAllProposalTeamMembers as ProposalTeamInfo[]
+      const teamData = result.data.getAllProposalTeamMembers as ProposalTeamInfo[]
+      console.log('[TeamMembersList] Team data received:', {
+        proposalCount: teamData?.length || 0,
+        proposals: teamData?.map(p => ({
+          proposalId: p.proposalId,
+          projectTitle: p.projectTitle,
+          memberCount: p.teamMembers.length
+        }))
+      })
+
+      return teamData
     },
     staleTime: 30 * 1000, // 30 seconds
   })
@@ -179,21 +199,23 @@ export function TeamMembersList({ projectId }: TeamMembersListProps) {
                     >
                       {proposal.proposalStatus}
                     </Badge>
-                    {/* Invite Button for this Proposal */}
-                    <TeamInvitationDialog
-                      projectId={proposal.projectId}
-                      proposalId={proposal.proposalId}
-                      trigger={
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-yellow-400/30 hover:bg-yellow-400/10 text-yellow-400"
-                        >
-                          <UserPlus className="h-4 w-4 mr-2" />
-                          Invite
-                        </Button>
-                      }
-                    />
+                    {/* Invite Button for this Proposal - Only for Leads */}
+                    {isCurrentUserLead && (
+                      <TeamInvitationDialog
+                        projectId={proposal.projectId}
+                        proposalId={proposal.proposalId}
+                        trigger={
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-yellow-400/30 hover:bg-yellow-400/10 text-yellow-400"
+                          >
+                            <UserPlus className="h-4 w-4 mr-2" />
+                            Invite
+                          </Button>
+                        }
+                      />
+                    )}
                   </div>
 
                   {/* Team Members for this Proposal */}
@@ -207,6 +229,7 @@ export function TeamMembersList({ projectId }: TeamMembersListProps) {
                           proposalId={proposal.proposalId}
                           onRemove={setMemberToRemove}
                           getInitials={getInitials}
+                          canManage={isCurrentUserLead}
                         />
                       )
                     })}
@@ -236,6 +259,7 @@ interface ProposalMemberCardProps {
   proposalId: string
   onRemove: (data: { member: ProposalTeamMember; proposalId: string }) => void
   getInitials: (name?: string, email?: string) => string
+  canManage: boolean
 }
 
 function ProposalMemberCard({
@@ -243,6 +267,7 @@ function ProposalMemberCard({
   proposalId,
   onRemove,
   getInitials,
+  canManage,
 }: ProposalMemberCardProps) {
   const isLead = member.role.toLowerCase() === "lead"
 
@@ -295,8 +320,8 @@ function ProposalMemberCard({
           </div>
         </div>
 
-        {/* Remove Button */}
-        {!isLead && (
+        {/* Remove Button - Only for Leads */}
+        {!isLead && canManage && (
           <Button
             variant="ghost"
             size="sm"

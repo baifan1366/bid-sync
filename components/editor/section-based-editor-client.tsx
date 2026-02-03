@@ -37,17 +37,31 @@ export function SectionBasedEditorClient({ documentId }: SectionBasedEditorClien
 
       const supabase = createClient()
 
-      // Load document info
-      const { data: doc, error: docError } = await supabase
-        .from('workspace_documents')
-        .select('title, workspace_id, workspaces!inner(project_id)')
-        .eq('id', documentId)
-        .single()
+      // Load document info via GraphQL to avoid RLS issues
+      const response = await fetch('/api/graphql', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: `
+            query GetDocument($id: ID!) {
+              document(id: $id) {
+                id
+                title
+                workspaceId
+              }
+            }
+          `,
+          variables: { id: documentId }
+        })
+      })
 
-      if (docError || !doc) {
+      const { data: graphqlData, errors } = await response.json()
+      
+      if (errors || !graphqlData?.document) {
         throw new Error('Document not found')
       }
 
+      const doc = graphqlData.document
       setDocumentTitle(doc.title)
 
       // Load sections

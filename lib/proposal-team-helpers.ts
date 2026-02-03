@@ -50,13 +50,19 @@ export async function checkProjectTeamMembership(
   userId: string
 ): Promise<{ isMember: boolean; proposalId?: string; role?: 'lead' | 'member'; error?: string }> {
   try {
-    const supabase = await createClient()
+    // Use admin client to bypass RLS when checking team membership
+    const { createAdminClient } = await import('@/lib/supabase/server');
+    const adminClient = createAdminClient();
+
+    console.log('[checkProjectTeamMembership] Checking for projectId:', projectId, 'userId:', userId);
 
     // Get all proposals for this project
-    const { data: proposals, error: proposalsError } = await supabase
+    const { data: proposals, error: proposalsError } = await adminClient
       .from('proposals')
       .select('id')
       .eq('project_id', projectId)
+
+    console.log('[checkProjectTeamMembership] Proposals found:', proposals?.length, 'error:', proposalsError);
 
     if (proposalsError) {
       return { isMember: false, error: proposalsError.message }
@@ -69,17 +75,21 @@ export async function checkProjectTeamMembership(
     const proposalIds = proposals.map(p => p.id)
 
     // Check if user is a member of any of these proposals
-    const { data: member, error } = await supabase
+    const { data: members, error } = await adminClient
       .from('proposal_team_members')
       .select('proposal_id, role')
       .in('proposal_id', proposalIds)
       .eq('user_id', userId)
-      .maybeSingle()
+
+    console.log('[checkProjectTeamMembership] Members found:', members?.length, 'error:', error);
 
     if (error) {
       console.error('Error checking project team membership:', error)
       return { isMember: false, error: error.message }
     }
+
+    // Return the first membership found
+    const member = members && members.length > 0 ? members[0] : null;
 
     return {
       isMember: !!member,

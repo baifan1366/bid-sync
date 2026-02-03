@@ -142,18 +142,34 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url)
     }
 
-    // Lead routes protection (dashboard, projects, proposals, performance, team)
+    // Lead routes protection (dashboard, projects, proposals, performance)
+    // Note: /team is handled separately below to allow members
     if ((path.startsWith('/lead-dashboard') || 
          path.startsWith('/lead-projects') || 
          path.startsWith('/lead-proposals') ||
-         path.startsWith('/performance') ||
-         path.startsWith('/team')) && 
+         path.startsWith('/performance')) && 
         role !== 'bidding_lead' && role !== 'admin') {
       await logUnauthorizedAccessAttempt(
         supabase,
         user.id,
         path,
         `insufficient_permissions: role=${role}, required=bidding_lead`
+      )
+      const url = request.nextUrl.clone()
+      url.pathname = '/unauthorized'
+      return NextResponse.redirect(url)
+    }
+
+    // Team page - allow both leads and members to view
+    if (path.startsWith('/team') && 
+        role !== 'bidding_lead' && 
+        role !== 'bidding_member' && 
+        role !== 'admin') {
+      await logUnauthorizedAccessAttempt(
+        supabase,
+        user.id,
+        path,
+        `insufficient_permissions: role=${role}, required=bidding_lead or bidding_member`
       )
       const url = request.nextUrl.clone()
       url.pathname = '/unauthorized'

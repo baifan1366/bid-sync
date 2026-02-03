@@ -241,7 +241,7 @@ export class DocumentService {
         .single();
 
       if (error || !document) {
-        console.error('Document fetch error:', error);
+        console.error('[getDocument] Document fetch error:', error);
         return {
           success: false,
           error: 'Document not found',
@@ -253,6 +253,14 @@ export class DocumentService {
       const isWorkspaceLead = workspace.lead_id === userId;
       const isCreator = document.created_by === userId;
 
+      console.log('[getDocument] Access check:', {
+        documentId,
+        userId,
+        projectId: workspace.project_id,
+        isWorkspaceLead,
+        isCreator
+      });
+
       // Check if user is a collaborator
       const { data: collaborator } = await adminClient
         .from('document_collaborators')
@@ -261,16 +269,23 @@ export class DocumentService {
         .eq('user_id', userId)
         .maybeSingle();
 
+      console.log('[getDocument] Collaborator check:', { hasCollaborator: !!collaborator });
+
       // Check if user is a team member for the project
       const { checkProjectTeamMembership } = await import('@/lib/proposal-team-helpers');
-      const { isMember } = await checkProjectTeamMembership(workspace.project_id, userId);
+      const { isMember, proposalId, error: memberError } = await checkProjectTeamMembership(workspace.project_id, userId);
+
+      console.log('[getDocument] Team membership check:', { isMember, proposalId, memberError });
 
       if (!isWorkspaceLead && !isCreator && !collaborator && !isMember) {
+        console.error('[getDocument] Access denied - no valid access path found');
         return {
           success: false,
           error: 'You do not have access to this document',
         };
       }
+
+      console.log('[getDocument] Access granted');
 
       return {
         success: true,

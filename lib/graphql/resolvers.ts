@@ -2886,22 +2886,9 @@ export const resolvers = {
         });
       }
 
+      // Use RPC function to avoid Supabase REST API relationship ambiguity
       const { data: sections, error } = await supabase
-        .from('document_sections')
-        .select(`
-          *,
-          document:workspace_documents (
-            id,
-            title,
-            workspace:workspaces (
-              id,
-              project_id,
-              name
-            )
-          )
-        `)
-        .eq('assigned_to', user.id)
-        .order('deadline', { ascending: true, nullsFirst: false });
+        .rpc('get_assigned_sections_for_user', { user_id_param: user.id });
 
       if (error) {
         console.error('[myAssignedSections] Error:', error);
@@ -2910,18 +2897,18 @@ export const resolvers = {
         });
       }
 
-      return sections.map((section: any) => ({
-        id: section.id,
-        title: section.title,
-        status: section.status?.toUpperCase() || 'NOT_STARTED',
-        deadline: section.deadline,
+      return (sections || []).map((section: any) => ({
+        id: section.section_id,
+        title: section.section_title,
+        status: section.section_status?.toUpperCase() || 'NOT_STARTED',
+        deadline: section.section_deadline,
         document: {
-          id: section.document.id,
-          title: section.document.title,
+          id: section.document_id,
+          title: section.document_title,
           workspace: {
-            id: section.document.workspace.id,
-            projectId: section.document.workspace.project_id,
-            name: section.document.workspace.name,
+            id: section.workspace_id,
+            projectId: section.project_id,
+            name: section.workspace_name,
           },
         },
       }));
@@ -2937,94 +2924,126 @@ export const resolvers = {
         });
       }
 
-      // Get all proposals where user is a team member
-      const { data: teamMemberships, error } = await supabase
+      // Step 1: Get proposal IDs where user is a team member (this works with RLS)
+      const { data: membershipRecords, error: membershipError } = await supabase
         .from('proposal_team_members')
-        .select(`
-          id,
-          proposal_id,
-          role,
-          joined_at,
-          proposals!inner (
-            id,
-            title,
-            project_id,
-            lead_id,
-            projects!inner (
-              id,
-              title
-            )
-          )
-        `)
+        .select('proposal_id, role, joined_at')
         .eq('user_id', user.id)
         .order('joined_at', { ascending: false });
 
-      if (error) {
-        console.error('Error fetching team memberships:', error);
+      if (membershipError) {
+        console.error('Error fetching team memberships:', membershipError);
         throw new GraphQLError('Failed to fetch team memberships', {
           extensions: { code: 'INTERNAL_SERVER_ERROR' },
         });
       }
 
-      if (!teamMemberships || teamMemberships.length === 0) {
+      if (!membershipRecords || membershipRecords.length === 0) {
         return [];
       }
 
-      // For each proposal, get the lead info and all team members
+      const proposalIds = membershipRecords.map(m => m.proposal_id);
+
+      // Step 2: Use admin client to fetch proposals (bypasses RLS, safe because we verified membership)
+      const adminClient = createAdminClient();
+      const { data: proposalsData, error: proposalsError } = await adminClient
+        .from('proposals')
+        .select('id, title, project_id, lead_id, projects!inner(id, title)')
+        .in('id', proposalIds);
+
+      if (proposalsError) {
+        console.error('Error fetching proposals:', proposalsError);
+        throw new GraphQLError('Failed to fetch proposals', {
+          extensions: { code: 'INTERNAL_SERVER_ERROR' },
+        });
+      }
+
+      // Create a map of proposals for easy lookup
+      const proposalMap = new Map(proposalsData?.map(p => [p.id, p]) || []);
+
+      // For each membership, get the full team info
       const teams = await Promise.all(
-        teamMemberships.map(async (membership: any) => {
-          const proposalId = membership.proposals.id;
-          const leadId = membership.proposals.lead_id;
+        membershipRecords.map(async (membership: any) => {
+          const proposal = proposalMap.get(membership.proposal_id);
+          if (!proposal) {
+            console.log('[myTeams] Proposal not found for ID:', membership.proposal_id);
+            return null;
+          }
 
-          // Get lead info
-          const { data: leadProfile } = await supabase
-            .from('profiles')
-            .select('id, full_name, email')
-            .eq('id', leadId)
-            .single();
+          const proposalId = proposal.id;
+          const leadId = proposal.lead_id;
 
-          // Get all team members for this proposal
-          const { data: allMembers } = await supabase
+          console.log('[myTeams] Processing proposal:', {
+            proposalId,
+            leadId,
+            title: proposal.title
+          });
+
+          // Get lead info using admin client
+          const { data: leadUser, error: leadError } = await adminClient.auth.admin.getUserById(leadId);
+          
+          console.log('[myTeams] Lead user data:', {
+            leadId,
+            found: !!leadUser?.user,
+            error: leadError,
+            name: leadUser?.user?.user_metadata?.full_name,
+            email: leadUser?.user?.email
+          });
+
+          // Get all team members for this proposal using admin client
+          const { data: allMembers } = await adminClient
             .from('proposal_team_members')
-            .select(`
-              id,
-              user_id,
-              role,
-              joined_at,
-              profiles!inner (
-                id,
-                full_name,
-                email
-              )
-            `)
+            .select('id, user_id, role, joined_at')
             .eq('proposal_id', proposalId)
             .order('joined_at', { ascending: true });
 
-          return {
+          console.log('[myTeams] All members for proposal', proposalId, ':', allMembers?.length || 0);
+
+          // Get user details for all members
+          const membersWithDetails = await Promise.all(
+            (allMembers || []).map(async (m: any) => {
+              const { data: userData } = await adminClient.auth.admin.getUserById(m.user_id);
+              return {
+                id: m.id,
+                userId: m.user_id,
+                userName: userData?.user?.user_metadata?.full_name || userData?.user?.email?.split('@')[0] || 'Unknown',
+                email: userData?.user?.email || '',
+                role: m.role,
+                joinedAt: m.joined_at,
+              };
+            })
+          );
+
+          const teamData = {
             proposalId: proposalId,
-            proposalTitle: membership.proposals.title,
-            projectId: membership.proposals.project_id,
-            projectTitle: membership.proposals.projects.title,
+            proposalTitle: proposal.title || 'Untitled Proposal',
+            projectId: proposal.project_id,
+            projectTitle: (proposal.projects as any)?.title || 'Unknown Project',
             role: membership.role,
             joinedAt: membership.joined_at,
             lead: {
               id: leadId,
-              name: leadProfile?.full_name || 'Unknown',
-              email: leadProfile?.email || '',
+              name: leadUser?.user?.user_metadata?.full_name || leadUser?.user?.email?.split('@')[0] || 'Unknown Lead',
+              email: leadUser?.user?.email || 'no-email@example.com',
             },
-            members: (allMembers || []).map((m: any) => ({
-              id: m.id,
-              userId: m.user_id,
-              userName: m.profiles.full_name || 'Unknown',
-              email: m.profiles.email || '',
-              role: m.role,
-              joinedAt: m.joined_at,
-            })),
+            members: membersWithDetails,
           };
+
+          console.log('[myTeams] Returning team data:', {
+            proposalId: teamData.proposalId,
+            leadName: teamData.lead.name,
+            leadEmail: teamData.lead.email,
+            memberCount: teamData.members.length
+          });
+
+          return teamData;
         })
       );
 
-      return teams;
+      // Filter out any null results
+      const validTeams = teams.filter(t => t !== null);
+      console.log('[myTeams] Returning', validTeams.length, 'teams');
+      return validTeams;
     },
 
     // ============================================================================
@@ -4406,47 +4425,110 @@ export const resolvers = {
         });
       }
 
-      try {
-        // First, get all proposals where user is the lead
-        const { data: leadProposals, error: leadError } = await supabase
-          .from('proposals')
-          .select(`
-            id,
-            project_id,
-            lead_id,
-            status,
-            projects!inner(id, title, client_id)
-          `)
-          .eq('lead_id', user.id)
-          .order('created_at', { ascending: false });
+      console.log('[getAllProposalTeamMembers] === START ===')
+      console.log('[getAllProposalTeamMembers] User ID:', user.id)
+      console.log('[getAllProposalTeamMembers] User role:', user.user_metadata?.role)
 
-        if (leadError) {
-          console.error('Failed to fetch lead proposals:', leadError);
-          throw new GraphQLError('Failed to fetch proposals', {
-            extensions: { code: 'INTERNAL_SERVER_ERROR' },
-          });
+      try {
+        const userRole = user.user_metadata?.role;
+        let leadProposals: any[] = [];
+
+        // Only fetch proposals where user is lead if they have bidding_lead role
+        // bidding_member cannot create proposals, they can only be team members
+        if (userRole === 'bidding_lead') {
+          console.log('[getAllProposalTeamMembers] Fetching proposals where user is lead...')
+          const { data, error: leadError } = await supabase
+            .from('proposals')
+            .select(`
+              id,
+              project_id,
+              lead_id,
+              status,
+              projects!inner(id, title, client_id)
+            `)
+            .eq('lead_id', user.id)
+            .order('created_at', { ascending: false });
+
+          console.log('[getAllProposalTeamMembers] Lead proposals result:', {
+            count: data?.length || 0,
+            error: leadError,
+            proposals: data?.map(p => ({ id: p.id, project_id: p.project_id }))
+          })
+
+          if (leadError) {
+            console.error('[getAllProposalTeamMembers] Failed to fetch lead proposals:', leadError);
+            throw new GraphQLError('Failed to fetch proposals', {
+              extensions: { code: 'INTERNAL_SERVER_ERROR' },
+            });
+          }
+
+          leadProposals = data || [];
+        } else {
+          console.log('[getAllProposalTeamMembers] Skipping lead proposals fetch - user is not bidding_lead')
         }
 
         // Then, get projects where user is a team member via proposal_team_members
-        const { data: memberProposals } = await supabase
+        console.log('[getAllProposalTeamMembers] Fetching proposals where user is member...')
+        
+        // First, get proposal IDs where user is a member (this works - RLS allows it)
+        const { data: membershipRecords, error: membershipError } = await supabase
           .from('proposal_team_members')
-          .select('proposal_id, proposals!inner(id, project_id, lead_id, status, projects!inner(id, title, client_id))')
+          .select('proposal_id')
           .eq('user_id', user.id);
+        
+        console.log('[getAllProposalTeamMembers] Membership records:', {
+          count: membershipRecords?.length || 0,
+          error: membershipError,
+          proposalIds: membershipRecords?.map(m => m.proposal_id)
+        })
 
-        const memberProposalsData = memberProposals?.map((m: any) => ({
-          id: m.proposals.id,
-          project_id: m.proposals.project_id,
-          lead_id: m.proposals.lead_id,
-          status: m.proposals.status,
-          projects: m.proposals.projects,
-        })) || [];
+        let memberProposalsData: any[] = [];
+
+        if (membershipRecords && membershipRecords.length > 0) {
+          const proposalIds = membershipRecords.map(m => m.proposal_id);
+          
+          // Use admin client to fetch proposals (bypasses RLS)
+          // This is safe because we already verified the user is a team member
+          const adminClient = createAdminClient();
+          const { data: proposalsData, error: proposalsError } = await adminClient
+            .from('proposals')
+            .select('id, project_id, lead_id, status, projects!inner(id, title, client_id)')
+            .in('id', proposalIds);
+
+          console.log('[getAllProposalTeamMembers] Proposals data:', {
+            count: proposalsData?.length || 0,
+            error: proposalsError,
+            errorDetails: proposalsError ? JSON.stringify(proposalsError) : null
+          })
+
+          if (proposalsError) {
+            console.error('[getAllProposalTeamMembers] Failed to fetch proposals:', proposalsError);
+            throw new GraphQLError('Failed to fetch member proposals', {
+              extensions: { code: 'INTERNAL_SERVER_ERROR' },
+            });
+          }
+
+          memberProposalsData = (proposalsData || []).map((p: any) => ({
+            id: p.id,
+            project_id: p.project_id,
+            lead_id: p.lead_id,
+            status: p.status,
+            projects: p.projects,
+          }));
+        }
 
         // Combine and deduplicate proposals
         const proposalMap = new Map();
-        [...(leadProposals || []), ...memberProposalsData].forEach(p => {
+        [...leadProposals, ...memberProposalsData].forEach(p => {
           proposalMap.set(p.id, p);
         });
         const proposals = Array.from(proposalMap.values());
+
+        console.log('[getAllProposalTeamMembers] Combined proposals:', {
+          totalCount: proposals.length,
+          leadCount: leadProposals.length,
+          memberCount: memberProposalsData.length
+        })
 
         // For each proposal, get team members
         const adminClient = createAdminClient();
@@ -4456,6 +4538,8 @@ export const resolvers = {
             .from('proposal_team_members')
             .select('user_id, role, joined_at')
             .eq('proposal_id', proposal.id);
+
+          console.log('[getAllProposalTeamMembers] Team members for proposal', proposal.id, ':', teamMembers?.length || 0)
 
           // Get user details for each member
           const membersWithDetails = await Promise.all((teamMembers || []).map(async (member: any) => {
@@ -4483,9 +4567,12 @@ export const resolvers = {
           };
         }));
 
+        console.log('[getAllProposalTeamMembers] === END ===')
+        console.log('[getAllProposalTeamMembers] Returning', proposalsWithTeams.length, 'proposals with teams')
+
         return proposalsWithTeams;
       } catch (error: any) {
-        console.error('Failed to get all proposal team members:', error);
+        console.error('[getAllProposalTeamMembers] Exception:', error);
         throw new GraphQLError(error.message || 'Failed to get all proposal team members', {
           extensions: { code: 'INTERNAL_SERVER_ERROR' },
         });
@@ -7714,14 +7801,12 @@ export const resolvers = {
       let workspaceId = null;
       let documentId = null;
       
-      const { data: workspaces } = await supabase
+      // Use proposal_id for direct lookup (more efficient)
+      const { data: workspace } = await supabase
         .from('workspaces')
         .select('id')
-        .eq('project_id', proposal.project_id)
-        .eq('lead_id', user.id)
-        .limit(1);
-
-      const workspace = workspaces?.[0];
+        .eq('proposal_id', proposalId)
+        .maybeSingle();
 
       if (workspace) {
         workspaceId = workspace.id;
