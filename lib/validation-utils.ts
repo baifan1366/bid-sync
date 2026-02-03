@@ -37,9 +37,11 @@ export const FILE_VALIDATION_CONFIG = {
 
 /**
  * Text field validation limits
+ * Note: For rich text editors (TipTap), no character limit is enforced
+ * This config is primarily for simple text inputs and textareas
  */
 export const TEXT_VALIDATION_CONFIG = {
-  maxLength: 5000,
+  maxLength: 1000000, // Effectively unlimited for rich text content
   minLength: 1,
 } as const
 

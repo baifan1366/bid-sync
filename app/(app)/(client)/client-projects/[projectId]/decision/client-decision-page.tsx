@@ -150,6 +150,9 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
   )
   const [selectedProposals, setSelectedProposals] = React.useState<string[]>([])
   
+  // Chat state - track which proposal's chat to show
+  const [activeChatProposalId, setActiveChatProposalId] = React.useState<string | null>(null)
+  
   // Dialog states
   const [acceptDialogOpen, setAcceptDialogOpen] = React.useState(false)
   const [rejectDialogOpen, setRejectDialogOpen] = React.useState(false)
@@ -273,6 +276,9 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
 
   // Handle proposal click to view details
   const handleProposalClick = (proposalId: string) => {
+    // Set active chat to this proposal
+    setActiveChatProposalId(proposalId)
+    
     const params = new URLSearchParams(searchParams.toString())
     params.set("proposal", proposalId)
     router.push(`/client-projects/${projectId}/decision?${params.toString()}`)
@@ -468,23 +474,109 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
 
           {/* Chat Sidebar (Desktop) */}
           <aside className="hidden lg:block lg:col-span-4" aria-label="Project chat">
-            <div className="sticky top-6">
-              <ChatSection
-                projectId={projectId}
-                proposalId={null}
-                projectTitle={projectData.project.title}
-              />
+            <div className="sticky top-6 space-y-4">
+              {/* Proposal Selector for Chat */}
+              {projectData && projectData.proposals.length > 0 && (
+                <div className="bg-white dark:bg-black border border-yellow-400/20 rounded-lg p-4">
+                  <label className="text-sm font-medium text-black dark:text-white mb-2 block">
+                    Chat with Team
+                  </label>
+                  <select
+                    value={activeChatProposalId || ''}
+                    onChange={(e) => setActiveChatProposalId(e.target.value || null)}
+                    className="w-full px-3 py-2 bg-white dark:bg-black border border-yellow-400/20 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400"
+                  >
+                    <option value="">Select a proposal to chat...</option>
+                    {projectData.proposals.map((proposal) => (
+                      <option key={proposal.id} value={proposal.id}>
+                        {proposal.biddingTeamName || proposal.biddingLead?.fullName || 'Team'} - {proposal.title || 'Untitled'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              
+              {/* Chat Section */}
+              {activeChatProposalId ? (
+                <ChatSection
+                  projectId={projectId}
+                  proposalId={activeChatProposalId}
+                  projectTitle={projectData.project.title}
+                  proposalTitle={
+                    projectData.proposals.find(p => p.id === activeChatProposalId)?.title || 
+                    projectData.proposals.find(p => p.id === activeChatProposalId)?.biddingTeamName ||
+                    'Proposal'
+                  }
+                />
+              ) : (
+                <div className="bg-white dark:bg-black border border-yellow-400/20 rounded-lg p-8 text-center">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-yellow-400/10 mb-4">
+                    <svg className="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                  </div>
+                  <h3 className="font-semibold text-black dark:text-white mb-2">
+                    Select a Proposal
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Choose a proposal above to start chatting with the bidding team
+                  </p>
+                </div>
+              )}
             </div>
           </aside>
         </div>
 
         {/* Chat Section (Mobile - Bottom) */}
-        <aside className="lg:hidden mt-6" aria-label="Project chat">
-          <ChatSection
-            projectId={projectId}
-            proposalId={null}
-            projectTitle={projectData.project.title}
-          />
+        <aside className="lg:hidden mt-6 space-y-4" aria-label="Project chat">
+          {/* Proposal Selector for Chat */}
+          {projectData && projectData.proposals.length > 0 && (
+            <div className="bg-white dark:bg-black border border-yellow-400/20 rounded-lg p-4">
+              <label className="text-sm font-medium text-black dark:text-white mb-2 block">
+                Chat with Team
+              </label>
+              <select
+                value={activeChatProposalId || ''}
+                onChange={(e) => setActiveChatProposalId(e.target.value || null)}
+                className="w-full px-3 py-2 bg-white dark:bg-black border border-yellow-400/20 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400"
+              >
+                <option value="">Select a proposal to chat...</option>
+                {projectData.proposals.map((proposal) => (
+                  <option key={proposal.id} value={proposal.id}>
+                    {proposal.biddingTeamName || proposal.biddingLead?.fullName || 'Team'} - {proposal.title || 'Untitled'}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          
+          {/* Chat Section */}
+          {activeChatProposalId ? (
+            <ChatSection
+              projectId={projectId}
+              proposalId={activeChatProposalId}
+              projectTitle={projectData.project.title}
+              proposalTitle={
+                projectData.proposals.find(p => p.id === activeChatProposalId)?.title || 
+                projectData.proposals.find(p => p.id === activeChatProposalId)?.biddingTeamName ||
+                'Proposal'
+              }
+            />
+          ) : (
+            <div className="bg-white dark:bg-black border border-yellow-400/20 rounded-lg p-8 text-center">
+              <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-yellow-400/10 mb-4">
+                <svg className="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
+              </div>
+              <h3 className="font-semibold text-black dark:text-white mb-2">
+                Select a Proposal
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                Choose a proposal above to start chatting with the bidding team
+              </p>
+            </div>
+          )}
         </aside>
       </div>
 

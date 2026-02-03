@@ -7,15 +7,16 @@ import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area"
 import { ProjectRequirementsDisplay } from "@/components/client/project-requirements-display"
 import { ProposalEditor, type ProposalFormData } from "@/components/lead/proposal-editor"
 import { LeadScoreCard } from "@/components/lead/lead-score-card"
 import { useUser } from "@/hooks/use-user"
-import { useGraphQLQuery } from "@/hooks/use-graphql"
+import { useGraphQLQuery, useGraphQLMutation } from "@/hooks/use-graphql"
 import { useRealtimeRankings } from "@/hooks/use-realtime-rankings"
 import { useToast } from "@/components/ui/use-toast"
 import { gql } from "graphql-request"
-import { GET_PROPOSAL_SCORES, GET_PROPOSAL_RANKINGS } from "@/lib/graphql/queries"
+import { GET_PROPOSAL_SCORES, GET_PROPOSAL_RANKINGS, GET_DOCUMENT_SECTIONS } from "@/lib/graphql/queries"
 import {
   FileText,
   Clock,
@@ -37,6 +38,8 @@ import {
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { TipTapEditor } from "@/components/editor/tiptap-editor"
+import { WorkspaceSectionEditor } from "./workspace-section-editor"
+import { cn } from "@/lib/utils"
 type JSONContent = Record<string, unknown>
 import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 import { WorkspaceSkeleton } from "./workspace-skeleton"
@@ -144,6 +147,7 @@ const GET_WORKSPACE_DOCUMENT = gql`
 `
 
 import { UPDATE_PROPOSAL, SUBMIT_PROPOSAL } from "@/lib/graphql/mutations"
+import { UPDATE_SECTION } from "@/lib/graphql/mutations"
 
 const statusColors: Record<string, { bg: string; text: string; icon: React.ReactNode }> = {
   draft: {
@@ -199,6 +203,7 @@ export function WorkspaceContent() {
   const [editingProposalId, setEditingProposalId] = React.useState<string | null>(null)
   const [editingTitle, setEditingTitle] = React.useState<string>("")
   const [isSavingTitle, setIsSavingTitle] = React.useState(false)
+  const [activeSection, setActiveSection] = React.useState<string | null>(null)
 
   // Only fetch proposals if user is a bidding lead or member
   const isBiddingLead = user?.user_metadata?.role === 'bidding_lead'
@@ -265,6 +270,90 @@ export function WorkspaceContent() {
   
   // Get document content from workspace_documents (source of truth for collaborative editor)
   const documentContent = workspaceData?.workspaceByProject?.documents?.[0]?.content
+
+  // Fetch document sections
+  const { data: sectionsData, isLoading: sectionsLoading, refetch: refetchSections } = useGraphQLQuery<{ 
+    getDocumentSections: Array<{
+      id: string
+      documentId: string
+      title: string
+      order: number
+      status: string
+      assignedTo?: string
+      assignedToUser?: { id: string; email: string; fullName: string }
+      deadline?: string
+      content: any
+      lockedBy?: string
+      lockedByUser?: { id: string; email: string; fullName: string }
+      lockedAt?: string
+      lockExpiresAt?: string
+    }>
+  }>(
+    ['document-sections', documentId || 'none'],
+    GET_DOCUMENT_SECTIONS,
+    { documentId: documentId || '' },
+    {
+      enabled: !!documentId,
+      staleTime: 30 * 1000,
+    }
+  )
+
+  const sections = sectionsData?.getDocumentSections || []
+
+  // Set active section to first section when sections load
+  React.useEffect(() => {
+    if (sections.length > 0 && !activeSection) {
+      setActiveSection(sections[0].id)
+    }
+  }, [sections, activeSection])
+
+  // Get current section
+  const currentSection = sections.find(s => s.id === activeSection)
+
+  // Mutation for updating section content
+  const updateSectionMutation = useGraphQLMutation<any, any>(UPDATE_SECTION, [
+    ['document-sections', documentId || 'none']
+  ])
+
+  // Handle section content update
+  const handleSectionUpdate = async (content: any) => {
+    if (!activeSection) return
+
+    try {
+      await updateSectionMutation.mutateAsync({
+        sectionId: activeSection,
+        input: { content }
+      })
+      
+      toast({
+        title: "Success",
+        description: "Section saved successfully!",
+      })
+      
+      refetchSections()
+    } catch (error) {
+      console.error('Error updating section:', error)
+      toast({
+        title: "Error",
+        description: error instanceof Error ? error.message : "Failed to save section",
+        variant: "destructive",
+      })
+    }
+  }
+
+  // Get status badge color
+  const getSectionStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'completed':
+        return 'bg-green-500 text-white'
+      case 'in_review':
+        return 'bg-blue-500 text-white'
+      case 'in_progress':
+        return 'bg-yellow-400 text-black'
+      default:
+        return 'bg-gray-400 text-white'
+    }
+  }
 
   // Fetch proposal scores for the selected proposal
   const { data: scoresData, isLoading: scoresLoading, refetch: refetchScores } = useGraphQLQuery<{ proposalScores: any[] }>(
@@ -801,10 +890,11 @@ export function WorkspaceContent() {
                               }
                             }}
                             disabled={!documentId}
-                            className="bg-yellow-400 hover:bg-yellow-500 text-black font-semibold disabled:opacity-50"
+                            variant="outline"
+                            className="border-yellow-400/20 hover:bg-yellow-400/10"
                           >
                             <Users2 className="h-4 w-4 mr-2" />
-                            Collaborative Editor
+                            Full Editor
                           </Button>
                           <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "view" | "edit")}>
                             <TabsList className="bg-yellow-400/10">
@@ -826,24 +916,81 @@ export function WorkspaceContent() {
 
                 {/* Edit Mode - Proposal Editor */}
                 {viewMode === "edit" && isDraft && (
-                  <ProposalEditor
-                    proposalId={selectedProposal.id}
-                    projectId={selectedProposal.project.id}
-                    initialData={{
-                      title: selectedProposal.title || "",
-                      // Prefer document content from workspace_documents (collaborative editor source)
-                      // Fall back to proposal content if document content is not available
-                      content: documentContent 
-                        ? (typeof documentContent === 'string' ? documentContent : JSON.stringify(documentContent))
-                        : (selectedProposal.content || ""),
-                      budgetEstimate: selectedProposal.budgetEstimate || undefined,
-                      timelineEstimate: selectedProposal.timelineEstimate || "",
-                      additionalInfo: selectedProposal.additionalInfo || {},
-                    }}
-                    requirements={selectedProposal.project.additionalInfoRequirements || []}
-                    onSave={handleDirectSave}
-                    onSubmit={handleSubmitProposal}
-                  />
+                  <div className="space-y-4">
+                    {/* Section Tabs */}
+                    {sections.length > 0 && (
+                      <Card className="border-yellow-400/20">
+                        <Tabs value={activeSection || ''} onValueChange={setActiveSection}>
+                          <div className="border-b border-yellow-400/20 bg-white dark:bg-black">
+                            <ScrollArea className="w-full">
+                              <div className="px-4 py-2">
+                                <TabsList className="h-auto bg-transparent p-0 gap-2 inline-flex">
+                                  {sectionsLoading ? (
+                                    <div className="flex items-center gap-2 py-2">
+                                      <Loader2 className="h-4 w-4 animate-spin text-yellow-400" />
+                                      <span className="text-sm text-muted-foreground">Loading sections...</span>
+                                    </div>
+                                  ) : sections.length === 0 ? (
+                                    <div className="py-2 text-sm text-muted-foreground">
+                                      No sections available
+                                    </div>
+                                  ) : (
+                                    sections.map((section) => (
+                                      <TabsTrigger
+                                        key={section.id}
+                                        value={section.id}
+                                        className="relative px-4 py-2 rounded-t-md border-b-2 transition-colors data-[state=active]:border-yellow-400 data-[state=active]:bg-yellow-400/10 data-[state=inactive]:border-transparent hover:bg-yellow-400/5 whitespace-nowrap"
+                                      >
+                                        <span className="font-medium">{section.title}</span>
+                                        <Badge 
+                                          className={cn('ml-2 text-xs', getSectionStatusColor(section.status))}
+                                        >
+                                          {section.status?.replace('_', ' ')}
+                                        </Badge>
+                                      </TabsTrigger>
+                                    ))
+                                  )}
+                                </TabsList>
+                              </div>
+                              <ScrollBar orientation="horizontal" className="h-2" />
+                            </ScrollArea>
+                          </div>
+
+                          {/* Section Content */}
+                          {sections.map((section) => (
+                            <TabsContent key={section.id} value={section.id} className="p-6">
+                              <WorkspaceSectionEditor
+                                section={section}
+                                currentUserId={user?.id}
+                                onSave={handleSectionUpdate}
+                                isSaving={updateSectionMutation.isPending}
+                              />
+                            </TabsContent>
+                          ))}
+                        </Tabs>
+                      </Card>
+                    )}
+
+                    {/* Fallback to ProposalEditor if no sections */}
+                    {sections.length === 0 && !sectionsLoading && (
+                      <ProposalEditor
+                        proposalId={selectedProposal.id}
+                        projectId={selectedProposal.project.id}
+                        initialData={{
+                          title: selectedProposal.title || "",
+                          content: documentContent 
+                            ? (typeof documentContent === 'string' ? documentContent : JSON.stringify(documentContent))
+                            : (selectedProposal.content || ""),
+                          budgetEstimate: selectedProposal.budgetEstimate || undefined,
+                          timelineEstimate: selectedProposal.timelineEstimate || "",
+                          additionalInfo: selectedProposal.additionalInfo || {},
+                        }}
+                        requirements={selectedProposal.project.additionalInfoRequirements || []}
+                        onSave={handleDirectSave}
+                        onSubmit={handleSubmitProposal}
+                      />
+                    )}
+                  </div>
                 )}
 
                 {/* View Mode - Read-only Display */}
@@ -1007,8 +1154,9 @@ export function WorkspaceContent() {
                   <div className="h-[500px]">
                     <ChatSection
                       projectId={selectedProposal.project.id}
-                      proposalId={null}
+                      proposalId={selectedProposal.id}
                       projectTitle={selectedProposal.project.title}
+                      proposalTitle={selectedProposal.title || "Your Proposal"}
                     />
                   </div>
                 </div>
@@ -1033,8 +1181,9 @@ export function WorkspaceContent() {
                 <div className="h-[calc(100vh-10rem)]">
                   <ChatSection
                     projectId={selectedProposal.project.id}
-                    proposalId={null}
+                    proposalId={selectedProposal.id}
                     projectTitle={selectedProposal.project.title}
+                    proposalTitle={selectedProposal.title || "Your Proposal"}
                   />
                 </div>
               ) : (

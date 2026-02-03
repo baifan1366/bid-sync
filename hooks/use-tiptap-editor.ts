@@ -11,6 +11,7 @@ import { TableHeader } from '@tiptap/extension-table-header'
 import { Placeholder } from '@tiptap/extension-placeholder'
 import { TaskList } from '@tiptap/extension-task-list'
 import { TaskItem } from '@tiptap/extension-task-item'
+import { CharacterCount } from '@tiptap/extension-character-count'
 import { JSONContent } from '@tiptap/core'
 
 export interface UseTipTapEditorOptions {
@@ -137,6 +138,11 @@ export function useTipTapEditor(options: UseTipTapEditorOptions = {}): Editor | 
         HTMLAttributes: {
           class: 'task-item',
         },
+      }),
+
+      // CharacterCount extension - no limit set (unlimited)
+      CharacterCount.configure({
+        limit: null, // Remove character limit
       }),
 
       // Note: Collaboration is now handled via Supabase Realtime
