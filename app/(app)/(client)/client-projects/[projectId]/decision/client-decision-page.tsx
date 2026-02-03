@@ -381,9 +381,15 @@ export function ClientDecisionPage({ projectId }: ClientDecisionPageProps) {
 
   // Show comparison view
   if (viewMode === 'comparison' && selectedProposals.length >= 2) {
+    // Get the selected proposals data
+    const selectedProposalsData = projectData.proposals.filter(p => 
+      selectedProposals.includes(p.id)
+    )
+    
     return (
       <ProposalComparisonView
         proposalIds={selectedProposals}
+        proposals={selectedProposalsData}
         onClose={() => handleViewModeChange('list')}
       />
     )

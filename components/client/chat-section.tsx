@@ -50,18 +50,7 @@ export function ChatSection({
     try {
       let query = supabase
         .from("chat_messages")
-        .select(`
-          id, 
-          content, 
-          created_at, 
-          sender_id, 
-          read,
-          sender:users!sender_id(
-            id,
-            email,
-            raw_user_meta_data
-          )
-        `)
+        .select("id, content, created_at, sender_id, read")
         .eq("project_id", projectId)
         .order("created_at", { ascending: true })
 
@@ -75,26 +64,30 @@ export function ChatSection({
 
       if (error) throw error
 
-      // Format messages with actual user names
-      const formattedMessages: Message[] = (data || []).map((msg: any) => {
-        const senderData = msg.sender
-        const senderName = senderData?.raw_user_meta_data?.full_name || 
-                          senderData?.raw_user_meta_data?.name || 
-                          senderData?.email?.split('@')[0] || 
-                          'User'
-        
-        return {
-          id: msg.id,
-          content: msg.content,
-          senderName: msg.sender_id === user?.id ? "You" : senderName,
-          senderAvatar: senderData?.raw_user_meta_data?.avatar_url || null,
-          senderRole: "bidding_member",
-          senderId: msg.sender_id,
-          timestamp: msg.created_at,
-        }
-      })
+      // Fetch sender info for each message
+      const messagesWithSenders = await Promise.all(
+        (data || []).map(async (msg: any) => {
+          // Get sender info from auth.users using admin client
+          const { data: { user: senderData } } = await supabase.auth.admin.getUserById(msg.sender_id)
+          
+          const senderName = senderData?.user_metadata?.full_name || 
+                            senderData?.user_metadata?.name || 
+                            senderData?.email?.split('@')[0] || 
+                            'User'
+          
+          return {
+            id: msg.id,
+            content: msg.content,
+            senderName: msg.sender_id === user?.id ? "You" : senderName,
+            senderAvatar: senderData?.user_metadata?.avatar_url || null,
+            senderRole: "bidding_member" as const,
+            senderId: msg.sender_id,
+            timestamp: msg.created_at,
+          }
+        })
+      )
 
-      setMessages(formattedMessages)
+      setMessages(messagesWithSenders)
     } catch (error) {
       console.error("Error fetching messages:", error)
     } finally {
@@ -109,15 +102,11 @@ export function ChatSection({
   // Handle new messages from realtime
   const handleNewMessage = useCallback(
     async (newMessage: any) => {
-      // Fetch sender info for the new message
-      const { data: senderData } = await supabase
-        .from("users")
-        .select("id, email, raw_user_meta_data")
-        .eq("id", newMessage.sender_id)
-        .single()
+      // Fetch sender info for the new message using admin client
+      const { data: { user: senderData } } = await supabase.auth.admin.getUserById(newMessage.sender_id)
 
-      const senderName = senderData?.raw_user_meta_data?.full_name || 
-                        senderData?.raw_user_meta_data?.name || 
+      const senderName = senderData?.user_metadata?.full_name || 
+                        senderData?.user_metadata?.name || 
                         senderData?.email?.split('@')[0] || 
                         'User'
 
@@ -125,7 +114,7 @@ export function ChatSection({
         id: newMessage.id,
         content: newMessage.content,
         senderName: newMessage.sender_id === user?.id ? "You" : senderName,
-        senderAvatar: senderData?.raw_user_meta_data?.avatar_url || null,
+        senderAvatar: senderData?.user_metadata?.avatar_url || null,
         senderRole: "bidding_member",
         senderId: newMessage.sender_id,
         timestamp: newMessage.created_at,

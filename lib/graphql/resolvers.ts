@@ -621,6 +621,14 @@ export const resolvers = {
         };
       }));
 
+      // Debug: Log proposal data
+      console.log('[projectWithProposals] Proposals data:', proposalSummaries.map(p => ({
+        id: p.id,
+        title: p.title,
+        budgetEstimate: p.budgetEstimate,
+        timelineEstimate: p.timelineEstimate,
+      })));
+
       return {
         project: {
           id: project.id,
@@ -678,6 +686,17 @@ export const resolvers = {
         `)
         .eq('id', proposalId)
         .single();
+
+      // Debug: Log raw proposal data from database
+      console.log('[proposalDetail] Raw proposal from database:', {
+        proposal_id: proposalId,
+        has_proposal: !!proposal,
+        budget_estimate: proposal?.budget_estimate,
+        timeline_estimate: proposal?.timeline_estimate,
+        executive_summary: proposal?.executive_summary,
+        title: proposal?.title,
+        all_keys: proposal ? Object.keys(proposal) : [],
+      });
 
       if (proposalError) {
         throw handleSupabaseError(proposalError, 'proposalDetail.fetchProposal', {

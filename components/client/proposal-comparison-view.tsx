@@ -21,16 +21,20 @@ import DOMPurify from "dompurify"
 
 interface ProposalComparisonViewProps {
   proposalIds: string[]
+  proposals?: any[]  // Optional: pre-fetched proposals from parent
   onClose: () => void
 }
 
-export function ProposalComparisonView({ proposalIds, onClose }: ProposalComparisonViewProps) {
+export function ProposalComparisonView({ proposalIds, proposals: providedProposals, onClose }: ProposalComparisonViewProps) {
   const scrollContainerRef = React.useRef<HTMLDivElement>(null)
   const [proposals, setProposals] = React.useState<ProposalDetail[]>([])
   const [loadedCount, setLoadedCount] = React.useState(0)
 
-  // Fetch all proposals - we'll use multiple queries
-  const proposalQueries = proposalIds.map(proposalId => 
+  // If proposals are provided from parent, use them directly
+  const useProvidedData = providedProposals && providedProposals.length > 0
+
+  // Fetch all proposals - we'll use multiple queries (only if not provided)
+  const proposalQueries = useProvidedData ? [] : proposalIds.map(proposalId => 
     useGraphQLQuery<{ proposalDetail: ProposalDetail }>(
       ['proposal-detail', proposalId],
       GET_PROPOSAL_DETAILS,
@@ -44,13 +48,49 @@ export function ProposalComparisonView({ proposalIds, onClose }: ProposalCompari
 
   // Combine all proposal data
   React.useEffect(() => {
-    const fetchedProposals = proposalQueries
-      .map(query => query.data?.proposalDetail)
-      .filter((p): p is ProposalDetail => p !== undefined)
-    
-    setProposals(fetchedProposals)
-    setLoadedCount(proposalQueries.filter(q => !q.isLoading).length)
-  }, [proposalQueries.map(q => q.data).join(',')])
+    if (useProvidedData) {
+      // Use provided proposals directly
+      console.log('[ProposalComparison] Using provided proposals:', providedProposals?.map(p => ({
+        id: p.id,
+        title: p.title,
+        budgetEstimate: p.budgetEstimate,
+        timelineEstimate: p.timelineEstimate,
+      })))
+      
+      // Convert ProposalSummary to ProposalDetail format
+      const convertedProposals = (providedProposals || []).map(p => ({
+        ...p,
+        biddingTeam: {
+          lead: p.biddingLead,
+          members: [],
+        },
+        sections: [],
+        documents: [],
+        complianceChecklist: [],
+        versions: [],
+        currentVersion: 1,
+        additionalInfo: p.additionalInfo || [],
+      })) as ProposalDetail[]
+      
+      setProposals(convertedProposals)
+      setLoadedCount(providedProposals?.length || 0)
+    } else {
+      // Fetch from GraphQL
+      const fetchedProposals = proposalQueries
+        .map(query => query.data?.proposalDetail)
+        .filter((p): p is ProposalDetail => p !== undefined)
+      
+      console.log('[ProposalComparison] Fetched proposals:', fetchedProposals.map(p => ({
+        id: p.id,
+        title: p.title,
+        budgetEstimate: p.budgetEstimate,
+        timelineEstimate: p.timelineEstimate,
+      })))
+      
+      setProposals(fetchedProposals)
+      setLoadedCount(proposalQueries.filter(q => !q.isLoading).length)
+    }
+  }, [useProvidedData, providedProposals, proposalQueries.map(q => q.data).join(',')])
 
   const isLoading = proposalQueries.some(q => q.isLoading)
   const hasError = proposalQueries.some(q => q.error)
@@ -101,6 +141,15 @@ export function ProposalComparisonView({ proposalIds, onClose }: ProposalCompari
 
   const alignedSections = alignProposalSections(proposals)
   const differences = detectProposalDifferences(proposals)
+  
+  // Debug: Log proposals before creating comparison summary
+  console.log('[ProposalComparison] Proposals for comparison summary:', proposals.map(p => ({
+    id: p.id,
+    title: p.title,
+    budgetEstimate: p.budgetEstimate,
+    timelineEstimate: p.timelineEstimate,
+  })))
+  
   const comparisonSummary = getComparisonSummary(
     proposals.map((p) => ({
       id: p.id,
@@ -221,6 +270,19 @@ interface ProposalColumnProps {
 }
 
 function ProposalColumn({ proposal, alignedSections, differences, onScroll, allProposals = [] }: ProposalColumnProps) {
+  // Debug: Log proposal data
+  React.useEffect(() => {
+    console.log('[ProposalColumn] Proposal data:', {
+      id: proposal.id,
+      title: proposal.title,
+      budgetEstimate: proposal.budgetEstimate,
+      budgetEstimate_type: typeof proposal.budgetEstimate,
+      timelineEstimate: proposal.timelineEstimate,
+      timelineEstimate_type: typeof proposal.timelineEstimate,
+      all_keys: Object.keys(proposal),
+    })
+  }, [proposal])
+
   const getInitials = (name: string) => {
     return name
       .split(' ')
