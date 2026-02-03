@@ -221,7 +221,7 @@ export class RealtimeNotificationService {
   ): Promise<RealtimeChannelSendResponse> {
     // No-op: postgres_changes handles this automatically
     console.warn('broadcastNewNotification is deprecated - postgres_changes handles this automatically')
-    return { status: 'ok' } as RealtimeChannelSendResponse
+    return { status: 'ok' } as unknown as RealtimeChannelSendResponse
   }
 
   /**
@@ -242,7 +242,7 @@ export class RealtimeNotificationService {
   ): Promise<RealtimeChannelSendResponse> {
     // No-op: postgres_changes handles this automatically
     console.warn('broadcastNotificationRead is deprecated - postgres_changes handles this automatically')
-    return { status: 'ok' } as RealtimeChannelSendResponse
+    return { status: 'ok' } as unknown as RealtimeChannelSendResponse
   }
 
   /**
@@ -263,7 +263,7 @@ export class RealtimeNotificationService {
   ): Promise<RealtimeChannelSendResponse> {
     // No-op: postgres_changes handles this automatically
     console.warn('broadcastNotificationDeleted is deprecated - postgres_changes handles this automatically')
-    return { status: 'ok' } as RealtimeChannelSendResponse
+    return { status: 'ok' } as unknown as RealtimeChannelSendResponse
   }
 
   /**
