@@ -407,7 +407,13 @@ function ProposalColumn({ proposal, alignedSections, differences, onScroll, allP
                         prose-code:text-yellow-400 prose-code:bg-yellow-400/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs
                         prose-ul:list-disc prose-ul:pl-4 prose-ul:text-sm
                         prose-ol:list-decimal prose-ol:pl-4 prose-ol:text-sm
-                        prose-li:text-gray-700 dark:prose-li:text-gray-300"
+                        prose-li:text-gray-700 dark:prose-li:text-gray-300
+                        prose-table:border-collapse prose-table:w-full prose-table:text-sm
+                        prose-thead:border-b-2 prose-thead:border-yellow-400/40
+                        prose-th:border prose-th:border-yellow-400/20 prose-th:bg-yellow-400/10 prose-th:px-3 prose-th:py-1.5 prose-th:text-left prose-th:font-semibold prose-th:text-black dark:prose-th:text-white prose-th:text-xs
+                        prose-td:border prose-td:border-yellow-400/20 prose-td:px-3 prose-td:py-1.5 prose-td:text-gray-700 dark:prose-td:text-gray-300 prose-td:text-xs
+                        prose-tbody:divide-y prose-tbody:divide-yellow-400/20
+                        prose-tr:border-b prose-tr:border-yellow-400/20"
                       dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(proposalSection.content) }}
                     />
                   ) : (

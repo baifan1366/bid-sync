@@ -19,6 +19,98 @@ import type { AdditionalInfoRequirement } from "@/lib/graphql/types"
 import { useRouter } from "next/navigation"
 import DOMPurify from "dompurify"
 
+// Helper function to convert TipTap JSON to HTML
+function tiptapJsonToHtml(json: any): string {
+  if (!json || !json.content) return ''
+  
+  const processNode = (node: any): string => {
+    if (!node) return ''
+    
+    switch (node.type) {
+      case 'doc':
+        return node.content?.map(processNode).join('') || ''
+      
+      case 'paragraph':
+        const pContent = node.content?.map(processNode).join('') || '<br>'
+        return `<p>${pContent}</p>`
+      
+      case 'heading':
+        const level = node.attrs?.level || 1
+        const hContent = node.content?.map(processNode).join('') || ''
+        return `<h${level}>${hContent}</h${level}>`
+      
+      case 'text':
+        let text = node.text || ''
+        if (node.marks) {
+          node.marks.forEach((mark: any) => {
+            switch (mark.type) {
+              case 'bold':
+                text = `<strong>${text}</strong>`
+                break
+              case 'italic':
+                text = `<em>${text}</em>`
+                break
+              case 'code':
+                text = `<code>${text}</code>`
+                break
+              case 'link':
+                text = `<a href="${mark.attrs?.href || '#'}">${text}</a>`
+                break
+            }
+          })
+        }
+        return text
+      
+      case 'bulletList':
+        const ulContent = node.content?.map(processNode).join('') || ''
+        return `<ul>${ulContent}</ul>`
+      
+      case 'orderedList':
+        const olContent = node.content?.map(processNode).join('') || ''
+        return `<ol>${olContent}</ol>`
+      
+      case 'listItem':
+        const liContent = node.content?.map(processNode).join('') || ''
+        return `<li>${liContent}</li>`
+      
+      case 'codeBlock':
+        const codeContent = node.content?.map((n: any) => n.text || '').join('') || ''
+        return `<pre><code>${codeContent}</code></pre>`
+      
+      case 'blockquote':
+        const bqContent = node.content?.map(processNode).join('') || ''
+        return `<blockquote>${bqContent}</blockquote>`
+      
+      case 'horizontalRule':
+        return '<hr>'
+      
+      case 'hardBreak':
+        return '<br>'
+      
+      case 'table':
+        const tableContent = node.content?.map(processNode).join('') || ''
+        return `<table>${tableContent}</table>`
+      
+      case 'tableRow':
+        const trContent = node.content?.map(processNode).join('') || ''
+        return `<tr>${trContent}</tr>`
+      
+      case 'tableHeader':
+        const thContent = node.content?.map(processNode).join('') || ''
+        return `<th>${thContent}</th>`
+      
+      case 'tableCell':
+        const tdContent = node.content?.map(processNode).join('') || ''
+        return `<td>${tdContent}</td>`
+      
+      default:
+        return node.content?.map(processNode).join('') || ''
+    }
+  }
+  
+  return processNode(json)
+}
+
 interface ProposalDetailViewProps {
   proposalId: string
   projectId?: string
@@ -92,8 +184,72 @@ export function ProposalDetailView({ proposalId, projectId, onClose, onSubmissio
   const renderVersionContent = (content: any) => {
     if (!content) return <p className="text-muted-foreground">No content available</p>
     
+    // If content is a TipTap JSON document, convert to HTML
+    if (typeof content === 'object' && content.type === 'doc') {
+      try {
+        // Convert TipTap JSON to HTML string
+        const htmlContent = tiptapJsonToHtml(content)
+        return (
+          <div
+            className="prose prose-sm max-w-none dark:prose-invert
+              prose-headings:text-black dark:prose-headings:text-white
+              prose-p:text-gray-700 dark:prose-p:text-gray-300
+              prose-p:leading-relaxed
+              prose-strong:text-black dark:prose-strong:text-white
+              prose-strong:font-bold
+              prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:underline
+              prose-code:text-yellow-400 prose-code:bg-yellow-400/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+              prose-pre:bg-gray-100 dark:prose-pre:bg-gray-900 prose-pre:border prose-pre:border-yellow-400/20
+              prose-ul:list-disc prose-ul:pl-6
+              prose-ol:list-decimal prose-ol:pl-6
+              prose-li:text-gray-700 dark:prose-li:text-gray-300
+              prose-blockquote:border-l-4 prose-blockquote:border-yellow-400 prose-blockquote:pl-4 prose-blockquote:italic
+              prose-hr:border-yellow-400/20
+              prose-table:border-collapse prose-table:w-full
+              prose-thead:border-b-2 prose-thead:border-yellow-400/40
+              prose-th:border prose-th:border-yellow-400/20 prose-th:bg-yellow-400/10 prose-th:px-4 prose-th:py-2 prose-th:text-left prose-th:font-semibold prose-th:text-black dark:prose-th:text-white
+              prose-td:border prose-td:border-yellow-400/20 prose-td:px-4 prose-td:py-2 prose-td:text-gray-700 dark:prose-td:text-gray-300
+              prose-tbody:divide-y prose-tbody:divide-yellow-400/20
+              prose-tr:border-b prose-tr:border-yellow-400/20"
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(htmlContent) }}
+          />
+        )
+      } catch (error) {
+        console.error('Error converting TipTap JSON to HTML:', error)
+        return <div className="text-sm text-muted-foreground whitespace-pre-wrap">{JSON.stringify(content, null, 2)}</div>
+      }
+    }
+    
     if (typeof content === 'string') {
-      return <div className="whitespace-pre-wrap">{content}</div>
+      // If it's an HTML string, render it with prose styles
+      if (content.includes('<') && content.includes('>')) {
+        return (
+          <div
+            className="prose prose-sm max-w-none dark:prose-invert
+              prose-headings:text-black dark:prose-headings:text-white
+              prose-p:text-gray-700 dark:prose-p:text-gray-300
+              prose-p:leading-relaxed
+              prose-strong:text-black dark:prose-strong:text-white
+              prose-strong:font-bold
+              prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:underline
+              prose-code:text-yellow-400 prose-code:bg-yellow-400/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+              prose-pre:bg-gray-100 dark:prose-pre:bg-gray-900 prose-pre:border prose-pre:border-yellow-400/20
+              prose-ul:list-disc prose-ul:pl-6
+              prose-ol:list-decimal prose-ol:pl-6
+              prose-li:text-gray-700 dark:prose-li:text-gray-300
+              prose-blockquote:border-l-4 prose-blockquote:border-yellow-400 prose-blockquote:pl-4 prose-blockquote:italic
+              prose-hr:border-yellow-400/20
+              prose-table:border-collapse prose-table:w-full
+              prose-thead:border-b-2 prose-thead:border-yellow-400/40
+              prose-th:border prose-th:border-yellow-400/20 prose-th:bg-yellow-400/10 prose-th:px-4 prose-th:py-2 prose-th:text-left prose-th:font-semibold prose-th:text-black dark:prose-th:text-white
+              prose-td:border prose-td:border-yellow-400/20 prose-td:px-4 prose-td:py-2 prose-td:text-gray-700 dark:prose-td:text-gray-300
+              prose-tbody:divide-y prose-tbody:divide-yellow-400/20
+              prose-tr:border-b prose-tr:border-yellow-400/20"
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(content) }}
+          />
+        )
+      }
+      return <div className="whitespace-pre-wrap text-gray-700 dark:text-gray-300">{content}</div>
     }
     
     if (typeof content === 'object') {
@@ -463,8 +619,9 @@ function OverviewTab({ proposal }: { proposal: ProposalDetail | null }) {
             <div>
               <p className="text-sm text-muted-foreground">Budget Estimate</p>
               <p className="font-medium text-black dark:text-white">
-                {/* Budget will come from proposal data when available */}
-                Not specified
+                {proposal.budgetEstimate 
+                  ? `MYR ${proposal.budgetEstimate.toLocaleString()}`
+                  : 'Not specified'}
               </p>
             </div>
           </div>
@@ -475,8 +632,7 @@ function OverviewTab({ proposal }: { proposal: ProposalDetail | null }) {
             <div>
               <p className="text-sm text-muted-foreground">Timeline Estimate</p>
               <p className="font-medium text-black dark:text-white">
-                {/* Timeline will come from proposal data when available */}
-                Not specified
+                {proposal.timelineEstimate || 'Not specified'}
               </p>
             </div>
           </div>
@@ -672,23 +828,70 @@ function SectionsTab({
                   <div className="p-6">
                     {/* Render rich text content with enhanced styling */}
                     {section.content && section.content.trim() !== '' && section.content !== '{}' ? (
-                      <div
-                        className="prose prose-sm max-w-none dark:prose-invert
-                          prose-headings:text-black dark:prose-headings:text-white
-                          prose-p:text-gray-700 dark:prose-p:text-gray-300
-                          prose-p:leading-relaxed
-                          prose-strong:text-black dark:prose-strong:text-white
-                          prose-strong:font-bold
-                          prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:underline
-                          prose-code:text-yellow-400 prose-code:bg-yellow-400/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
-                          prose-pre:bg-gray-100 dark:prose-pre:bg-gray-900 prose-pre:border prose-pre:border-yellow-400/20
-                          prose-ul:list-disc prose-ul:pl-6
-                          prose-ol:list-decimal prose-ol:pl-6
-                          prose-li:text-gray-700 dark:prose-li:text-gray-300
-                          prose-blockquote:border-l-4 prose-blockquote:border-yellow-400 prose-blockquote:pl-4 prose-blockquote:italic
-                          prose-hr:border-yellow-400/20"
-                        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.content) }}
-                      />
+                      (() => {
+                        // Try to parse as JSON (TipTap format)
+                        try {
+                          const parsed = JSON.parse(section.content)
+                          if (parsed.type === 'doc') {
+                            // It's TipTap JSON, convert to HTML
+                            const htmlContent = tiptapJsonToHtml(parsed)
+                            return (
+                              <div
+                                className="prose prose-sm max-w-none dark:prose-invert
+                                  prose-headings:text-black dark:prose-headings:text-white
+                                  prose-p:text-gray-700 dark:prose-p:text-gray-300
+                                  prose-p:leading-relaxed
+                                  prose-strong:text-black dark:prose-strong:text-white
+                                  prose-strong:font-bold
+                                  prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:underline
+                                  prose-code:text-yellow-400 prose-code:bg-yellow-400/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                                  prose-pre:bg-gray-100 dark:prose-pre:bg-gray-900 prose-pre:border prose-pre:border-yellow-400/20
+                                  prose-ul:list-disc prose-ul:pl-6
+                                  prose-ol:list-decimal prose-ol:pl-6
+                                  prose-li:text-gray-700 dark:prose-li:text-gray-300
+                                  prose-blockquote:border-l-4 prose-blockquote:border-yellow-400 prose-blockquote:pl-4 prose-blockquote:italic
+                                  prose-hr:border-yellow-400/20
+                                  prose-table:border-collapse prose-table:w-full
+                                  prose-thead:border-b-2 prose-thead:border-yellow-400/40
+                                  prose-th:border prose-th:border-yellow-400/20 prose-th:bg-yellow-400/10 prose-th:px-4 prose-th:py-2 prose-th:text-left prose-th:font-semibold prose-th:text-black dark:prose-th:text-white
+                                  prose-td:border prose-td:border-yellow-400/20 prose-td:px-4 prose-td:py-2 prose-td:text-gray-700 dark:prose-td:text-gray-300
+                                  prose-tbody:divide-y prose-tbody:divide-yellow-400/20
+                                  prose-tr:border-b prose-tr:border-yellow-400/20"
+                                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(htmlContent) }}
+                              />
+                            )
+                          }
+                        } catch (e) {
+                          // Not JSON or parsing failed, treat as HTML string
+                        }
+                        
+                        // Render as HTML string
+                        return (
+                          <div
+                            className="prose prose-sm max-w-none dark:prose-invert
+                              prose-headings:text-black dark:prose-headings:text-white
+                              prose-p:text-gray-700 dark:prose-p:text-gray-300
+                              prose-p:leading-relaxed
+                              prose-strong:text-black dark:prose-strong:text-white
+                              prose-strong:font-bold
+                              prose-a:text-yellow-400 prose-a:no-underline hover:prose-a:underline
+                              prose-code:text-yellow-400 prose-code:bg-yellow-400/10 prose-code:px-1 prose-code:py-0.5 prose-code:rounded
+                              prose-pre:bg-gray-100 dark:prose-pre:bg-gray-900 prose-pre:border prose-pre:border-yellow-400/20
+                              prose-ul:list-disc prose-ul:pl-6
+                              prose-ol:list-decimal prose-ol:pl-6
+                              prose-li:text-gray-700 dark:prose-li:text-gray-300
+                              prose-blockquote:border-l-4 prose-blockquote:border-yellow-400 prose-blockquote:pl-4 prose-blockquote:italic
+                              prose-hr:border-yellow-400/20
+                              prose-table:border-collapse prose-table:w-full
+                              prose-thead:border-b-2 prose-thead:border-yellow-400/40
+                              prose-th:border prose-th:border-yellow-400/20 prose-th:bg-yellow-400/10 prose-th:px-4 prose-th:py-2 prose-th:text-left prose-th:font-semibold prose-th:text-black dark:prose-th:text-white
+                              prose-td:border prose-td:border-yellow-400/20 prose-td:px-4 prose-td:py-2 prose-td:text-gray-700 dark:prose-td:text-gray-300
+                              prose-tbody:divide-y prose-tbody:divide-yellow-400/20
+                              prose-tr:border-b prose-tr:border-yellow-400/20"
+                            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(section.content) }}
+                          />
+                        )
+                      })()
                     ) : (
                       <div className="text-center py-8 text-muted-foreground">
                         <p className="text-sm">No content yet</p>

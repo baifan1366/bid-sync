@@ -107,6 +107,9 @@ export const GET_PROPOSAL_DETAILS = gql`
     proposalDetail(proposalId: $proposalId) {
       id
       title
+      budgetEstimate
+      timelineEstimate
+      executiveSummary
       status
       submissionDate
       biddingTeam {
@@ -172,6 +175,12 @@ export const GET_PROPOSAL_DETAILS = gql`
         completed
         completedBy
         completedAt
+      }
+      additionalInfo {
+        id
+        fieldId
+        fieldName
+        fieldValue
       }
       versions {
         id

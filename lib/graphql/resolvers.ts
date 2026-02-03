@@ -794,22 +794,42 @@ export const resolvers = {
 
       console.log('[proposalDetail] Versions with creators:', versionsWithCreators.length);
 
-      // Fetch workspace and document sections for this proposal's project
-      // Note: There might be multiple workspaces per project, get the first one
-      const { data: workspaces, error: workspaceError } = await supabase
+      // Fetch workspace for this specific proposal
+      // First try to find workspace by proposal_id, then fall back to project_id
+      let workspace: any = null;
+      
+      // Try to get workspace by proposal_id first
+      const { data: proposalWorkspaces, error: proposalWorkspaceError } = await supabase
         .from('workspaces')
         .select('id')
-        .eq('project_id', proposal.project_id)
+        .eq('proposal_id', proposalId)
         .limit(1);
 
-      const workspace = workspaces?.[0];
-
-      console.log('[proposalDetail] Workspace lookup:', { 
-        project_id: proposal.project_id, 
-        workspace_id: workspace?.id,
-        workspace_count: workspaces?.length || 0,
-        error: workspaceError 
-      });
+      if (proposalWorkspaces && proposalWorkspaces.length > 0) {
+        workspace = proposalWorkspaces[0];
+        console.log('[proposalDetail] Found workspace by proposal_id:', { 
+          proposal_id: proposalId,
+          workspace_id: workspace.id,
+        });
+      } else {
+        // Fallback: get workspace by project_id (for backward compatibility)
+        const { data: projectWorkspaces, error: projectWorkspaceError } = await supabase
+          .from('workspaces')
+          .select('id')
+          .eq('project_id', proposal.project_id)
+          .limit(1);
+        
+        workspace = projectWorkspaces?.[0];
+        
+        console.log('[proposalDetail] Workspace lookup (fallback to project):', { 
+          proposal_id: proposalId,
+          project_id: proposal.project_id, 
+          workspace_id: workspace?.id,
+          workspace_count: projectWorkspaces?.length || 0,
+          error: projectWorkspaceError,
+          warning: 'Using project-level workspace - consider running migration to add proposal_id'
+        });
+      }
 
       let sections: any[] = [];
       let documents: any[] = [];
@@ -1094,9 +1114,18 @@ export const resolvers = {
         .select('*')
         .eq('proposal_id', proposalId);
 
+      // Fetch additional info
+      const { data: additionalInfoData } = await supabase
+        .from('proposal_additional_info')
+        .select('*')
+        .eq('proposal_id', proposalId);
+
       const result = {
         id: proposal.id,
         title: proposal.title || `Proposal for ${proposal.projects.title}`,
+        budgetEstimate: proposal.budget_estimate || null,
+        timelineEstimate: proposal.timeline_estimate || null,
+        executiveSummary: proposal.executive_summary || null,
         status: proposal.status ? proposal.status.toUpperCase() : 'DRAFT',
         submissionDate: proposal.submitted_at || proposal.created_at,
         biddingTeam: {
@@ -1112,6 +1141,12 @@ export const resolvers = {
           completed: item.passed,
           completedBy: item.reviewer_id,
           completedAt: item.checked_at,
+        })),
+        additionalInfo: (additionalInfoData || []).map((info: any) => ({
+          id: info.id,
+          fieldId: info.field_id,
+          fieldName: info.field_name,
+          fieldValue: info.field_value,
         })),
         versions: (versionsWithCreators || []).map((v: any) => ({
           id: v.id,
@@ -1132,6 +1167,8 @@ export const resolvers = {
         documents_count: result.documents.length,
         versions_count: result.versions.length,
         has_workspace: !!workspace,
+        budget_estimate: result.budgetEstimate,
+        timeline_estimate: result.timelineEstimate,
       });
 
       return result;
