@@ -235,9 +235,13 @@ function ProposalDocumentCard({
     draft: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
     submitted: "bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-300",
     under_review: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300",
+    pending_approval: "bg-yellow-100 text-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300",
+    approved: "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-300",
     accepted: "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-300",
     rejected: "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-300",
   }
+
+  const statusColor = statusColors[proposal.status.toLowerCase()] || statusColors.draft
 
   const handleOpenEditor = () => {
     if (mainDocument) {
@@ -261,7 +265,7 @@ function ProposalDocumentCard({
               {proposal.title || "Untitled Proposal"}
             </p>
           </div>
-          <Badge className={statusColors[proposal.status] || statusColors.draft}>
+          <Badge className={statusColor}>
             {proposal.status.replace(/_/g, " ")}
           </Badge>
         </div>
@@ -291,7 +295,7 @@ function ProposalDocumentCard({
         )}
 
         <div className="flex gap-2 pt-2">
-          {mainDocument && (
+          {mainDocument && proposal.status.toLowerCase() === 'draft' && (
             <Button
               size="sm"
               onClick={handleOpenEditor}
